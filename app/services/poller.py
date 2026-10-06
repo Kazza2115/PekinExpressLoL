@@ -13,6 +13,7 @@ concurrent à `poll_once()` attend le cycle en cours et renvoie son rapport.
 from __future__ import annotations
 
 import asyncio
+import httpx
 import json
 import logging
 import time
@@ -38,11 +39,12 @@ from app.db.models import (
     Queue,
     RankSnapshot,
     Team,
+    game_end_of,
 )
 from app.db.session import as_utc, session_scope
 from app.events import EventBus
 from app.riot import ddragon
-from app.riot.base import LeagueEntryDTO, RiotAPI, RiotNotFound, RiotUnauthorized
+from app.riot.base import LeagueEntryDTO, RiotAPI, RiotError, RiotNotFound, RiotRateLimited, RiotUnauthorized
 from app.services.notifications import format_live_start, format_match_recorded, send_discord
 from app.services.stats import absolute_lp
 from app.state import AppState, LiveGameState, PollReport
@@ -56,14 +58,30 @@ APEX_TIERS = frozenset({"MASTER", "GRANDMASTER", "CHALLENGER"})
 # Une partie terminée depuis plus longtemps n'est plus annoncée sur Discord
 # (évite le spam si le challenge démarre avec une date de début dans le passé)
 NOTIFY_MAX_AGE = timedelta(minutes=30)
-# Nombre d'IDs de parties demandés par joueur et par file à chaque cycle
+# Nombre d'IDs de parties demandés par joueur et par file à chaque cycle, et pages max
 MATCH_IDS_COUNT = 20
-# Au-delà, `gameDuration` est en millisecondes (parties antérieures à 2021)
+MATCH_IDS_MAX_PAGES = 5
+# Garde-fou : au-delà, `gameDuration` est forcément en millisecondes (> 27 h de partie)
 DURATION_MS_THRESHOLD = 100_000
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def public_error_label(exc: Exception) -> str:
+    """Libellé d'erreur affichable à tous (le détail complet reste dans les logs)."""
+    if isinstance(exc, RiotUnauthorized):
+        return "clé Riot invalide ou expirée"
+    if isinstance(exc, RiotRateLimited):
+        return "API Riot saturée (limite de requêtes)"
+    if isinstance(exc, RiotNotFound):
+        return "introuvable côté Riot"
+    if isinstance(exc, RiotError):
+        return f"erreur API Riot ({exc.status or '?'})"
+    if isinstance(exc, httpx.HTTPError):
+        return "API Riot injoignable"
+    return type(exc).__name__
 
 
 def _queue_of(value: Any) -> Queue:
@@ -72,7 +90,7 @@ def _queue_of(value: Any) -> Queue:
 
 
 def _game_end(participant: MatchParticipant) -> datetime:
-    return as_utc(participant.game_start) + timedelta(seconds=participant.game_duration)
+    return game_end_of(participant)
 
 
 @dataclass
@@ -246,7 +264,7 @@ class Poller:
                         await self._run_phase(name, phase, session, player, challenge, report, ctx)
         except Exception as exc:  # noqa: BLE001 — ex. base indisponible
             log.exception("Cycle de polling interrompu")
-            report.errors.append(f"cycle : {exc}")
+            report.errors.append(f"cycle : {public_error_label(exc)}")
         finally:
             report.duration_s = time.monotonic() - started
             requests_after = getattr(self.api, "request_count", None)
@@ -313,14 +331,16 @@ class Poller:
     def _record_error(
         self, phase: str, player: Player, exc: Exception, report: PollReport, ctx: _CycleContext
     ) -> None:
-        message = f"{player.display_name} [{phase}]: {exc}"
-        report.errors.append(message)
+        # Le rapport est public (/health, /api/state, SSE) : libellé court, sans détail interne
+        report.errors.append(f"{player.display_name} [{phase}] : {public_error_label(exc)}")
         if isinstance(exc, RiotUnauthorized):
             if not ctx.unauthorized:
                 log.error("Clé Riot invalide ou expirée — cycle interrompu (%s)", exc)
             ctx.unauthorized = True
         else:
-            log.warning("Poll %s — %s", phase, message, exc_info=not isinstance(exc, RiotNotFound))
+            log.warning(
+                "Poll %s — %s : %s", phase, player.display_name, exc, exc_info=not isinstance(exc, RiotNotFound)
+            )
 
     # ------------------------------------------------------------------ chargement
 
@@ -476,10 +496,14 @@ class Poller:
 
         match_ids: list[str] = []
         for queue in self._tracked_queues(challenge):
-            fetched = await self.api.get_match_ids_by_puuid(
-                player.puuid, QUEUE_IDS[queue], start_time=start_time, count=MATCH_IDS_COUNT
-            )
+            fetched = await self._fetch_match_ids(session, player, QUEUE_IDS[queue], start_time)
             match_ids.extend(match_id for match_id in fetched if match_id not in match_ids)
+
+        # Le statut peut avoir changé pendant le cycle (reset / fin) : on relit la base
+        # avant d'écrire, pour ne pas réinsérer des parties juste purgées.
+        session.expire(challenge)
+        if challenge.status != ChallengeStatus.RUNNING:
+            return
 
         recorded: list[tuple[Player, MatchParticipant]] = []
         if match_ids:
@@ -510,6 +534,28 @@ class Poller:
                 format_match_recorded(participant_player, team, participant, participant.lp_change)
             )
 
+    async def _fetch_match_ids(
+        self, session: Session, player: Player, queue_id: int, start_time: int
+    ) -> list[str]:
+        """IDs Match-V5 depuis `start_time`, en paginant tant que tout est inconnu.
+
+        Après une coupure du serveur, un joueur peut avoir plus de `MATCH_IDS_COUNT`
+        parties non enregistrées : on avance par pages (`start`) jusqu'à retrouver un
+        ID déjà en base, une page incomplète, ou `MATCH_IDS_MAX_PAGES`.
+        """
+        ids: list[str] = []
+        for page in range(MATCH_IDS_MAX_PAGES):
+            fetched = await self.api.get_match_ids_by_puuid(
+                player.puuid, queue_id, start_time=start_time, count=MATCH_IDS_COUNT, start=page * MATCH_IDS_COUNT
+            )
+            ids.extend(match_id for match_id in fetched if match_id not in ids)
+            if len(fetched) < MATCH_IDS_COUNT:
+                break
+            known = session.exec(select(Match.match_id).where(col(Match.match_id).in_(fetched))).first()
+            if known is not None:
+                break  # la page contient déjà une partie connue : les suivantes le sont aussi
+        return ids
+
     def _store_match(
         self,
         session: Session,
@@ -529,8 +575,15 @@ class Poller:
         game_start_ms = int(info.get("gameStartTimestamp") or info.get("gameCreation") or 0)
         game_start = datetime.fromtimestamp(game_start_ms / 1000, tz=timezone.utc)
         duration = int(info.get("gameDuration") or 0)
-        if duration > DURATION_MS_THRESHOLD:
-            duration //= 1000  # anciennes parties : millisecondes
+        # Règle Riot : millisecondes si `gameEndTimestamp` est absent (parties < patch 11.20), sinon secondes
+        if "gameEndTimestamp" not in info or duration > DURATION_MS_THRESHOLD:
+            duration //= 1000
+        game_end_ms = int(info.get("gameEndTimestamp") or 0)
+        game_end = (
+            datetime.fromtimestamp(game_end_ms / 1000, tz=timezone.utc)
+            if game_end_ms > 0
+            else game_start + timedelta(seconds=duration)
+        )
         queue_id = int(info.get("queueId") or 0)
         queue = QUEUE_BY_ID.get(queue_id, Queue.SOLO)
         is_remake = duration < REMAKE_MAX_DURATION_S
@@ -540,6 +593,7 @@ class Poller:
                 match_id=match_id,
                 queue_id=queue_id,
                 game_start=game_start,
+                game_end=game_end,
                 game_duration=duration,
                 raw_json=json.dumps(raw, ensure_ascii=False, separators=(",", ":")),
             )
@@ -559,6 +613,7 @@ class Poller:
                 player_id=participant_player.id,
                 queue=queue,
                 game_start=game_start,
+                game_end=game_end,
                 game_duration=duration,
                 is_remake=is_remake,
                 champion_name=part.get("championName") or f"Champion {champion_id}",
@@ -605,6 +660,7 @@ class Poller:
                 "assists": participant.assists,
                 "lp_change": participant.lp_change,
                 "game_start": as_utc(participant.game_start).isoformat(),
+                "game_end": _game_end(participant).isoformat(),
                 "game_duration": participant.game_duration,
                 "is_remake": participant.is_remake,
             },
@@ -633,7 +689,11 @@ class Poller:
             return
 
         if current is not None and current.game_id == game.game_id:
-            return  # même partie qu'au cycle précédent
+            # Même partie : Spectator renvoie gameStartTime = 0 pendant le chargement, on complète
+            known_start = as_utc(game.game_start)
+            if current.game_start.timestamp() <= 0 and known_start is not None and known_start.timestamp() > 0:
+                current.game_start = known_start
+            return
         if current is not None:
             # Nouvelle partie sans avoir vu la fin de la précédente
             self._publish_live_end(player, player.id, current, ctx)

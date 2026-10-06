@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Any
 from urllib.parse import quote
 
-from app.db.models import Challenge, Match, MatchParticipant, Player, RankSnapshot, Team
+from app.db.models import Challenge, Match, MatchParticipant, Player, RankSnapshot, Team, game_end_of
 from app.db.session import as_utc
 from app.riot import ddragon
 from app.services.stats import format_rank, kda, rank_color
@@ -104,6 +104,7 @@ def match_row(
         "player_id": participant.player_id,
         "queue": enum_value(participant.queue),
         "game_start": iso(participant.game_start),
+        "game_end": game_end_of(participant).isoformat(),
         "game_duration": duration,
         "champion_name": participant.champion_name,
         "champion_icon_url": ddragon.champion_icon_url(ddragon.CURRENT_VERSION, participant.champion_name),

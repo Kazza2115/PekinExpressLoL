@@ -184,14 +184,16 @@ async def test_match_ids_filters(api):
     assert len(await api.get_match_ids_by_puuid(puuid, 420, start_time=0)) >= 3
     assert len(await api.get_match_ids_by_puuid(puuid, 420, count=2)) == 2
 
-    # Filtre sur gameStartTimestamp : seules les parties commencées après `start_time` sont renvoyées
+    # Filtre sur gameEndTimestamp : seules les parties terminées après `start_time` sont renvoyées
     all_ids = await api.get_match_ids_by_puuid(puuid, 420, count=100)
-    starts = {match_id: (await api.get_match(match_id))["info"]["gameStartTimestamp"] // 1000 for match_id in all_ids}
-    threshold = sorted(starts.values())[1]
+    ends = {match_id: (await api.get_match(match_id))["info"]["gameEndTimestamp"] // 1000 for match_id in all_ids}
+    threshold = sorted(ends.values())[1]
     filtered = await api.get_match_ids_by_puuid(puuid, 420, start_time=threshold, count=100)
-    assert all(starts.get(i, threshold) >= threshold for i in filtered)
-    assert all(i in filtered for i, s in starts.items() if s >= threshold)
-    assert all(i not in filtered for i, s in starts.items() if s < threshold)
+    assert all(ends.get(i, threshold) >= threshold for i in filtered)
+    assert all(i in filtered for i, s in ends.items() if s >= threshold)
+    assert all(i not in filtered for i, s in ends.items() if s < threshold)
+    # Pagination : `start` décale la fenêtre
+    assert await api.get_match_ids_by_puuid(puuid, 420, count=100, start=1) == all_ids[1:]
 
     # Plus récentes d'abord
     recent = await api.get_match_ids_by_puuid(puuid, 420, count=100)
@@ -200,8 +202,9 @@ async def test_match_ids_filters(api):
 
 
 @pytest.mark.anyio
-async def test_window_hint_keeps_first_games_in_window(api):
-    """Avec `start_time` (début du challenge), les parties générées commencent après cette date."""
+async def test_start_time_filters_on_game_end(api):
+    """`start_time` (début du challenge) filtre sur la FIN de partie : les premières parties
+    du challenge, commencées fictivement avant, sont renvoyées et leur fin est ≥ start_time."""
     account = await api.get_account_by_riot_id("Fenetre", "EUW")
     puuid = account.puuid
     challenge_start = int(time.time()) - 5
@@ -213,9 +216,12 @@ async def test_window_hint_keeps_first_games_in_window(api):
     assert len(ids) >= 2
     for match_id in ids:
         info = (await api.get_match(match_id))["info"]
-        assert info["gameStartTimestamp"] // 1000 >= challenge_start
+        assert info["gameEndTimestamp"] // 1000 >= challenge_start
+        assert info["gameEndTimestamp"] <= int(time.time() * 1000) + 1000  # jamais dans le futur
         assert info["gameDuration"] >= 180
         assert info["gameStartTimestamp"] + info["gameDuration"] * 1000 == info["gameEndTimestamp"]
+    # Un début de fenêtre dans le futur ne renvoie rien
+    assert await api.get_match_ids_by_puuid(puuid, 420, start_time=int(time.time()) + 3600) == []
 
 
 @pytest.mark.anyio

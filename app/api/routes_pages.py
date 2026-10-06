@@ -7,9 +7,10 @@ Chaque page reçoit : `request`, `page` (nom), `challenge` (dict), `demo_mode`,
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
+from fastapi import Path as PathParam
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
@@ -117,7 +118,7 @@ def dashboard(request: Request, session: Session = Depends(get_session)) -> Resp
 
 @router.get("/player/{player_id}", response_class=HTMLResponse, include_in_schema=False)
 def player_page(
-    player_id: int, request: Request, session: Session = Depends(get_session)
+    player_id: Annotated[int, PathParam(ge=1, le=2**31 - 1)], request: Request, session: Session = Depends(get_session)
 ) -> Response:
     player = session.get(Player, player_id)
     if player is None:

@@ -33,6 +33,7 @@ def make_settings(webhook_url: str) -> Settings:
         admin_password="x",
         database_url="sqlite://",
         games_per_day=10,
+        max_players=8,
         timezone="Europe/Paris",
         discord_webhook_url=webhook_url,
         base_url="http://localhost:8000",
@@ -65,7 +66,7 @@ async def test_send_discord_posts_content_and_returns_true_on_200():
     request = seen[0]
     assert request.method == "POST"
     assert str(request.url) == WEBHOOK_URL
-    assert json.loads(request.content) == {"content": "Salut **Mike**"}
+    assert json.loads(request.content) == {"content": "Salut **Mike**", "allowed_mentions": {"parse": []}}
     assert request.headers["content-type"].startswith("application/json")
 
 

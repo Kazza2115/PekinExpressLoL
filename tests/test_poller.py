@@ -181,11 +181,12 @@ class ScriptedAPI:
         return list(self.entries.get(puuid, []))
 
     async def get_match_ids_by_puuid(
-        self, puuid: str, queue_id: int, start_time: int | None = None, count: int = 20
+        self, puuid: str, queue_id: int, start_time: int | None = None, count: int = 20, start: int = 0
     ) -> list[str]:
         self.request_count += 1
         self.calls.append(("match_ids", puuid, queue_id, start_time, count))
-        return list(self.match_ids.get(puuid, []))
+        ids = list(self.match_ids.get(puuid, []))
+        return ids[start : start + count]
 
     async def get_match(self, match_id: str) -> dict[str, Any]:
         self.request_count += 1
@@ -244,6 +245,8 @@ def match_json(
             "queueId": queue_id,
             "gameMode": "CLASSIC",
             "gameStartTimestamp": int(game_start.timestamp() * 1000),
+            # Présent depuis le patch 11.20 : `gameDuration` est alors en secondes (règle Riot)
+            "gameEndTimestamp": int(game_start.timestamp() * 1000) + duration * 1000,
             "gameDuration": duration,
             "participants": participants,
         },
@@ -517,6 +520,7 @@ async def test_run_forever_survives_exceptions(session: Session, monkeypatch: py
         admin_password="x",
         database_url="sqlite://",
         games_per_day=10,
+        max_players=8,
         timezone="Europe/Paris",
         discord_webhook_url="",
         base_url="http://localhost:8000",

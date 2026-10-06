@@ -52,7 +52,7 @@ async def send_discord(
     url = (settings.discord_webhook_url or "").strip()
     if not url:
         return False
-    payload = {"content": truncate(content)}
+    payload = {"content": truncate(content), "allowed_mentions": {"parse": []}}
     try:
         if client is not None:
             response = await client.post(url, json=payload, timeout=DISCORD_TIMEOUT_S)

@@ -4,7 +4,15 @@ Un petit site pour organiser un **challenge ranked League of Legends entre 8 ami
 week-end : la roue tire 4 duos au sort, chacun joue ses parties classées, et le site suit
 tout en temps réel grâce à l'API Riot. Le duo qui gagne le plus de LP l'emporte.
 
-> Captures d'écran : à venir.
+| Accueil (inscriptions) | La roue des duos |
+|---|---|
+| ![Accueil](docs/screenshots/accueil.png) | ![La roue](docs/screenshots/roue.png) |
+
+| Classement en direct | Fiche joueur |
+|---|---|
+| ![Classement](docs/screenshots/classement.png) | ![Fiche joueur](docs/screenshots/joueur.png) |
+
+*(captures prises en mode démo : comptes et parties simulés)*
 
 ---
 
@@ -35,7 +43,9 @@ joueurs. En cas d'égalité, le winrate puis le nombre de parties départagent.
 
 - Seules les parties **Ranked Solo/Duo** comptent (la **Flex** peut être ajoutée en option).
 - Les **remakes** (parties de moins de 5 minutes) sont **exclus** des statistiques.
-- Seules les parties jouées **après le clic sur « Démarrer »** sont prises en compte.
+- Une partie compte si elle **se termine** entre « Démarrer » et « Terminer » (c'est à la fin
+  de la partie que les LP sont attribués). Une partie en cours au moment du clic sur
+  « Démarrer » compte donc, et le compteur « 10 games par jour » suit la même règle.
 
 ---
 
@@ -103,6 +113,7 @@ Copie `.env.example` en `.env` à la racine du projet et complète-le. Chaque va
 | `ADMIN_PASSWORD` | Mot de passe de l'organisateur (page admin, roue, démarrage). **À changer** (défaut `change-me`). |
 | `DATABASE_URL` | Base SQLite. Défaut : `sqlite:///./data/tracker.db` (fichier dans `data/`). |
 | `GAMES_PER_DAY` | Objectif de parties par jour et par joueur (défaut 10). Modifiable ensuite dans l'admin. |
+| `MAX_PLAYERS` | Nombre maximal de joueurs inscrits (défaut 8). Au-delà, l'inscription est refusée. |
 | `TIMEZONE` | Fuseau pour découper les journées (défaut `Europe/Paris`). |
 | `DISCORD_WEBHOOK_URL` | URL d'un webhook Discord pour recevoir les annonces. Vide = désactivé. |
 | `BASE_URL` | Adresse publique du site, utilisée dans les messages Discord (défaut `http://localhost:8000`). |
@@ -152,6 +163,10 @@ Riot ID et le lier plus tard avec le bouton **« Lier mon compte »** sur sa car
 Quand tous les joueurs actifs sont liés et qu'ils sont en nombre pair (au moins 2), le
 bouton **« Tirer les duos »** apparaît.
 
+Une fois le challenge démarré, un compte déjà lié ne peut plus être changé par n'importe qui
+(sinon l'historique de rang serait remplacé) : seul l'organisateur, avec son mot de passe,
+peut corriger un Riot ID. Un joueur inscrit sans compte peut toujours lier le sien.
+
 Astuce : l'organisateur peut pré-inscrire tout le monde dans `players.yaml` (lu une seule
 fois, au premier démarrage, si aucun joueur n'existe encore).
 
@@ -184,8 +199,9 @@ toutes les 60 s.
 
 ### 4. Terminer
 
-Dans la page **Admin**, **« Terminer »** fige le classement à l'instant du clic. Les parties
-jouées après ne comptent plus.
+Dans la page **Admin**, **« Terminer »** lance un dernier relevé puis fige le classement à
+l'instant du clic. Les parties terminées avant ce moment comptent (le site laisse quelques
+minutes de marge pour que Riot les remonte) ; celles terminées après ne comptent plus.
 
 ### Option : une fenêtre différente par duo
 
@@ -333,8 +349,9 @@ pytest
 - **Un seul challenge à la fois.** Pour en refaire un, on réinitialise (ou on supprime le
   fichier SQLite).
 - **Pas d'authentification des joueurs.** N'importe qui ayant l'URL peut s'inscrire ou lier
-  un compte ; seules les actions d'organisateur sont protégées par mot de passe. C'est
-  pensé pour un groupe d'amis, pas pour Internet entier.
+  un compte (dans la limite de `MAX_PLAYERS` et d'un garde-fou anti-spam) ; seules les
+  actions d'organisateur sont protégées par mot de passe. C'est pensé pour un groupe
+  d'amis, pas pour Internet entier.
 - **Flex optionnelle, Solo/Duo par défaut.** Le rang affiché, les LP nets et le graphe sont
   ceux de la Solo/Duo. Avec `TRACK_FLEX` / la case de l'admin, les parties Flex sont
   enregistrées et apparaissent dans le feed, mais ne changent pas le classement.

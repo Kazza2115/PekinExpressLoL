@@ -54,6 +54,9 @@ def engine():
     state.poll_count = 0
     state.polling = False
     bus._history.clear()  # noqa: SLF001
+    from app.api import routes_api
+
+    routes_api._write_hits.clear()  # noqa: SLF001 — garde-fou anti-spam remis à zéro
     yield engine
     db_session.set_engine(None)
     engine.dispose()

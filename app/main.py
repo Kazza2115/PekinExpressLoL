@@ -44,6 +44,12 @@ async def lifespan(app: FastAPI):
     task: asyncio.Task | None = None
     if os.getenv("PEKIN_DISABLE_POLLER", "") not in {"1", "true"}:
         task = asyncio.create_task(poller.run_forever(), name="poller")
+    if settings.admin_password_is_default:
+        log.warning(
+            "ADMIN_PASSWORD n'est pas défini : le mot de passe organisateur est « %s ». "
+            "Change-le dans .env avant de partager l'URL du site.",
+            settings.admin_password,
+        )
     log.info(
         "Pékin Express LoL démarré (%s, polling toutes les %ss)",
         "MODE DÉMO" if settings.demo_mode else f"API Riot {settings.riot_platform}",

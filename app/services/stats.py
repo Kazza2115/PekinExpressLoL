@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import statistics
 from dataclasses import asdict, dataclass
-from datetime import datetime, tzinfo
+from datetime import datetime, timedelta, tzinfo
 
-from app.db.models import MatchParticipant, Player, Queue, RankSnapshot, Team
+from app.db.models import MatchParticipant, Player, Queue, RankSnapshot, Team, game_end_of
 from app.db.session import as_utc
 from app.state import LiveGameState
 
@@ -34,6 +34,9 @@ DIVISIONS = ["IV", "III", "II", "I"]
 APEX_TIERS = {"MASTER", "GRANDMASTER", "CHALLENGER"}
 # Base absolue des tiers apex : Diamond I 100 LP → Master 0 LP
 APEX_BASE = 7 * 400  # 2800
+# Après la fin d'une fenêtre, on accepte encore les snapshots pris pendant cette grâce
+# (Match-V5 et League-V4 reflètent une partie 1 à 3 min après sa fin)
+WINDOW_END_GRACE = timedelta(minutes=10)
 
 RANK_COLORS: dict[str, str] = {
     "IRON": "#8a8a8a",
@@ -299,10 +302,12 @@ def compute_player_stats(
             else:
                 baseline = queue_snapshots[0]  # premier snapshot après le début
 
-    # Snapshot de fin : le dernier pris avant la fin de fenêtre (classement figé après `window_end`)
+    # Snapshot de fin : le dernier pris avant la fin de fenêtre (classement figé après `window_end`),
+    # avec une courte période de grâce : les résultats Riot arrivent 1 à 3 min après la partie.
     end_snapshot: RankSnapshot | None = latest
     if end_utc is not None:
-        within = [s for s in queue_snapshots if as_utc(s.captured_at) <= end_utc]  # type: ignore[operator]
+        limit = end_utc + WINDOW_END_GRACE
+        within = [s for s in queue_snapshots if as_utc(s.captured_at) <= limit]  # type: ignore[operator]
         end_snapshot = within[-1] if within else None
 
     tier = latest.tier if latest is not None else None
@@ -315,18 +320,19 @@ def compute_player_stats(
     lp_net = end_abs - baseline_abs if (end_abs is not None and baseline_abs is not None) else 0
 
     # --- Parties de la file dans la fenêtre, hors remakes ----------------------------
+    # Une partie compte si elle se *termine* dans la fenêtre (les LP sont appliqués à la fin,
+    # comme les snapshots de rang) ; les journées (10 games/jour) sont aussi comptées à la fin.
     games_in_window: list[MatchParticipant] = []
     for p in sorted(
         (p for p in participants if p.queue == queue),
-        key=lambda p: as_utc(p.game_start),  # type: ignore[arg-type,return-value]
+        key=game_end_of,
     ):
         if p.is_remake:
             continue
-        game_start = as_utc(p.game_start)
-        assert game_start is not None
-        if start_utc is not None and game_start < start_utc:
+        game_end = game_end_of(p)
+        if start_utc is not None and game_end < start_utc:
             continue
-        if end_utc is not None and game_start > end_utc:
+        if end_utc is not None and game_end > end_utc:
             continue
         games_in_window.append(p)
 
@@ -336,7 +342,7 @@ def compute_player_stats(
 
     games_per_day: dict[str, int] = {}
     for p in games_in_window:
-        key = day_key(p.game_start, tz)
+        key = day_key(game_end_of(p), tz)
         games_per_day[key] = games_per_day.get(key, 0) + 1
     games_today = games_per_day.get(day_key(now_utc, tz), 0)
 
@@ -373,9 +379,7 @@ def compute_player_stats(
 
     last_game_at: str | None = None
     if games_in_window:
-        last_start = as_utc(games_in_window[-1].game_start)
-        assert last_start is not None
-        last_game_at = last_start.isoformat()
+        last_game_at = game_end_of(games_in_window[-1]).isoformat()
 
     # --- Data Dragon (icône de profil, icône du champion en live) --------------------
     ddragon = _ddragon_module()

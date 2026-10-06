@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 
 from fastapi import Depends, Header, HTTPException, status
@@ -14,11 +15,21 @@ from app.db.session import get_session
 ADMIN_ERROR_DETAIL = "Mot de passe administrateur incorrect."
 
 
-def require_admin(x_admin_password: str | None = Header(default=None)) -> None:
-    """Vérifie l'en-tête `X-Admin-Password` (comparaison en temps constant) → 401 sinon."""
+# Délai imposé après un mot de passe refusé : rend la force brute inintéressante
+FAILED_AUTH_DELAY_S = 0.5
+
+
+def check_admin_password(provided: str | None) -> bool:
+    """Compare en temps constant avec `ADMIN_PASSWORD`."""
     expected = get_settings().admin_password
-    provided = x_admin_password or ""
-    if not provided or not secrets.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
+    value = provided or ""
+    return bool(value) and secrets.compare_digest(value.encode("utf-8"), expected.encode("utf-8"))
+
+
+async def require_admin(x_admin_password: str | None = Header(default=None)) -> None:
+    """Vérifie l'en-tête `X-Admin-Password` → 401 (après un court délai) sinon."""
+    if not check_admin_password(x_admin_password):
+        await asyncio.sleep(FAILED_AUTH_DELAY_S)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=ADMIN_ERROR_DETAIL)
 
 

@@ -194,9 +194,62 @@ def test_registration_closed_after_start(client: TestClient, admin_headers: dict
     response = client.post("/api/players", json={"display_name": "Tardif"})
     assert response.status_code == 400
     assert response.json()["detail"] == "Les inscriptions sont closes."
-    # La liaison reste possible (corriger un Riot ID)
-    response = client.post(f"/api/players/{p1['id']}/link", json={"riot_id": MIKE[1]})
+    # Un compte déjà lié ne change plus sans l'organisateur (l'historique de rang serait remplacé)
+    response = client.post(f"/api/players/{p1['id']}/link", json={"riot_id": "Autre Compte#EUW"})
+    assert response.status_code == 403
+    assert "organisateur" in response.json()["detail"]
+    # … mais l'organisateur peut le faire
+    response = client.post(
+        f"/api/players/{p1['id']}/link", json={"riot_id": "Autre Compte#EUW"}, headers=admin_headers
+    )
     assert response.status_code == 200, response.text
+    assert response.json()["player"]["riot_id"] == "Autre Compte#EUW"
+
+
+def test_unlinked_player_can_still_link_after_start(client: TestClient, admin_headers: dict) -> None:
+    """Un joueur inscrit sans compte (puis désactivé pour le tirage) peut encore se lier."""
+    _register(client, *MIKE)
+    _register(client, *LEA)
+    late = _register(client, "Retardataire")["player"]
+    assert late["is_linked"] is False
+    response = client.patch(f"/api/admin/players/{late['id']}", json={"active": False}, headers=admin_headers)
+    assert response.status_code == 200
+    _admin_post(client, admin_headers, "/api/admin/draw")
+    _admin_post(client, admin_headers, "/api/admin/challenge/start")
+    response = client.post(f"/api/players/{late['id']}/link", json={"riot_id": "Retard#EUW"})
+    assert response.status_code == 200, response.text
+    assert response.json()["player"]["is_linked"] is True
+
+
+def test_player_cap(client: TestClient) -> None:
+    """Pas plus de MAX_PLAYERS (8) joueurs actifs."""
+    for index in range(8):
+        _register(client, f"Joueur{index}")
+    response = client.post("/api/players", json={"display_name": "Neuvième"})
+    assert response.status_code == 400
+    assert "places sont prises" in response.json()["detail"]
+
+
+def test_huge_ids_are_rejected_not_500(client: TestClient, admin_headers: dict) -> None:
+    assert client.get(f"/api/players/{2**70}").status_code == 422
+    assert client.get(f"/api/players/{2**70}/lp-history").status_code == 422
+    assert client.delete(f"/api/admin/players/{2**70}", headers=admin_headers).status_code == 422
+    response = client.patch(
+        "/api/admin/challenge", json={"start_at": "0001-01-01T00:00"}, headers=admin_headers
+    )
+    assert response.status_code == 400
+    response = client.patch("/api/admin/challenge", json={"games_per_day": 10**23}, headers=admin_headers)
+    assert response.status_code == 422
+
+
+def test_finish_runs_a_last_poll_before_freezing(client: TestClient, admin_headers: dict) -> None:
+    _setup_duo(client, admin_headers)
+    before = client.get("/api/state").json()["last_poll"]["started_at"]
+    finished = _admin_post(client, admin_headers, "/api/admin/challenge/finish")
+    assert finished["challenge"]["status"] == "finished"
+    after = client.get("/api/state").json()["last_poll"]["started_at"]
+    assert after > before  # un cycle de clôture a eu lieu
+    assert after <= finished["challenge"]["end_at"]
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +421,37 @@ def test_admin_maintenance(client: TestClient, admin_headers: dict) -> None:
 
     response = client.post("/api/admin/reload-settings", headers=admin_headers)
     assert response.status_code == 200
-    assert response.json() == {"demo_mode": True, "has_api_key": False}
+    # Même mode (démo) → le client simulé est conservé (sinon les rangs repartiraient de zéro)
+    assert response.json() == {"demo_mode": True, "has_api_key": False, "client_replaced": False}
+
+
+def test_sse_does_not_hold_a_db_connection(client: TestClient) -> None:
+    """Le flux SSE ne garde pas de session SQLAlchemy ouverte (un onglet = zéro connexion du pool)."""
+    import inspect
+
+    from app.api import routes_api
+
+    params = inspect.signature(routes_api.get_events).parameters
+    assert "session" not in params and "challenge" not in params
+
+
+def test_deactivating_a_live_player_publishes_live_end(client: TestClient, admin_headers: dict) -> None:
+    from datetime import datetime, timezone
+
+    from app.events import bus
+    from app.state import LiveGameState, state
+
+    player = _register(client, *MIKE)["player"]
+    now = datetime.now(timezone.utc)
+    state.live_games[player["id"]] = LiveGameState(
+        player_id=player["id"], game_id=1, champion_id=103, champion_name="Ahri", queue_id=420,
+        game_mode="CLASSIC", game_start=now, detected_at=now,
+    )
+    response = client.patch(f"/api/admin/players/{player['id']}", json={"active": False}, headers=admin_headers)
+    assert response.status_code == 200
+    assert player["id"] not in state.live_games
+    ends = [e for e in bus.recent(50) if e["type"] == "live_end"]
+    assert ends and ends[-1]["data"]["player_id"] == player["id"]
 
 
 def test_sse_stream_events(engine, monkeypatch) -> None:

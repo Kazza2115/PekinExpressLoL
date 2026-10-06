@@ -14,10 +14,11 @@ de `get_active_game` / `get_match_ids_by_puuid` (`tick`), joueur par joueur :
 Horodatages des parties générées : la partie *se termine* à l'instant réel de la
 fin de simulation (`gameEndTimestamp`), avec une durée fictive plausible
 (`gameDuration` ≈ 15–28 min) et donc un `gameStartTimestamp` dans le passé, de
-sorte que `game_start + gameDuration` corresponde au moment où le rang change
-(c'est ce que le poller utilise pour calculer `lp_change`). Quand le poller
-interroge avec `start_time` (début du challenge), le début fictif est ramené
-après cette date pour que les premières parties du challenge comptent quand même.
+sorte que la fin de partie corresponde au moment où le rang change (c'est ce que
+le poller utilise pour calculer `lp_change`). Le filtre `start_time` de
+`get_match_ids_by_puuid` s'applique à la *fin* de partie : les premières parties
+d'un challenge (commencées fictivement avant « Démarrer ») sont donc renvoyées,
+et comptent puisque le site place une partie dans la fenêtre d'après sa fin.
 
 `puuid` déterministe : "demo-" + sha1(riot_id)[:24] ; rang initial déterministe
 par puuid (Silver IV → Diamond II). Le Riot ID "unranked#…" simule un compte
@@ -46,7 +47,6 @@ MAX_STORED_MATCHES = 2000
 # Durée fictive d'une partie normale (secondes) et d'un remake
 NORMAL_DURATION_RANGE = (900, 1680)
 REMAKE_DURATION_S = 180
-MIN_NORMAL_DURATION_S = 300  # au-delà du seuil remake du poller
 
 # Identifiants image Data Dragon (= `championName` Match-V5) et championId, par poste
 CHAMPIONS_BY_POSITION: dict[str, list[tuple[str, int]]] = {
@@ -161,7 +161,6 @@ class DemoRiotClient:
         self._players: dict[str, _DemoPlayer] = {}
         self._matches: dict[str, dict[str, Any]] = {}
         self._game_seq = 0  # identifiant de partie global (DEMO_000001…)
-        self._window_hint: float | None = None  # dernier `start_time` reçu (début du challenge)
 
     # ------------------------------------------------------------------ joueurs
 
@@ -237,14 +236,10 @@ class DemoRiotClient:
         remake = self.rng.random() < self.remake_chance
         win = False if remake else self.rng.random() < self.win_chance
 
-        # Durée fictive plausible, fin = maintenant ; début ramené après le début du challenge si connu
+        # Durée fictive plausible, fin = maintenant (instant où le rang change)
         duration = REMAKE_DURATION_S if remake else self.rng.randint(*NORMAL_DURATION_RANGE)
-        start_ts = now - duration
-        if self._window_hint is not None and start_ts <= self._window_hint:
-            start_ts = self._window_hint + 1.0
-            if not remake:
-                duration = max(MIN_NORMAL_DURATION_S, int(now - start_ts))
-        end_ts = start_ts + duration
+        end_ts = now
+        start_ts = end_ts - duration
 
         match_id = f"DEMO_{live.game_id:06d}"
         self._matches[match_id] = self._build_match(player, live, match_id, win, remake, start_ts, end_ts, duration)
@@ -478,20 +473,20 @@ class DemoRiotClient:
         queue_id: int,
         start_time: int | None = None,
         count: int = 20,
+        start: int = 0,
     ) -> list[str]:
         self.request_count += 1
-        # Mémorise le début de fenêtre demandé par le poller (voir docstring du module)
-        if start_time is not None and 0 < start_time <= time.time():
-            self._window_hint = float(start_time)
         self._ensure_player(puuid)
         self.tick(puuid)
         player = self._players[puuid]
+        # `start_time` filtre sur la fin de partie (voir docstring du module)
         matches = [
             m for m in player.matches
-            if m.queue_id == queue_id and (start_time is None or m.start_ts >= start_time)
+            if m.queue_id == queue_id and (start_time is None or m.end_ts >= start_time)
         ]
         matches.sort(key=lambda m: (m.end_ts, m.match_id), reverse=True)  # plus récentes d'abord
-        return [m.match_id for m in matches[: max(0, count)]]
+        offset = max(0, start)
+        return [m.match_id for m in matches[offset : offset + max(0, count)]]
 
     async def get_match(self, match_id: str) -> dict[str, Any]:
         self.request_count += 1
@@ -507,9 +502,11 @@ class DemoRiotClient:
         live = self._players[puuid].live
         if live is None:
             return None
+        # Comme Spectator-V5 : gameStartTime vaut 0 pendant l'écran de chargement (première vue)
+        started_at = live.started_at if live.ticks >= 1 else 0.0
         return ActiveGameDTO(
             game_id=live.game_id,
-            game_start=datetime.fromtimestamp(live.started_at, tz=timezone.utc),
+            game_start=datetime.fromtimestamp(started_at, tz=timezone.utc),
             queue_id=RANKED_SOLO_QUEUE_ID,
             game_mode="CLASSIC",
             champion_id=live.champion_id,

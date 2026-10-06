@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 # Racine du projet (dossier contenant `app/`)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = PROJECT_ROOT / ".env"
+DEFAULT_ADMIN_PASSWORD = "change-me"
 
 
 def _env_bool(name: str, default: bool | None = None) -> bool | None:
@@ -45,6 +46,7 @@ class Settings:
     admin_password: str
     database_url: str
     games_per_day: int
+    max_players: int
     timezone: str
     discord_webhook_url: str
     base_url: str
@@ -66,6 +68,10 @@ class Settings:
     def has_api_key(self) -> bool:
         return bool(self.riot_api_key.strip())
 
+    @property
+    def admin_password_is_default(self) -> bool:
+        return self.admin_password == DEFAULT_ADMIN_PASSWORD
+
 
 def _build_settings() -> Settings:
     load_dotenv(ENV_FILE, override=True)
@@ -81,10 +87,11 @@ def _build_settings() -> Settings:
         demo_mode=demo_mode,
         poll_interval_seconds=max(3, _env_int("POLL_INTERVAL_SECONDS", default_poll)),
         track_flex=bool(_env_bool("TRACK_FLEX", default=False)),
-        admin_password=os.getenv("ADMIN_PASSWORD", "change-me") or "change-me",
+        admin_password=os.getenv("ADMIN_PASSWORD", "").strip() or DEFAULT_ADMIN_PASSWORD,
         database_url=os.getenv("DATABASE_URL", "sqlite:///./data/tracker.db").strip()
         or "sqlite:///./data/tracker.db",
         games_per_day=max(1, _env_int("GAMES_PER_DAY", 10)),
+        max_players=max(2, _env_int("MAX_PLAYERS", 8)),
         timezone=os.getenv("TIMEZONE", "Europe/Paris").strip() or "Europe/Paris",
         discord_webhook_url=os.getenv("DISCORD_WEBHOOK_URL", "").strip(),
         base_url=(os.getenv("BASE_URL", "http://localhost:8000").strip() or "http://localhost:8000").rstrip("/"),

@@ -191,10 +191,8 @@ class RiotClient:
 
     async def get_league_entries_by_puuid(self, puuid: str) -> list[LeagueEntryDTO]:
         url = endpoints.league_entries_url(self._settings().platform_host, puuid)
-        try:
-            data = await self._get(url)
-        except RiotNotFound:
-            return []  # joueur inconnu de League-V4 = unranked
+        # Un joueur non classé = `200 []` ; un 404 est une vraie erreur (puuid/plateforme) → remonte
+        data = await self._get(url)
         return endpoints.parse_league_entries(data or [])
 
     async def get_match_ids_by_puuid(
@@ -203,8 +201,9 @@ class RiotClient:
         queue_id: int,
         start_time: int | None = None,
         count: int = 20,
+        start: int = 0,
     ) -> list[str]:
-        url = endpoints.match_ids_url(self._settings().region_host, puuid, queue_id, start_time, count)
+        url = endpoints.match_ids_url(self._settings().region_host, puuid, queue_id, start_time, count, start)
         return endpoints.parse_match_ids(await self._get(url))
 
     async def get_match(self, match_id: str) -> dict[str, Any]:

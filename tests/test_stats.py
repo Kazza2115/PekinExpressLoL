@@ -395,9 +395,20 @@ class TestComputePlayerStats:
         assert s.winrate == 80.0
 
     def test_window_end_excludes_later_games(self):
+        # Une partie compte si elle se TERMINE dans la fenêtre : celle de 18:00 (40 min) finit à 18:40
         s = compute(window_end=utc(2026, 10, 10, 18, 30))
+        assert s.games == 2
+        assert s.last_game_at == "2026-10-10T09:25:00+00:00"
+        s = compute(window_end=utc(2026, 10, 10, 18, 45))
         assert s.games == 3
-        assert s.last_game_at == "2026-10-10T18:00:00+00:00"
+        assert s.last_game_at == "2026-10-10T18:40:00+00:00"
+
+    def test_window_start_uses_game_end(self):
+        # Partie commencée avant « Démarrer » mais terminée après : elle compte (LP appliqués à la fin)
+        s = compute(window_start=utc(2026, 10, 10, 8, 15))
+        assert s.games == 5
+        s = compute(window_start=utc(2026, 10, 10, 8, 31))
+        assert s.games == 4
 
     def test_games_per_day_and_today_in_paris(self):
         s = compute()
@@ -445,8 +456,8 @@ class TestComputePlayerStats:
         assert s.top_champion_winrate == 0.0
 
     def test_last_game_at(self):
-        s = compute()
-        assert s.last_game_at == "2026-10-10T22:30:00+00:00"
+        s = compute()  # fin de la dernière partie : 22:30 + 20 min
+        assert s.last_game_at == "2026-10-10T22:50:00+00:00"
 
     def test_no_data(self):
         player = make_player(puuid=None, game_name=None, tag_line=None, team_id=None)
@@ -509,7 +520,7 @@ class TestComputePlayerStats:
         assert s.lp_net == 60
         assert s.games == 5
         assert s.games_today == 1
-        assert s.last_game_at == "2026-10-10T22:30:00+00:00"
+        assert s.last_game_at == "2026-10-10T22:50:00+00:00"
 
     def test_live_game(self):
         live = LiveGameState(
@@ -606,7 +617,7 @@ class TestComputePlayerStats:
         assert d["display_name"] == "Mike"
         assert d["games_per_day"] == {"2026-10-10": 4, "2026-10-11": 1}
         assert d["live"]["champion_name"] == "Ahri"
-        assert d["last_game_at"] == "2026-10-10T22:30:00+00:00"
+        assert d["last_game_at"] == "2026-10-10T22:50:00+00:00"
         json.dumps(d)  # ne lève pas
         # Tous les champs du dataclass sont présents
         assert set(d) == set(PlayerStats.__dataclass_fields__)

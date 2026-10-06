@@ -29,13 +29,13 @@ from app.riot.base import (
     RiotRateLimited,
     RiotUnauthorized,
 )
-from app.services.stats import absolute_lp
+from app.services.stats import APEX_TIERS, absolute_lp
 
 log = logging.getLogger("pekin.registration")
 
 DISPLAY_NAME_MIN, DISPLAY_NAME_MAX = 2, 20
 GAME_NAME_MIN, GAME_NAME_MAX = 3, 16
-TAG_LINE_RE = re.compile(r"^[A-Za-z0-9]{3,5}$")
+TAG_LINE_RE = re.compile(r"^[^\W_]{3,5}$")  # lettres/chiffres Unicode, sans espace ni #
 
 ERR_NOT_FOUND = "Riot ID introuvable : vérifie le pseudo et le tag."
 ERR_UNAUTHORIZED = "Clé Riot invalide ou expirée (voir .env)."
@@ -73,7 +73,8 @@ def _snapshot_from_entry(player_id: int, queue: Queue, entry: LeagueEntryDTO | N
     if entry is None:
         return RankSnapshot(player_id=player_id, queue=queue, tier=None, rank=None, lp=0, absolute_lp=None)
     tier = entry.tier.upper()
-    rank = entry.rank.upper() if entry.rank else None
+    # Master+ : Riot renvoie rank "I", sans signification → None (même normalisation que le poller)
+    rank = entry.rank.upper() if entry.rank and tier not in APEX_TIERS else None
     return RankSnapshot(
         player_id=player_id,
         queue=queue,

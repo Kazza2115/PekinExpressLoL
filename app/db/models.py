@@ -111,6 +111,7 @@ class Match(SQLModel, table=True):
     match_id: str = Field(primary_key=True)
     queue_id: int
     game_start: datetime = Field(index=True)
+    game_end: datetime | None = None  # `gameEndTimestamp` (sinon début + durée)
     game_duration: int  # secondes
     raw_json: str  # JSON Match-V5 complet
     fetched_at: datetime = Field(default_factory=utcnow)
@@ -123,7 +124,8 @@ class MatchParticipant(SQLModel, table=True):
     match_id: str = Field(foreign_key="match.match_id", index=True)
     player_id: int = Field(foreign_key="player.id", index=True)
     queue: Queue = Field(default=Queue.SOLO)
-    game_start: datetime = Field(index=True)  # dénormalisé (tri / fenêtre)
+    game_start: datetime = Field(index=True)  # dénormalisé (tri)
+    game_end: datetime | None = None  # fin réelle : c'est elle qui place la partie dans la fenêtre
     game_duration: int
     is_remake: bool = False
     champion_name: str
@@ -138,3 +140,19 @@ class MatchParticipant(SQLModel, table=True):
     damage_to_champions: int = 0
     vision_score: int = 0
     lp_change: int | None = None  # calculé par diff de snapshots (approximation)
+
+
+def game_end_of(row: Match | MatchParticipant) -> datetime:
+    """Fin de partie (UTC) : `game_end` si connue, sinon début + durée.
+
+    Une partie compte dans la fenêtre du challenge si elle s'y *termine* (c'est à
+    la fin que les LP sont appliqués, en cohérence avec les snapshots de rang).
+    """
+    from datetime import timedelta  # import local : pas d'autre usage dans le module
+
+    end = row.game_end
+    if end is None:
+        end = row.game_start + timedelta(seconds=row.game_duration)
+    if end.tzinfo is None:  # SQLite renvoie des datetimes naïfs (UTC)
+        end = end.replace(tzinfo=timezone.utc)
+    return end.astimezone(timezone.utc)

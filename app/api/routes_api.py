@@ -12,16 +12,17 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
-from app.api.deps import get_challenge
+from app.api.deps import check_admin_password, get_challenge
 from app.api.leaderboard import SORT_KEYS, build_leaderboard, compute_single_player_stats, team_window
 from app.api.serializers import (
     challenge_to_dict,
@@ -34,8 +35,18 @@ from app.api.serializers import (
     team_public,
 )
 from app.config import get_settings
-from app.db.models import Challenge, ChallengeStatus, MatchParticipant, Player, Queue, RankSnapshot, Team, utcnow
-from app.db.session import as_utc, get_session
+from app.db.models import (
+    Challenge,
+    ChallengeStatus,
+    MatchParticipant,
+    Player,
+    Queue,
+    RankSnapshot,
+    Team,
+    game_end_of,
+    utcnow,
+)
+from app.db.session import as_utc, get_session, session_scope
 from app.events import bus
 from app.riot import ddragon, get_api
 from app.riot.base import RiotAPI
@@ -56,6 +67,14 @@ DEFAULT_SERIES_COLOR = "#9ca3af"
 REGISTRATION_OPEN_STATUSES = (ChallengeStatus.REGISTRATION, ChallengeStatus.DRAWN)
 REGISTRATION_CLOSED_DETAIL = "Les inscriptions sont closes."
 PLAYER_NOT_FOUND_DETAIL = "Joueur introuvable."
+# Flux SSE simultanés (un par onglet ouvert) ; au-delà → 503 le temps que ça se libère
+MAX_SSE_SUBSCRIBERS = 100
+# Garde-fou anti-spam sur l'inscription / la liaison : N requêtes par adresse et par fenêtre
+WRITE_RATE_LIMIT = 40
+WRITE_RATE_WINDOW_S = 600
+RELINK_LOCKED_DETAIL = "Le challenge a démarré : seul l'organisateur peut changer un compte déjà lié."
+# Identifiants : SQLite n'accepte pas d'entiers > 2^63 et un id démesuré n'existe jamais
+PlayerId = Annotated[int, Path(ge=1, le=2**31 - 1)]
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +108,23 @@ def _all_players(session: Session) -> list[Player]:
 
 def _all_teams(session: Session) -> list[Team]:
     return list(session.exec(select(Team).order_by(col(Team.slot), col(Team.id))).all())
+
+
+_write_hits: dict[str, list[float]] = defaultdict(list)
+
+
+def _check_write_rate(request: Request) -> None:
+    """Limite simple en mémoire des écritures publiques (inscription, liaison) par adresse IP."""
+    client_ip = request.client.host if request.client else "?"
+    now = time.monotonic()
+    hits = [t for t in _write_hits[client_ip] if now - t < WRITE_RATE_WINDOW_S]
+    if len(hits) >= WRITE_RATE_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Trop de tentatives, réessaie dans quelques minutes.",
+        )
+    hits.append(now)
+    _write_hits[client_ip] = hits
 
 
 def _player_or_404(session: Session, player_id: int) -> Player:
@@ -261,7 +297,7 @@ def get_leaderboard(
 
 @router.get("/api/players/{player_id}")
 def get_player(
-    player_id: int,
+    player_id: PlayerId,
     session: Session = Depends(get_session),
     challenge: Challenge = Depends(get_challenge),
 ) -> dict[str, Any]:
@@ -290,7 +326,7 @@ def get_player(
 
 @router.get("/api/players/{player_id}/lp-history")
 def get_player_lp_history(
-    player_id: int,
+    player_id: PlayerId,
     session: Session = Depends(get_session),
     challenge: Challenge = Depends(get_challenge),
 ) -> dict[str, Any]:
@@ -352,8 +388,7 @@ def get_feed(limit: int = FEED_DEFAULT_LIMIT, session: Session = Depends(get_ses
             continue
         team = teams.get(player.team_id) if player.team_id is not None else None
         row = match_row(participant, player)
-        game_start = as_utc(participant.game_start) or now
-        ended_at = game_start + timedelta(seconds=participant.game_duration or 0)
+        ended_at = game_end_of(participant)
         row.update(
             {
                 "display_name": player.display_name,
@@ -426,9 +461,14 @@ async def get_events(
     request: Request,
     since: int | None = None,
     max_events: int | None = Query(default=None, ge=1, description="Ferme le flux après N événements (tests, curl)."),
-    session: Session = Depends(get_session),
-    challenge: Challenge = Depends(get_challenge),
 ) -> StreamingResponse:
+    # Pas de `Depends(get_session)` ici : une dépendance `yield` vivrait aussi longtemps
+    # que le flux SSE et garderait une connexion du pool SQLite par onglet ouvert.
+    if bus.subscriber_count >= MAX_SSE_SUBSCRIBERS:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Trop de connexions temps réel ouvertes, réessaie dans un instant.",
+        )
     since_id = since
     if since_id is None:
         header = request.headers.get("last-event-id")
@@ -436,13 +476,15 @@ async def get_events(
             with contextlib.suppress(ValueError):
                 since_id = int(header)
     recent = bus.recent(limit=1)
-    hello = {
-        "live": _live_items(session),
-        "challenge_status": enum_value(challenge.status),
-        "challenge": challenge_to_dict(challenge),
-        "live_count": len(state.live_games),
-        "last_event_id": recent[-1]["id"] if recent else 0,
-    }
+    with session_scope() as session:
+        challenge = get_challenge(session)
+        hello = {
+            "live": _live_items(session),
+            "challenge_status": enum_value(challenge.status),
+            "challenge": challenge_to_dict(challenge),
+            "live_count": len(state.live_games),
+            "last_event_id": recent[-1]["id"] if recent else 0,
+        }
     headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     return StreamingResponse(
         _event_stream(since_id, hello, max_events), media_type="text/event-stream", headers=headers
@@ -462,10 +504,18 @@ async def create_player(
     challenge: Challenge = Depends(get_challenge),
 ) -> dict[str, Any]:
     _ensure_registration_open(challenge)
+    _check_write_rate(request)
     display_name = body.display_name.strip()
     riot_id = (body.riot_id or "").strip() or None
     if not display_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Le pseudo est obligatoire.")
+    max_players = get_settings().max_players
+    active_count = len(session.exec(select(Player.id).where(Player.active == True)).all())  # noqa: E712
+    if active_count >= max_players:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Toutes les places sont prises ({max_players} joueurs).",
+        )
     try:
         if riot_id is not None:
             parse_riot_id(riot_id)  # validation du format avant toute création
@@ -477,12 +527,20 @@ async def create_player(
 
 @router.post("/api/players/{player_id}/link")
 async def link_player_account(
-    player_id: int,
     body: LinkIn,
     request: Request,
+    player_id: PlayerId,
     session: Session = Depends(get_session),
+    challenge: Challenge = Depends(get_challenge),
+    x_admin_password: str | None = Header(default=None),
 ) -> dict[str, Any]:
     player = _player_or_404(session, player_id)
+    _check_write_rate(request)
+    # Un compte déjà lié ne change plus une fois le challenge démarré (sinon l'historique de rang
+    # serait remplacé) — sauf pour l'organisateur. Lier un compte encore absent reste possible.
+    if player.is_linked and challenge.status not in REGISTRATION_OPEN_STATUSES:
+        if not check_admin_password(x_admin_password):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=RELINK_LOCKED_DETAIL)
     riot_id = body.riot_id.strip()
     try:
         parse_riot_id(riot_id)

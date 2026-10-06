@@ -209,8 +209,12 @@ async def test_active_game_parses_participant_champion():
 
 
 @pytest.mark.anyio
-async def test_league_entries_404_returns_empty_and_parses_entries():
+async def test_league_entries_404_is_an_error_and_parses_entries():
+    # Un joueur non classé = `200 []` ; un 404 est une vraie erreur (puuid / plateforme)
     client, _ = make_client(lambda request: json_response(404))
+    with pytest.raises(RiotNotFound):
+        await client.get_league_entries_by_puuid("puuid-1")
+    client, _ = make_client(lambda request: json_response(200, []))
     assert await client.get_league_entries_by_puuid("puuid-1") == []
 
     entries_payload = [

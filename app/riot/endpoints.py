@@ -45,9 +45,10 @@ def match_ids_url(
     queue_id: int | None = None,
     start_time: int | None = None,
     count: int = 20,
+    start: int = 0,
 ) -> str:
     """Match-V5 (routing régional) : IDs des dernières parties, filtrés par file / date."""
-    params: dict[str, Any] = {"start": 0, "count": max(1, min(int(count), 100))}
+    params: dict[str, Any] = {"start": max(0, int(start)), "count": max(1, min(int(count), 100))}
     if queue_id is not None:
         params["queue"] = int(queue_id)
     if start_time is not None:

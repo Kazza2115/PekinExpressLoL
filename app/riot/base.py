@@ -89,8 +89,9 @@ class RiotAPI(Protocol):
         queue_id: int,
         start_time: int | None = None,
         count: int = 20,
+        start: int = 0,
     ) -> list[str]:
-        """Match-V5 : IDs des dernières parties (les plus récentes d'abord)."""
+        """Match-V5 : IDs des dernières parties (les plus récentes d'abord), à partir de l'index `start`."""
         ...
 
     async def get_match(self, match_id: str) -> dict[str, Any]:
