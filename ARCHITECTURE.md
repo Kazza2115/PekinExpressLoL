@@ -323,7 +323,7 @@ Chaque page reçoit `request`, `page` (nom), `challenge` (dict), `demo_mode`, `g
 - `tests/conftest.py` : moteur SQLite en mémoire (`set_engine`, `StaticPool`), `reset_api()`, client
   `TestClient(app)` avec le lifespan **désactivé** pour le poller (variable d'env `PEKIN_DISABLE_POLLER=1`
   lue dans `main.lifespan` → ne pas lancer la tâche) ; `DEMO_MODE=1`.
-- `tests/test_stats.py` : absolute_lp (Iron IV 0 → 0, Gold II 45 → 1245, Master 120 → 2920, unranked →
+- `tests/test_stats.py` : absolute_lp (Iron IV 0 → 0, Gold II 45 → 1445, Master 120 → 2920, unranked →
   None, inverse), compute_streak, winrate, kda, compute_player_stats (fenêtre, remakes, games_today),
   rank_teams (égalités).
 - `tests/test_draw.py` : paires uniformes, nombre impair → ValueError, perform_draw sur une DB en mémoire.
