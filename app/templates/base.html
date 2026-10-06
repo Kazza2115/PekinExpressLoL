@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0e14">
+  <meta name="color-scheme" content="dark">
+  <title>{% block title %}{{ challenge.name }}{% endblock %} · Pékin Express LoL</title>
+  <link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+  <link rel="stylesheet" href="/static/css/app.css">
+  {% block head %}{% endblock %}
+</head>
+<body data-page="{{ page }}"
+      data-demo="{{ 'true' if demo_mode else 'false' }}"
+      data-games-per-day="{{ games_per_day }}"
+      data-challenge-status="{{ challenge.status }}"
+      {% block body_attrs %}{% endblock %}>
+
+  <a class="skip-link" href="#main">Aller au contenu</a>
+
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="brand" href="/" aria-label="Accueil — {{ challenge.name }}">
+        <img src="/static/img/logo.svg" alt="" width="28" height="28">
+        <span class="brand-name">Pékin Express <span class="brand-accent">LoL</span></span>
+      </a>
+
+      <nav class="nav-links" aria-label="Navigation principale">
+        <a href="/" {% if page == 'home' %}class="active" aria-current="page"{% endif %}>Accueil</a>
+        <a href="/wheel" {% if page == 'wheel' %}class="active" aria-current="page"{% endif %}>La roue</a>
+        <a href="/dashboard" {% if page in ('dashboard', 'player') %}class="active" aria-current="page"{% endif %}>Classement</a>
+        <a href="/admin" {% if page == 'admin' %}class="active" aria-current="page"{% endif %}>Admin</a>
+      </nav>
+
+      <div class="nav-right">
+        {% if demo_mode %}<span class="pill pill-demo" title="Données simulées : aucun appel à l'API Riot">MODE DÉMO</span>{% endif %}
+        <a href="/dashboard#live" class="pill pill-live" id="nav-live" data-count="0" title="Joueurs actuellement en partie">
+          <span class="dot"></span><span class="pill-live-text">0 en game</span>
+        </a>
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-notifications" hidden>🔔 Activer les notifications</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <span>{{ challenge.name }} · un week-end, 4 duos, 10 games par jour.</span>
+    <span class="muted">Fait maison, sans Tailwind.</span>
+  </footer>
+
+  <div id="toasts" class="toasts" aria-live="polite" aria-relevant="additions"></div>
+  <div id="modal-root"></div>
+
+  <script src="/static/js/app.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

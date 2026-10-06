@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Accueil · {{ challenge.name }}{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <div>
+    <span class="section-label">Un week-end, 4 duos, {{ games_per_day }} games par jour</span>
+    <h1 id="hero-name">{{ challenge.name }}</h1>
+    <div class="hero-meta">
+      <span id="hero-status">{% if challenge.status == 'registration' %}<span class="chip chip-blue chip-lg">Inscriptions ouvertes</span>{% elif challenge.status == 'drawn' %}<span class="chip chip-gold chip-lg">Duos tirés</span>{% elif challenge.status == 'running' %}<span class="chip chip-green chip-lg">Challenge en cours</span>{% else %}<span class="chip chip-lg">Terminé</span>{% endif %}</span>
+      <span class="hero-count" id="hero-count"><strong>—</strong> / 8 joueurs</span>
+    </div>
+  </div>
+  <div class="hero-cta" id="hero-cta"></div>
+</section>
+
+<div id="home-root" class="home-layout">
+  <aside id="home-side" class="stack">
+    <div class="card" id="register-card">
+      <span class="section-label">Rejoindre le challenge</span>
+      <form id="register-form" class="stack" autocomplete="off" novalidate>
+        <div class="field">
+          <label for="reg-name">Ton pseudo pour le challenge</label>
+          <input id="reg-name" name="display_name" type="text" maxlength="24" placeholder="Mike" required>
+        </div>
+        <div class="field">
+          <label for="reg-riot">Ton Riot ID</label>
+          <input id="reg-riot" name="riot_id" type="text" placeholder="Pseudo#TAG" autocapitalize="off" spellcheck="false">
+          <div class="help">Dans le client LoL, clique sur ton nom en haut à droite : ton Riot ID est <code>Nom#TAG</code> (ex. <code>La Peace#CHILL</code>). Tu peux aussi le lier plus tard.</div>
+        </div>
+        <div class="form-error" id="register-error"></div>
+        <button type="submit" class="btn btn-primary" id="register-submit">Je m'inscris</button>
+      </form>
+    </div>
+    {% if demo_mode %}
+    <div class="card card-flat" id="demo-card">
+      <span class="section-label">Mode démo</span>
+      <p class="help">Aucune clé Riot : les comptes sont simulés et les parties sont jouées par le robot. Pratique pour tester le site.</p>
+      <button type="button" class="btn" id="btn-demo-fill">Remplir avec des joueurs démo</button>
+    </div>
+    {% endif %}
+  </aside>
+
+  <div id="home-main" class="stack">
+    <div id="duos-section" hidden>
+      <div class="section-head"><span class="section-label">Les duos</span><span class="muted" id="duos-hint"></span></div>
+      <div class="grid grid-2" id="duos-grid"></div>
+    </div>
+    <div id="players-section">
+      <div class="section-head"><span class="section-label">Les joueurs</span><span class="muted" id="players-hint">Chaque joueur lie son compte LoL pour être suivi.</span></div>
+      <div class="slots" id="slots">
+        {% for i in range(8) %}<div class="card slot slot-empty skeleton"><span class="slot-num">Place {{ i + 1 }}</span></div>{% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}<script src="/static/js/home.js"></script>{% endblock %}

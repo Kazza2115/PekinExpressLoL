@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ player.display_name }} · {{ challenge.name }}{% endblock %}
+{% block body_attrs %}data-player-id="{{ player.id }}"{% endblock %}
+
+{% block content %}
+<p class="mb-sm"><a href="/dashboard" class="muted">← Classement</a></p>
+
+<section class="card card-pad-lg profile" id="profile">
+  <div class="avatar avatar-xl" id="profile-avatar" style="--avatar-color:#6b7280"><span class="avatar-initials">{{ player.display_name[:2]|upper }}</span></div>
+  <div class="profile-main">
+    <div class="profile-name"><span id="profile-name">{{ player.display_name }}</span><span id="profile-badges"></span></div>
+    <div class="profile-sub">
+      <span id="profile-riot">{% if player.riot_id %}{{ player.riot_id }}{% else %}Compte non lié{% endif %}</span>
+      <span id="profile-rank" class="rank"></span>
+    </div>
+  </div>
+  <div class="profile-lp">
+    <div class="big lp-zero" id="profile-lp">—</div>
+    <div class="lbl">LP nets</div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-head"><span class="section-label">Statistiques</span><span class="muted" id="stats-hint">Fenêtre du challenge, remakes exclus</span></div>
+  <div class="tiles" id="tiles">
+    {% for i in range(10) %}<div class="card tile skeleton" style="min-height:76px"></div>{% endfor %}
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-head"><span class="section-label">Évolution des LP</span></div>
+  <div class="card chart-card">
+    <div class="chart-wrap"><canvas id="lp-chart" role="img" aria-label="Évolution des LP"></canvas></div>
+    <div id="chart-empty" class="empty" hidden></div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-head"><span class="section-label">Parties</span><span class="muted" id="matches-count"></span></div>
+  <div class="card"><div class="match-list" id="matches"><div class="muted">Chargement…</div></div></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/vendor/chart.umd.js"></script>
+<script src="/static/js/player.js"></script>
+{% endblock %}

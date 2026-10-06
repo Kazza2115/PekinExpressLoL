@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Page introuvable · {{ challenge.name }}{% endblock %}
+
+{% block content %}
+<div class="empty" style="max-width:520px;margin:48px auto;padding:48px 24px">
+  <div class="empty-icon" style="font-size:40px">🧭</div>
+  <h1 style="font-size:24px;margin-bottom:8px">Perdu en route</h1>
+  <p class="muted">{{ message or "Cette page n'existe pas." }}</p>
+  <div class="btn-row" style="justify-content:center;margin-top:18px">
+    <a class="btn btn-primary" href="/">Retour à l'accueil</a>
+    <a class="btn" href="/dashboard">Voir le classement</a>
+  </div>
+</div>
+{% endblock %}

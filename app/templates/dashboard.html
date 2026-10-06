@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Classement · {{ challenge.name }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="section-label">Classement</span>
+    <h1 class="page-title"><span id="dash-name">{{ challenge.name }}</span> <span id="dash-status"></span></h1>
+    <div class="page-sub flex wrap" style="gap:14px">
+      <span class="updated" id="dash-updated">Chargement…</span>
+      <span id="dash-day" class="muted"></span>
+    </div>
+  </div>
+  <div class="btn-row" id="dash-actions"></div>
+</div>
+
+<section class="section" style="margin-top:0" id="teams-section">
+  <div class="team-grid" id="teams-grid">
+    <div class="card skeleton" style="min-height:220px"></div>
+    <div class="card skeleton" style="min-height:220px"></div>
+    <div class="card skeleton" style="min-height:220px"></div>
+    <div class="card skeleton" style="min-height:220px"></div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-head">
+    <span class="section-label">Joueurs</span>
+    <span class="muted" id="players-sort-hint">Clique sur une colonne pour trier</span>
+  </div>
+  <div class="table-wrap">
+    <table class="table" id="players-table">
+      <thead>
+        <tr>
+          <th style="width:36px">#</th>
+          <th>Joueur</th>
+          <th>Rang</th>
+          <th class="num sortable is-active" data-sort="lp_net">LP nets</th>
+          <th class="num sortable" data-sort="games">Parties</th>
+          <th class="num">V – D</th>
+          <th class="num sortable" data-sort="winrate">Winrate</th>
+          <th class="num sortable" data-sort="kda">KDA</th>
+          <th class="num">Série</th>
+        </tr>
+      </thead>
+      <tbody id="players-body"><tr><td colspan="9" class="muted center">Chargement…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<div class="dash-grid section">
+  <div class="stack" style="gap:24px">
+    <section>
+      <div class="section-head"><span class="section-label">Évolution des LP</span><span class="muted" id="chart-hint"></span></div>
+      <div class="card chart-card">
+        <div class="chart-wrap"><canvas id="lp-chart" aria-label="Évolution des LP de chaque joueur" role="img"></canvas></div>
+        <div class="chart-legend" id="lp-legend"></div>
+        <div id="chart-empty" class="empty" hidden></div>
+      </div>
+    </section>
+    <section>
+      <div class="section-head"><span class="section-label">Dernières parties</span></div>
+      <div class="card"><div class="feed" id="feed"><div class="muted">Chargement…</div></div></div>
+    </section>
+  </div>
+  <aside class="stack" style="gap:24px">
+    <section id="live">
+      <div class="section-head"><span class="section-label">En game</span><span class="badge-live" id="live-badge" hidden><span class="dot"></span>Live</span></div>
+      <div class="card"><div class="live-list" id="live-list"><div class="muted">Chargement…</div></div></div>
+    </section>
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/vendor/chart.umd.js"></script>
+<script src="/static/js/dashboard.js"></script>
+{% endblock %}

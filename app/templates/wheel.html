@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}La roue · {{ challenge.name }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="section-label">Tirage au sort</span>
+    <h1 class="page-title">🎡 La roue des duos</h1>
+    <p class="page-sub" id="wheel-sub">Chaque tour de roue désigne un joueur ; deux joueurs à la suite forment un duo.</p>
+  </div>
+  <div id="wheel-head-status"></div>
+</div>
+
+<div id="wheel-blocked" class="empty" hidden></div>
+
+<div class="wheel-layout" id="wheel-layout">
+  <section class="wheel-stage" aria-label="Roue">
+    <div class="wheel-wrap">
+      <div class="wheel-pointer" aria-hidden="true"></div>
+      <canvas id="wheel" width="560" height="560" role="img" aria-label="Roue avec les pseudos des joueurs"></canvas>
+    </div>
+    <div class="wheel-status" id="wheel-status" aria-live="polite"></div>
+    <div class="btn-row" id="wheel-actions"></div>
+    <p class="help center" id="wheel-help"></p>
+  </section>
+
+  <aside class="wheel-side">
+    <div class="section-head"><span class="section-label">Les duos</span><span class="muted" id="duos-count"></span></div>
+    <div class="duos" id="wheel-duos"></div>
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts %}<script src="/static/js/wheel.js"></script>{% endblock %}
