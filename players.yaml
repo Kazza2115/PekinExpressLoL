@@ -1,0 +1,11 @@
+# Chargé au démarrage uniquement si la table des joueurs est vide.
+# Les joueurs peuvent aussi s'inscrire eux-mêmes depuis la page d'accueil.
+challenge:
+  name: "Pékin Express LoL"
+  games_per_day: 10
+
+players: []
+#  - riot_id: "La Peace#CHILL"
+#    display_name: "Mike"
+#  - riot_id: "Pseudo#TAG"
+#    display_name: "Joueur 2"

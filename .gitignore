@@ -1,0 +1,19 @@
+# Environnement
+.venv/
+.env
+
+# Données locales (SQLite)
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Divers
+.DS_Store
+screenshots/

@@ -1,0 +1,78 @@
+"""Point d'entrée FastAPI : `uvicorn app.main:app --reload`.
+
+- monte les routes JSON (`app.api.routes_api`, `routes_admin`) et HTML (`routes_pages`)
+- démarre le poller en tâche de fond au démarrage (lifespan)
+- charge `players.yaml` si la table des joueurs est vide
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+
+from app.config import PROJECT_ROOT, get_settings
+from app.db.session import init_db
+from app.events import bus
+from app.riot import get_api
+from app.services.bootstrap import ensure_challenge, load_players_yaml
+from app.services.poller import Poller
+from app.state import state
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger("pekin")
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = get_settings()
+    init_db()
+    ensure_challenge()
+    await load_players_yaml(PROJECT_ROOT / "players.yaml")
+    api = get_api()
+    poller = Poller(api=api, bus=bus, state=state)
+    app.state.poller = poller
+    app.state.riot_api = api
+    # PEKIN_DISABLE_POLLER=1 (tests) : pas de tâche de fond
+    task: asyncio.Task | None = None
+    if os.getenv("PEKIN_DISABLE_POLLER", "") not in {"1", "true"}:
+        task = asyncio.create_task(poller.run_forever(), name="poller")
+    log.info(
+        "Pékin Express LoL démarré (%s, polling toutes les %ss)",
+        "MODE DÉMO" if settings.demo_mode else f"API Riot {settings.riot_platform}",
+        settings.poll_interval_seconds,
+    )
+    try:
+        yield
+    finally:
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+        await api.aclose()
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(title="Pékin Express LoL", version="0.1.0", lifespan=lifespan)
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    from app.api.routes_admin import router as admin_router
+    from app.api.routes_api import router as api_router
+    from app.api.routes_pages import router as pages_router
+
+    app.include_router(api_router)
+    app.include_router(admin_router)
+    app.include_router(pages_router)
+    return app
+
+
+app = create_app()
