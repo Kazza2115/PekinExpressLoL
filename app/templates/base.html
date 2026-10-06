@@ -33,7 +33,7 @@
       </nav>
 
       <div class="nav-right">
-        {% if demo_mode %}<span class="pill pill-demo" title="Données simulées : aucun appel à l'API Riot">MODE DÉMO</span>{% endif %}
+        {% if demo_mode %}<span class="pill pill-demo" title="Données simulées : aucun appel à l'API Riot"><span class="pill-demo-prefix">MODE </span>DÉMO</span>{% endif %}
         <a href="/dashboard#live" class="pill pill-live" id="nav-live" data-count="0" title="Joueurs actuellement en partie">
           <span class="dot"></span><span class="pill-live-text">0 en game</span>
         </a>
@@ -47,8 +47,7 @@
   </main>
 
   <footer class="footer">
-    <span>{{ challenge.name }} · un week-end, 4 duos, 10 games par jour.</span>
-    <span class="muted">Fait maison, sans Tailwind.</span>
+    <span>{{ challenge.name }} · un week-end, 4 duos, {{ games_per_day }} games par jour.</span>
   </footer>
 
   <div id="toasts" class="toasts" aria-live="polite" aria-relevant="additions"></div>

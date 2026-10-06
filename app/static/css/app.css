@@ -102,6 +102,7 @@ code { font-family: var(--mono); font-size: 0.92em; background: var(--surface-2)
   margin: 0 auto;
   padding: var(--space-lg) var(--gutter) 64px;
   flex: 1;
+  min-width: 0;
 }
 
 .muted { color: var(--muted); }
@@ -158,14 +159,23 @@ code { font-family: var(--mono); font-size: 0.92em; background: var(--surface-2)
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text-strong); font-weight: 600; white-space: nowrap; }
 .brand:hover { text-decoration: none; }
 .brand-accent { color: var(--accent); }
-.nav-links { display: flex; gap: 4px; margin-left: 8px; }
+/* Les liens ne se coupent jamais sur deux lignes : la barre défile horizontalement si la place manque
+   (défilement interne, la page elle-même ne s'élargit pas). */
+.nav-links {
+  display: flex; gap: 4px; margin-left: 8px;
+  flex: 0 1 auto; min-width: 0;
+  overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none; overscroll-behavior-x: contain;
+}
+.nav-links::-webkit-scrollbar { display: none; }
 .nav-links a {
   color: var(--muted); padding: 7px 12px; border-radius: 9px; font-weight: 500; font-size: 14px;
   transition: color 0.15s, background 0.15s;
+  white-space: nowrap; flex: 0 0 auto;
 }
 .nav-links a:hover { color: var(--text); background: var(--surface-2); text-decoration: none; }
 .nav-links a.active { color: var(--text-strong); background: var(--surface-2); }
-.nav-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.nav-right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 
 .pill {
   display: inline-flex; align-items: center; gap: 7px;
@@ -182,13 +192,24 @@ code { font-family: var(--mono); font-size: 0.92em; background: var(--surface-2)
 .pill-live.is-live .dot { background: var(--red); animation: pulse 1.6s ease-in-out infinite; }
 
 @media (max-width: 720px) {
-  .brand-name { display: none; }
-  .nav-inner { gap: 10px; }
-  .nav-links { margin-left: 0; gap: 0; }
+  /* Deux rangées : marque + pastilles, puis les liens sur toute la largeur (jamais coupés, défilement
+     interne en dernier recours sur les très petits écrans). */
+  .nav-inner { flex-wrap: wrap; gap: 8px; row-gap: 2px; min-height: 0; padding-top: 8px; padding-bottom: 6px; }
+  .brand-name { font-size: 15px; }
+  .nav-links { order: 3; flex: 1 0 100%; margin: 0 -4px; gap: 2px; }
   .nav-links a { padding: 7px 9px; font-size: 13px; }
-  #btn-notifications { font-size: 0; padding: 6px 9px; }
+  #btn-notifications { font-size: 0; padding: 6px 8px; }
   #btn-notifications::before { content: "🔔"; font-size: 14px; }
   .pill-live:not(.is-live) { display: none; }
+  /* Sur mobile, seul le nombre de joueurs en game est affiché (le libellé complet reste dans le title). */
+  .pill-live.is-live { padding: 4px 8px; }
+  .pill-live.is-live .pill-live-text { display: none; }
+  .pill-live.is-live::after { content: attr(data-count); font-size: 12px; }
+  .pill-demo { padding: 4px 8px; }
+  .pill-demo-prefix { display: none; }
+}
+@media (max-width: 380px) {
+  .brand-name { display: none; }
 }
 
 /* --------------------------------------------------------------------------
@@ -363,8 +384,11 @@ input[type="datetime-local"] { color-scheme: dark; }
 /* --------------------------------------------------------------------------
    Tables
    -------------------------------------------------------------------------- */
-.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); }
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface); max-width: 100%; min-width: 0; }
 .table { width: 100%; border-collapse: collapse; font-size: 14px; }
+/* Tableau du classement : largeur mini pour que les colonnes restent lisibles (défilement interne sur mobile). */
+#players-table { min-width: 760px; }
+#players-admin-table { min-width: 640px; }
 .table th, .table td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; vertical-align: middle; }
 .table th { font-size: 11.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); background: var(--surface-2); }
 .table tbody tr:last-child td { border-bottom: 0; }
@@ -490,8 +514,10 @@ input[type="datetime-local"] { color-scheme: dark; }
    -------------------------------------------------------------------------- */
 .wheel-layout { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr); gap: 32px; align-items: start; }
 @media (max-width: 900px) { .wheel-layout { grid-template-columns: minmax(0, 1fr); } }
-.wheel-stage { display: flex; flex-direction: column; align-items: center; gap: 18px; }
-.wheel-wrap { position: relative; width: min(100%, 560px); aspect-ratio: 1 / 1; }
+.wheel-stage { display: flex; flex-direction: column; align-items: center; gap: 18px; min-width: 0; width: 100%; }
+.wheel-wrap { position: relative; width: min(100%, 560px); max-width: 100%; aspect-ratio: 1 / 1; }
+.wheel-side, .wheel-side .duos { min-width: 0; }
+.wheel-status { max-width: 100%; overflow-wrap: anywhere; }
 .wheel-wrap canvas { width: 100%; height: 100%; display: block; border-radius: 50%; box-shadow: 0 0 0 6px var(--surface), 0 0 0 7px var(--border-strong), var(--shadow); }
 .wheel-pointer {
   position: absolute; top: -8px; left: 50%; transform: translateX(-50%);
@@ -545,8 +571,9 @@ input[type="datetime-local"] { color-scheme: dark; }
 .dash-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); gap: 24px; align-items: start; }
 @media (max-width: 980px) { .dash-grid { grid-template-columns: minmax(0, 1fr); } }
 
-.chart-card { padding: 20px 20px 12px; }
-.chart-wrap { position: relative; height: 320px; }
+.chart-card { padding: 20px 20px 12px; min-width: 0; }
+.chart-wrap { position: relative; height: 320px; min-width: 0; max-width: 100%; }
+.chart-wrap canvas { max-width: 100%; }
 @media (max-width: 720px) { .chart-wrap { height: 260px; } }
 .chart-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; }
 .chart-legend button {
@@ -618,11 +645,17 @@ input[type="datetime-local"] { color-scheme: dark; }
    Admin
    -------------------------------------------------------------------------- */
 .admin-gate { max-width: 420px; margin: 48px auto; }
-.admin-sections { display: grid; gap: 24px; }
+/* `minmax(0, 1fr)` : une colonne `auto` prendrait la largeur max-content des formulaires et déborderait sur mobile. */
+.admin-sections { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; }
+.admin-sections > * { min-width: 0; }
 .admin-section .section-label { margin-bottom: 14px; }
 .team-admin { display: grid; grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; align-items: end; padding: 12px 0; border-top: 1px solid var(--border); }
 .team-admin:first-of-type { border-top: 0; }
-@media (max-width: 900px) { .team-admin { grid-template-columns: 44px minmax(0, 1fr); } .team-admin .btn { grid-column: 1 / -1; } }
+@media (max-width: 900px) {
+  /* Couleur + nom sur la première ligne, puis chaque fenêtre et le bouton sur toute la largeur. */
+  .team-admin { grid-template-columns: 44px minmax(0, 1fr); }
+  .team-admin .field:nth-of-type(3), .team-admin .field:nth-of-type(4), .team-admin .btn { grid-column: 1 / -1; }
+}
 .sys-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 @media (max-width: 720px) { .sys-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .errors-list { font-family: var(--mono); font-size: 12px; color: var(--red); background: var(--bg); border-radius: 10px; padding: 10px 12px; max-height: 160px; overflow: auto; }
