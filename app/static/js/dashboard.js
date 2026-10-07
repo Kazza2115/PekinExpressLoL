@@ -88,11 +88,11 @@
       els.day.textContent = `Objectif ${gamesPerDay} games par jour et par joueur`;
     }
     if (c.status === 'registration') {
-      els.actions.innerHTML = '<a class="btn" href="/">Inscriptions</a><a class="btn btn-primary" href="/wheel">🎡 Tirer les duos</a>';
+      els.actions.innerHTML = '<a class="btn" href="/">Inscriptions</a><a class="btn btn-primary" href="/duos">🤝 Voir les duos</a>';
     } else if (c.status === 'drawn') {
-      els.actions.innerHTML = '<a class="btn btn-primary" href="/wheel">🚀 Démarrer le challenge</a>';
+      els.actions.innerHTML = '<a class="btn" href="/duos">🤝 Voir les duos</a><a class="btn btn-primary" href="/admin" title="Réservé à l’organisateur">🚀 Démarrer le challenge</a>';
     } else {
-      els.actions.innerHTML = '';
+      els.actions.innerHTML = '<a class="btn" href="/duos">🤝 Voir les duos</a>';
     }
   }
 
@@ -110,7 +110,8 @@
     const start = liveInfo.game_start ? Date.parse(liveInfo.game_start) : NaN;
     const elapsed = liveInfo.elapsed_s !== undefined && liveInfo.elapsed_s !== null ? liveInfo.elapsed_s : 0;
     const startMs = !isNaN(start) && start > 0 ? start : Date.now() - elapsed * 1000;
-    return `<span class="badge-live"><span class="dot"></span>En game${liveInfo.champion_name ? ` <span class="detail">· ${esc(liveInfo.champion_name)}</span>` : ''} <span class="detail tnum" data-elapsed-start="${startMs}">${App.formatDuration(elapsed)}</span></span>`;
+    const icon = liveInfo.champion_icon_url ? App.champIcon({ name: liveInfo.champion_name, src: liveInfo.champion_icon_url, size: 'xs', title: liveInfo.champion_name }) : '';
+    return `<span class="badge-live">${icon}<span class="dot"></span>En game${liveInfo.champion_name ? ` <span class="detail">· ${esc(liveInfo.champion_name)}</span>` : ''} <span class="detail tnum" data-elapsed-start="${startMs}">${App.formatDuration(elapsed)}</span></span>`;
   }
 
   function playerRowHtml(p, color) {
@@ -121,8 +122,8 @@
     return `<div class="team-player">
       <div class="tp-row">
         ${avatar({ name: p.display_name, src: p.icon_url, color, size: 'sm' })}
-        <div class="grow truncate"><a class="tp-name" href="/player/${p.player_id}">${esc(p.display_name)}</a>
-          <div class="tp-rank rank" style="--rank-color:${esc(rankColor)}">${esc(p.rank_label || App.formatRank(p.tier, p.rank, p.lp))}</div></div>
+        <div class="grow truncate"><div class="tp-line"><a class="tp-name" href="/player/${p.player_id}">${esc(p.display_name)}</a>${p.top_champion ? App.champIcon({ name: p.top_champion, src: p.top_champion_icon_url, size: 'xs', className: 'tp-champ', title: `Champion favori : ${p.top_champion} · ${p.top_champion_games || 0} ${p.top_champion_games > 1 ? 'parties' : 'partie'}` }) : ''}</div>
+          <div class="tp-rank rank" style="--rank-color:${esc(rankColor)}">${App.rankEmblem(p.rank_emblem_url, 'sm', App.tierName(p.tier))}${esc(p.rank_label || App.formatRank(p.tier, p.rank, p.lp))}</div></div>
         ${App.lpHtml(p.lp_net, 'tp-lp')}
       </div>
       <div class="tp-today"><span>aujourd'hui ${today}/${limit}</span><div class="progress ${today >= limit ? 'done' : ''}"><span style="width:${pct}%"></span></div></div>
@@ -134,19 +135,29 @@
     const teams = (leaderboard.teams || []).slice().sort((a, b) => (a.position || 99) - (b.position || 99));
     if (!teams.length) {
       const status = leaderboard.challenge && leaderboard.challenge.status;
-      els.teamsGrid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🎡</div><div class="empty-title">Aucun duo pour l'instant</div>${status === 'registration' ? 'Lance la roue pour former les duos.' : 'Les duos apparaîtront ici.'}<br><a class="btn btn-primary" href="/wheel">Lancer la roue</a></div>`;
+      els.teamsGrid.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🤝</div><div class="empty-title">Aucun duo pour l'instant</div>${status === 'running' || status === 'finished' ? 'Les duos apparaîtront ici.' : 'L\'organisateur compose les duos dans <a href="/admin#duos">Admin → Duos</a>.'}<br><a class="btn btn-primary" href="/duos">Voir les duos</a></div>`;
       return;
     }
     els.teamsGrid.innerHTML = teams.map((t) => {
       const wr = App.formatPct(t.winrate);
-      return `<article class="card team-card pos-${t.position}" style="--team-color:${esc(t.color)}">
-        <div class="team-head"><span class="pos-badge pos-${t.position}">${t.position}</span><span class="team-name truncate">${esc(t.name)}</span>${t.live_count ? `<span class="badge-live" title="${t.live_count} en partie"><span class="dot"></span>${t.live_count}</span>` : ''}</div>
+      return `<article class="card team-card is-link pos-${t.position}" style="--team-color:${esc(t.color)}" data-href="/duos#duo-${t.team_id}" tabindex="0" role="link" aria-label="${esc(t.name)} : voir les stats du duo">
+        <div class="team-head"><span class="pos-badge pos-${t.position}">${t.position}</span><span class="team-name truncate">${esc(t.name)}</span>${t.live_count ? `<span class="badge-live" title="${t.live_count} en partie"><span class="dot"></span>${t.live_count}</span>` : ''}<span class="team-more" aria-hidden="true" title="Voir le détail du duo">→</span></div>
         <div class="team-lp ${App.lpClass(t.lp_net)}">${esc(App.formatLp(t.lp_net).replace(' LP', ''))}<small>LP</small></div>
         <div class="team-record"><span><strong>${t.wins}</strong> V – <strong>${t.losses}</strong> D</span><span>${wr === '—' ? 'Pas de partie' : `<strong>${wr}</strong> winrate`}</span><span><strong>${t.games}</strong> ${t.games > 1 ? 'parties' : 'partie'}</span></div>
         <div class="team-players">${(t.players || []).map((p) => playerRowHtml(p, t.color)).join('')}</div>
       </article>`;
     }).join('');
   }
+
+  /* Clic (ou Entrée) sur une carte de duo → page Duos, sauf sur un lien interne (fiche joueur). */
+  function cardNavigate(e) {
+    const card = e.target.closest('.team-card[data-href]');
+    if (!card || e.target.closest('a')) return;
+    if (e.type === 'keydown' && e.key !== 'Enter') return;
+    window.location.href = card.dataset.href;
+  }
+  els.teamsGrid.addEventListener('click', cardNavigate);
+  els.teamsGrid.addEventListener('keydown', cardNavigate);
 
   /* ------------------------------------------------------------------ */
   /* Tableau joueurs                                                      */
@@ -180,8 +191,8 @@
       const streak = p.streak && p.streak !== '—' ? `<span class="chip ${p.streak.startsWith('W') ? 'chip-green' : 'chip-red'}">${esc(p.streak)}${p.hot_streak ? ' 🔥' : ''}</span>` : '<span class="muted">—</span>';
       return `<tr class="${p.active === false ? 'is-stale' : ''}">
         <td class="muted tnum">${i + 1}</td>
-        <td><div class="cell-player">${avatar({ name: p.display_name, src: p.icon_url, color, size: 'sm' })}<a href="/player/${p.player_id}">${esc(p.display_name)}</a>${team ? `<span class="chip chip-team" style="--team-color:${esc(team.color)}" title="${esc(team.name)}"><span class="swatch"></span>${esc(team.name.replace(/^Duo\s+/i, ''))}</span>` : ''}${p.live ? '<span class="badge-live"><span class="dot"></span>Live</span>' : ''}</div></td>
-        <td><span class="rank" style="--rank-color:${esc(p.rank_color || App.rankColor(p.tier))}">${esc(p.rank_label || App.formatRank(p.tier, p.rank, p.lp))}</span></td>
+        <td><div class="cell-player">${avatar({ name: p.display_name, src: p.icon_url, color, size: 'sm' })}<a href="/player/${p.player_id}">${esc(p.display_name)}</a>${p.top_champion ? App.champIcon({ name: p.top_champion, src: p.top_champion_icon_url, size: 'sm', title: `Champion favori : ${p.top_champion} · ${p.top_champion_games || 0} ${p.top_champion_games > 1 ? 'parties' : 'partie'}` }) : ''}${team ? `<span class="chip chip-team" style="--team-color:${esc(team.color)}" title="${esc(team.name)}"><span class="swatch"></span>${esc(team.name.replace(/^Duo\s+/i, ''))}</span>` : ''}${p.live ? '<span class="badge-live"><span class="dot"></span>Live</span>' : ''}</div></td>
+        <td><span class="cell-rank">${App.rankEmblem(p.rank_crest_url, 'sm', App.tierName(p.tier))}<span class="rank" style="--rank-color:${esc(p.rank_color || App.rankColor(p.tier))}">${esc(p.rank_label || App.formatRank(p.tier, p.rank, p.lp))}</span></span></td>
         <td class="num">${App.lpHtml(p.lp_net)}</td>
         <td class="num">${p.games || 0}<span class="muted"> · ${p.games_today || 0}/${p.games_limit || gamesPerDay} auj.</span></td>
         <td class="num"><span class="lp-pos">${p.wins || 0}</span> – <span class="lp-neg">${p.losses || 0}</span></td>
@@ -328,10 +339,6 @@
   /* ------------------------------------------------------------------ */
   /* Feed                                                                 */
   /* ------------------------------------------------------------------ */
-  function champIcon(name, url) {
-    return avatar({ name: name || '?', src: url, color: '#5f6778', square: true, title: name });
-  }
-
   function renderFeed() {
     const items = (feed && feed.items) || [];
     if (!items.length) {
@@ -341,11 +348,13 @@
     els.feed.innerHTML = items.map((m) => {
       const ago = m.ago_s !== undefined && m.ago_s !== null ? App.timeAgoSeconds(m.ago_s) : App.timeAgo(m.game_start);
       const kda = `${m.kills}/${m.deaths}/${m.assists}`;
+      const hasItems = Array.isArray(m.item_urls) && m.item_urls.some(Boolean);
       return `<div class="feed-item ${m.is_remake ? 'is-remake' : ''}">
-        ${champIcon(m.champion_name, m.champion_icon_url)}
+        ${App.champIcon({ name: m.champion_name || '?', src: m.champion_icon_url, size: 'md', level: m.champ_level, title: m.champion_name })}
         <div class="feed-main">
           <div class="feed-line"><a class="feed-name" href="/player/${m.player_id}">${esc(m.display_name)}</a>${m.team_color ? `<span class="swatch" style="--team-color:${esc(m.team_color)}"></span>` : ''}<span class="wl-pill ${m.is_remake ? 'remake' : m.win ? 'win' : 'loss'}">${m.is_remake ? 'R' : m.win ? 'V' : 'D'}</span></div>
-          <div class="feed-sub"><span>${esc(m.champion_name || '')}</span><span class="tnum">${kda}</span><span>${App.formatDuration(m.game_duration)}</span>${m.queue && m.queue !== 'SOLO' ? `<span>${esc(App.queueLabel(m.queue))}</span>` : ''}</div>
+          <div class="feed-sub"><span>${esc(m.champion_name || '')}</span>${m.position ? App.posIcon(m.position_icon_url, m.position) : ''}<span class="tnum">${kda}</span><span>${App.formatDuration(m.game_duration)}</span>${m.queue && m.queue !== 'SOLO' ? `<span>${esc(App.queueLabel(m.queue))}</span>` : ''}</div>
+          ${hasItems ? `<div class="feed-items">${App.itemRow(m.item_urls, { size: 'sm' })}</div>` : ''}
         </div>
         <div class="feed-lp">${m.is_remake ? '<span class="chip">Remake</span>' : App.lpHtml(m.lp_change)}<span class="ago">${esc(ago)}</span></div>
       </div>`;
@@ -366,7 +375,7 @@
       const start = l.game_start ? Date.parse(l.game_start) : NaN;
       const startMs = !isNaN(start) && start > 0 ? start : Date.now() - (l.elapsed_s || 0) * 1000;
       return `<div class="live-item">
-        ${champIcon(l.champion_name, l.champion_icon_url)}
+        ${App.loadingArt({ name: l.champion_name || '?', src: l.champion_loading_url, iconSrc: l.champion_icon_url, title: l.champion_name })}
         <div class="live-main truncate">
           <div class="live-name"><a href="/player/${l.player_id}" style="color:inherit">${esc(l.display_name)}</a>${l.team_name ? ` <span class="chip chip-team" style="--team-color:${esc(l.team_color || '#e5b64d')}"><span class="swatch"></span>${esc(l.team_name)}</span>` : ''}</div>
           <div class="live-sub">${esc(l.champion_name || 'Champion inconnu')} · ${esc(App.queueLabel(l.queue_id, l.game_mode))}</div>

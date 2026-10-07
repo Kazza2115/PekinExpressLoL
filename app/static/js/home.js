@@ -47,25 +47,23 @@
 
     const status = c.status || 'registration';
     const linked = linkedPlayers(players);
-    const canDraw = linked.length >= 2 && linked.length % 2 === 0;
+    const teams = state.teams || [];
     let html = '';
     if (status === 'registration') {
-      html += `<a class="btn btn-primary btn-lg" href="/wheel" id="cta-draw" ${canDraw ? '' : 'aria-disabled="true" tabindex="-1"'}>🎡 Tirer les duos</a>`;
-      if (!canDraw) {
-        html += `<span class="help">${linked.length < 2
-          ? 'Il faut au moins 2 joueurs avec un compte lié.'
-          : 'Il faut un nombre pair de joueurs, tous liés.'}</span>`;
+      html += '<a class="btn btn-primary btn-lg" href="/duos" id="cta-duos">🤝 Voir les duos</a>';
+      if (teams.length) {
+        html += `<span class="help">${teams.length} ${teams.length > 1 ? 'duos formés' : 'duo formé'} · ${linked.length} ${linked.length > 1 ? 'joueurs liés' : 'joueur lié'}. L'organisateur compose les duos dans l'Admin.</span>`;
       } else {
-        html += `<span class="help">${linked.length} joueurs prêts · ${linked.length / 2} duos</span>`;
+        html += `<span class="help">L'organisateur compose les duos dans <a href="/admin#duos">l'Admin</a>.${linked.length < players.filter((p) => p.active !== false).length ? ' Pense à lier ton compte avant.' : ''}</span>`;
       }
     } else if (status === 'drawn') {
-      html += `<div class="btn-row"><a class="btn btn-ghost" href="/wheel">🎡 Relancer la roue</a><a class="btn" href="/dashboard">Voir le classement</a><button type="button" class="btn btn-primary btn-lg" id="cta-start">🚀 Démarrer le challenge</button></div>`;
-      html += `<span class="help">Réservé à l'organisateur : lance le suivi des parties.</span>`;
+      html += '<div class="btn-row"><a class="btn" href="/duos">🤝 Voir les duos</a><a class="btn" href="/dashboard">Voir le classement</a><button type="button" class="btn btn-primary btn-lg" id="cta-start">🚀 Démarrer le challenge</button></div>';
+      html += '<span class="help">Réservé à l\'organisateur : lance le suivi des parties.</span>';
     } else if (status === 'running') {
-      html += `<a class="btn btn-primary btn-lg" href="/dashboard">Voir le classement</a>`;
+      html += '<div class="btn-row"><a class="btn" href="/duos">🤝 Les duos</a><a class="btn btn-primary btn-lg" href="/dashboard">Voir le classement</a></div>';
       if (c.start_at) html += `<span class="help">Démarré ${esc(App.formatDateTime(c.start_at))}</span>`;
     } else {
-      html += `<a class="btn btn-primary btn-lg" href="/dashboard">Voir le classement final</a>`;
+      html += '<div class="btn-row"><a class="btn" href="/duos">🤝 Les duos</a><a class="btn btn-primary btn-lg" href="/dashboard">Voir le classement final</a></div>';
     }
     els.cta.innerHTML = html;
 
@@ -95,7 +93,7 @@
           <div class="grow">
             <div class="slot-name truncate"><a href="/player/${p.id}" style="color:inherit">${esc(p.display_name)}</a></div>
             <div class="slot-riot truncate">${p.riot_id ? esc(p.riot_id) : '<span class="muted">Compte non renseigné</span>'}</div>
-            <div class="rank" style="--rank-color:${esc(p.rank_color || App.rankColor(p.tier))};font-size:13px">${esc(p.rank_label || App.formatRank(p.tier, p.rank, p.lp))}</div>
+            <div class="rank" style="--rank-color:${esc(p.rank_color || App.rankColor(p.tier))};font-size:13px">${App.rankEmblem(p.rank_emblem_url, 'sm', App.tierName(p.tier))}${esc(p.rank_label || App.formatRank(p.tier, p.rank, p.lp))}</div>
           </div>
         </div>
         ${p.link_error && !p.is_linked ? `<div class="link-error">⚠ ${esc(p.link_error)}</div>` : ''}
@@ -117,24 +115,29 @@
   function renderDuos() {
     const teams = (state.teams || []).slice().sort((a, b) => (a.slot || 0) - (b.slot || 0));
     const status = (state.challenge && state.challenge.status) || 'registration';
-    if (status === 'registration' || !teams.length) {
+    if (!teams.length) {
       els.duosSection.hidden = true;
       return;
     }
     els.duosSection.hidden = false;
-    els.duosHint.textContent = status === 'drawn' ? 'Tirés au sort, en attente du départ' : status === 'running' ? 'Le challenge est en cours' : 'Classement final disponible';
+    els.duosHint.innerHTML = {
+      registration: 'Composés par l\'organisateur · <a href="/duos">toutes les stats →</a>',
+      drawn: 'En attente du départ · <a href="/duos">toutes les stats →</a>',
+      running: 'Le challenge est en cours · <a href="/duos">toutes les stats →</a>',
+    }[status] || 'Classement final disponible · <a href="/duos">toutes les stats →</a>';
     els.duosGrid.innerHTML = teams.map((t) => {
       const players = (t.player_ids || []).map(playerById).filter(Boolean);
-      return `<div class="card duo-card" style="--team-color:${esc(t.color)}">
+      return `<a class="card duo-card" href="/duos#duo-${t.id}" style="--team-color:${esc(t.color)}" aria-label="${esc(t.name)} : voir les stats du duo">
         <div class="duo-name"><span class="swatch"></span>${esc(t.name)}</div>
         <div class="duo-players">
-          ${players.map((p) => `<div class="duo-player">
+          ${players.length ? players.map((p) => `<div class="duo-player">
             ${avatar({ name: p.display_name, src: p.icon_url, color: t.color })}
-            <div class="grow truncate"><div class="name"><a href="/player/${p.id}" style="color:inherit">${esc(p.display_name)}</a></div>
-            <div class="sub rank" style="--rank-color:${esc(p.rank_color || App.rankColor(p.tier))}">${esc(p.rank_label || App.formatRank(p.tier, p.rank, p.lp))}</div></div>
-          </div>`).join('')}
+            <div class="grow truncate"><div class="name">${esc(p.display_name)}</div>
+            <div class="sub rank" style="--rank-color:${esc(p.rank_color || App.rankColor(p.tier))}">${App.rankEmblem(p.rank_emblem_url, 'sm', App.tierName(p.tier))}${esc(p.rank_label || App.formatRank(p.tier, p.rank, p.lp))}</div></div>
+          </div>`).join('') : '<div class="duo-player muted">Aucun joueur pour l\'instant</div>'}
         </div>
-      </div>`;
+        <div class="duo-arrow">Voir les stats du duo →</div>
+      </a>`;
     }).join('');
   }
 

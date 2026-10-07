@@ -19,6 +19,12 @@
     btnFinish: $('#btn-finish'),
     btnReset: $('#btn-reset'),
     teams: $('#teams-admin'),
+    teamsNotice: $('#teams-admin-notice'),
+    teamsHelp: $('#teams-admin-help'),
+    teamsActions: $('#teams-admin-actions'),
+    teamsUnassigned: $('#teams-unassigned'),
+    btnTeamAdd: $('#btn-team-add'),
+    btnTeamAuto: $('#btn-team-auto'),
     players: $('#players-admin'),
     playersCount: $('#players-admin-count'),
     sysStats: $('#sys-stats'),
@@ -116,7 +122,7 @@
     f.end_at.value = toLocalInput(c.end_at);
     f.track_flex.checked = !!c.track_flex;
     els.btnStart.disabled = !(c.status === 'drawn' || c.status === 'registration');
-    els.btnStart.title = c.status === 'registration' ? 'Tire d\'abord les duos (la roue)' : '';
+    els.btnStart.title = c.status === 'registration' ? 'Tous les joueurs actifs et liés doivent être dans un duo complet' : '';
     els.btnFinish.disabled = c.status !== 'running';
   }
 
@@ -195,48 +201,174 @@
   });
 
   /* ------------------------------------------------------------------ */
-  /* Duos                                                                 */
+  /* Duos : éditeur manuel (nom, couleur, deux joueurs, fenêtre)          */
   /* ------------------------------------------------------------------ */
   function playerName(id) {
     const p = (state.players || []).find((x) => x.id === id);
     return p ? p.display_name : `#${id}`;
   }
 
+  /* Le challenge figé (en cours / terminé) : les duos ne se modifient plus. */
+  function teamsReadOnly() {
+    const status = (state.challenge && state.challenge.status) || 'registration';
+    return status === 'running' || status === 'finished';
+  }
+
+  function playerOptions(team, selectedId) {
+    const teamById = {};
+    (state.teams || []).forEach((t) => { teamById[t.id] = t; });
+    const players = (state.players || []).filter((p) => p.active !== false).slice().sort((a, b) => a.display_name.localeCompare(b.display_name, 'fr'));
+    let html = `<option value="" ${selectedId ? '' : 'selected'}>— Personne —</option>`;
+    players.forEach((p) => {
+      const elsewhere = p.team_id && p.team_id !== team.id ? teamById[p.team_id] : null;
+      const label = `${p.display_name}${elsewhere ? ` (${elsewhere.name})` : ''}${p.is_linked ? '' : ' · compte à lier'}`;
+      html += `<option value="${p.id}" ${p.id === selectedId ? 'selected' : ''} class="${elsewhere ? 'is-elsewhere' : ''}">${esc(label)}</option>`;
+    });
+    return html;
+  }
+
   function renderTeams() {
     const teams = (state.teams || []).slice().sort((a, b) => (a.slot || 0) - (b.slot || 0));
+    const readOnly = teamsReadOnly();
+    const status = (state.challenge && state.challenge.status) || 'registration';
+
+    els.teamsNotice.hidden = !readOnly;
+    els.teamsNotice.textContent = status === 'running'
+      ? '🔒 Le challenge est en cours : les duos sont figés. Termine ou réinitialise le challenge pour les modifier.'
+      : '🔒 Le challenge est terminé : les duos sont figés.';
+    els.teamsHelp.hidden = readOnly;
+    els.teamsActions.hidden = readOnly;
+
     if (!teams.length) {
-      els.teams.innerHTML = '<div class="empty"><div class="empty-icon">🎡</div><div class="empty-title">Aucun duo</div>Lance la roue pour tirer les duos.<br><a class="btn btn-primary" href="/wheel">La roue</a></div>';
-      return;
+      els.teams.innerHTML = readOnly
+        ? '<div class="empty"><div class="empty-title">Aucun duo</div></div>'
+        : '<div class="empty"><div class="empty-icon">🤝</div><div class="empty-title">Aucun duo pour l\'instant</div>Ajoute un duo et choisis ses deux joueurs, ou forme-les au hasard.</div>';
+    } else {
+      els.teams.innerHTML = teams.map((t, i) => {
+        const ids = t.player_ids || [];
+        const hasWindow = !!(t.window_start || t.window_end);
+        const dis = readOnly ? 'disabled' : '';
+        return `<form class="team-admin ${readOnly ? 'is-readonly' : ''}" data-team="${t.id}" style="--team-color:${esc(t.color || '#e5b64d')}" autocomplete="off">
+          <div class="ta-main">
+            <div class="field ta-color"><label for="ta-color-${t.id}" class="sr-only">Couleur du duo</label><input id="ta-color-${t.id}" type="color" name="color" value="${esc(t.color || '#e5b64d')}" title="Couleur du duo" ${dis}></div>
+            <div class="field"><label for="ta-name-${t.id}">Nom du duo ${i + 1}</label><input id="ta-name-${t.id}" type="text" name="name" value="${esc(t.name)}" maxlength="40" placeholder="Duo ${i + 1}" ${dis}></div>
+            <div class="field"><label for="ta-p1-${t.id}">Joueur 1</label><select id="ta-p1-${t.id}" name="p1" ${dis}>${playerOptions(t, ids[0])}</select></div>
+            <div class="field"><label for="ta-p2-${t.id}">Joueur 2</label><select id="ta-p2-${t.id}" name="p2" ${dis}>${playerOptions(t, ids[1])}</select></div>
+          </div>
+          <details class="ta-window" ${hasWindow ? 'open' : ''}>
+            <summary>Fenêtre de dates personnalisée <span class="muted">(optionnel · sinon celle du challenge)</span></summary>
+            <div class="form-row">
+              <div class="field"><label for="ta-ws-${t.id}">Début</label><input id="ta-ws-${t.id}" type="datetime-local" name="window_start" value="${toLocalInput(t.window_start)}" ${dis}></div>
+              <div class="field"><label for="ta-we-${t.id}">Fin</label><input id="ta-we-${t.id}" type="datetime-local" name="window_end" value="${toLocalInput(t.window_end)}" ${dis}></div>
+            </div>
+          </details>
+          ${readOnly ? '' : `<div class="ta-actions">
+            <button type="submit" class="btn btn-sm btn-primary">Enregistrer</button>
+            <button type="button" class="btn btn-sm btn-danger" data-delete-team="${t.id}">Supprimer</button>
+            <span class="ta-meta">${ids.length ? ids.map((id) => esc(playerName(id))).join(' & ') : 'Aucun joueur'}${ids.length < 2 ? ' · duo incomplet' : ''}</span>
+          </div>`}
+        </form>`;
+      }).join('');
     }
-    els.teams.innerHTML = teams.map((t) => `<form class="team-admin" data-team="${t.id}">
-      <div class="field"><label>&nbsp;</label><input type="color" name="color" value="${esc(t.color || '#e5b64d')}" aria-label="Couleur de ${esc(t.name)}"></div>
-      <div class="field"><label>Nom <span class="muted">· ${(t.player_ids || []).map((id) => esc(playerName(id))).join(' & ')}</span></label><input type="text" name="name" value="${esc(t.name)}" maxlength="40"></div>
-      <div class="field"><label>Fenêtre début <span class="muted">(optionnel)</span></label><input type="datetime-local" name="window_start" value="${toLocalInput(t.window_start)}"></div>
-      <div class="field"><label>Fenêtre fin <span class="muted">(optionnel)</span></label><input type="datetime-local" name="window_end" value="${toLocalInput(t.window_end)}"></div>
-      <button type="submit" class="btn btn-sm">Enregistrer</button>
-    </form>`).join('');
-    $$('form.team-admin', els.teams).forEach((form) => form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const id = form.dataset.team;
-      const btn = form.querySelector('button');
-      const body = {
-        name: form.name.value.trim() || undefined,
-        color: form.color.value,
-        window_start: fromLocalInput(form.window_start.value),
-        window_end: fromLocalInput(form.window_end.value),
-      };
-      App.setLoading(btn, true);
-      try {
-        const r = await admin(() => api(`/api/admin/teams/${id}`, { method: 'PATCH', admin: true, body }));
-        if (r !== undefined) toast('Duo enregistré.', { type: 'success' });
-        await load();
-      } catch (err) {
-        toast(err.message, { type: 'error' });
-      } finally {
-        App.setLoading(btn, false);
-      }
-    }));
+
+    renderUnassigned();
+    if (readOnly) return;
+
+    $$('form.team-admin', els.teams).forEach((form) => {
+      form.color.addEventListener('input', () => { form.style.setProperty('--team-color', form.color.value); });
+      form.addEventListener('submit', (e) => { e.preventDefault(); saveTeam(form); });
+    });
+    $$('[data-delete-team]', els.teams).forEach((btn) => btn.addEventListener('click', () => deleteTeam(parseInt(btn.dataset.deleteTeam, 10), btn)));
   }
+
+  function renderUnassigned() {
+    const assigned = new Set();
+    (state.teams || []).forEach((t) => (t.player_ids || []).forEach((id) => assigned.add(id)));
+    const list = (state.players || []).filter((p) => p.active !== false && !assigned.has(p.id) && !p.team_id);
+    els.teamsUnassigned.hidden = !list.length;
+    if (!list.length) return;
+    els.teamsUnassigned.innerHTML = `<span class="lbl">Sans duo (${list.length}) :</span>` + list.map((p) =>
+      `<span class="chip ${p.is_linked ? '' : 'chip-gold'}" title="${p.is_linked ? 'Compte lié' : 'Compte à lier'}">${esc(p.display_name)}${p.is_linked ? '' : ' · à lier'}</span>`).join('');
+  }
+
+  async function saveTeam(form) {
+    const id = form.dataset.team;
+    const btn = form.querySelector('button[type="submit"]');
+    const p1 = parseInt(form.p1.value, 10) || null;
+    const p2 = parseInt(form.p2.value, 10) || null;
+    if (p1 && p2 && p1 === p2) { toast('Choisis deux joueurs différents.', { type: 'error' }); form.p2.focus(); return; }
+    const body = {
+      name: form.name.value.trim() || undefined,
+      color: form.color.value,
+      window_start: fromLocalInput(form.window_start.value),
+      window_end: fromLocalInput(form.window_end.value),
+      player_ids: [p1, p2].filter(Boolean),
+    };
+    App.setLoading(btn, true);
+    try {
+      const r = await admin(() => api(`/api/admin/teams/${id}`, { method: 'PATCH', admin: true, body }));
+      if (r !== undefined) toast('Duo enregistré.', { type: 'success' });
+      await load();
+    } catch (err) {
+      toast(err.message, { type: 'error' });
+    } finally {
+      App.setLoading(btn, false);
+    }
+  }
+
+  async function deleteTeam(id, btn) {
+    const t = (state.teams || []).find((x) => x.id === id);
+    const res = await App.confirm({ title: `Supprimer ${t ? t.name : 'ce duo'} ?`, message: 'Ses joueurs se retrouvent sans duo. Les parties déjà enregistrées sont conservées.', confirmText: 'Supprimer', danger: true });
+    if (!res.ok) return;
+    App.setLoading(btn, true);
+    try {
+      const r = await admin(() => api(`/api/admin/teams/${id}`, { method: 'DELETE', admin: true }));
+      if (r !== undefined) toast('Duo supprimé.', { type: 'success' });
+      await load();
+    } catch (err) {
+      toast(err.message, { type: 'error' });
+      App.setLoading(btn, false);
+    }
+  }
+
+  els.btnTeamAdd.addEventListener('click', async () => {
+    App.setLoading(els.btnTeamAdd, true);
+    try {
+      const r = await admin(() => api('/api/admin/teams', { method: 'POST', admin: true, body: {} }));
+      if (r !== undefined) {
+        toast('Duo ajouté : choisis ses deux joueurs puis enregistre.', { type: 'success' });
+        await load();
+        const created = r && r.team && r.team.id;
+        const input = created ? $(`form.team-admin[data-team="${created}"] input[name="name"]`) : null;
+        if (input) { input.focus(); input.select(); input.closest('form').scrollIntoView({ block: 'nearest' }); }
+      }
+    } catch (err) {
+      toast(err.message, { type: 'error' });
+    } finally {
+      App.setLoading(els.btnTeamAdd, false);
+    }
+  });
+
+  els.btnTeamAuto.addEventListener('click', async () => {
+    const hasTeams = (state.teams || []).length > 0;
+    const res = await App.confirm({
+      title: 'Former les duos au hasard ?',
+      message: `${hasTeams ? 'Les duos actuels seront remplacés. ' : ''}Les joueurs actifs et liés sont mélangés puis regroupés deux par deux.`,
+      confirmText: '🎲 Former les duos',
+      danger: hasTeams,
+    });
+    if (!res.ok) return;
+    App.setLoading(els.btnTeamAuto, true);
+    try {
+      const r = await admin(() => api('/api/admin/teams/auto', { method: 'POST', admin: true, body: {} }));
+      if (r !== undefined) toast(`${(r && r.teams && r.teams.length) || 'Les'} duos formés au hasard.`, { type: 'success' });
+      await load();
+    } catch (err) {
+      toast(err.message, { type: 'error' });
+    } finally {
+      App.setLoading(els.btnTeamAuto, false);
+    }
+  });
 
   /* ------------------------------------------------------------------ */
   /* Joueurs                                                              */
@@ -257,7 +389,7 @@
         <td>${p.riot_id ? esc(p.riot_id) : '<span class="muted">—</span>'}</td>
         <td>${p.is_linked ? '<span class="chip chip-green">✓ lié</span>' : `<span class="chip chip-gold" title="${esc(p.link_error || '')}">À lier${p.link_error ? ' ⚠' : ''}</span>`}</td>
         <td>${team ? `<span class="chip chip-team" style="--team-color:${esc(team.color)}"><span class="swatch"></span>${esc(team.name)}</span>` : '<span class="muted">—</span>'}</td>
-        <td><label class="switch" title="${p.active === false ? 'Réactiver' : 'Désactiver (exclu du suivi et de la roue)'}"><input type="checkbox" data-toggle-active="${p.id}" ${p.active === false ? '' : 'checked'}><span class="track"></span></label></td>
+        <td><label class="switch" title="${p.active === false ? 'Réactiver' : 'Désactiver (exclu du suivi et des duos)'}"><input type="checkbox" data-toggle-active="${p.id}" ${p.active === false ? '' : 'checked'}><span class="track"></span></label></td>
         <td class="right"><button type="button" class="btn btn-sm btn-danger" data-delete="${p.id}">Supprimer</button></td>
       </tr>`;
     }).join('');
@@ -371,6 +503,8 @@
   App.connectEvents({
     poll_done: App.debounce(() => { if (!els.panel.hidden) load(); }, 1000),
     draw_done: () => { if (!els.panel.hidden) load(); },
+    teams_changed: () => { if (!els.panel.hidden) load(); },
+    team_updated: () => { if (!els.panel.hidden) load(); },
     challenge_started: () => { if (!els.panel.hidden) load(); },
     challenge_finished: () => { if (!els.panel.hidden) load(); },
     challenge_reset: () => { if (!els.panel.hidden) load(); },

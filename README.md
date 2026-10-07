@@ -12,7 +12,7 @@ tout en temps réel grâce à l'API Riot. Le duo qui gagne le plus de LP l'empor
 |---|---|
 | ![Classement](docs/screenshots/classement.png) | ![Fiche joueur](docs/screenshots/joueur.png) |
 
-*(captures prises en mode démo : comptes et parties simulés)*
+*(captures prises en mode démo : comptes, parties et images simulés — chez toi, les vraies icônes, splashs et emblèmes de Riot s'affichent)*
 
 ---
 

@@ -6,7 +6,7 @@
   <div>
     <span class="section-label">Organisateur</span>
     <h1 class="page-title">Administration <span id="admin-status"></span></h1>
-    <p class="page-sub">Démarrer, terminer, ajuster les duos et les joueurs, surveiller le suivi.</p>
+    <p class="page-sub">Démarrer, terminer, composer les duos, gérer les joueurs, surveiller le suivi.</p>
   </div>
   <div class="btn-row" id="admin-head-actions" hidden>
     <button type="button" class="btn btn-ghost btn-sm" id="btn-logout">Se déconnecter</button>
@@ -56,9 +56,17 @@
     </form>
   </section>
 
-  <section class="card admin-section">
-    <div class="section-head"><span class="section-label">Duos</span><a href="/wheel" class="muted">Relancer la roue →</a></div>
-    <div id="teams-admin"><div class="muted">Chargement…</div></div>
+  <section class="card admin-section" id="duos">
+    <div class="section-head"><span class="section-label">Duos</span><a href="/duos" class="muted" id="teams-admin-link">Voir la page Duos →</a></div>
+    <p class="help" id="teams-admin-help">Compose les duos à la main : un nom, une couleur et deux joueurs. Un joueur déjà dans un autre duo est déplacé si tu le choisis ici.</p>
+    <div class="notice mb-sm" id="teams-admin-notice" hidden></div>
+    <div class="teams-editor" id="teams-admin"><div class="muted">Chargement…</div></div>
+    <div class="btn-row mt-sm" id="teams-admin-actions">
+      <button type="button" class="btn" id="btn-team-add">➕ Ajouter un duo</button>
+      <span class="grow"></span>
+      <button type="button" class="btn btn-ghost btn-sm" id="btn-team-auto" title="Mélange les joueurs actifs et liés, puis crée les duos">🎲 Former les duos au hasard</button>
+    </div>
+    <div class="unassigned-admin mt-sm" id="teams-unassigned" hidden></div>
   </section>
 
   <section class="card admin-section">

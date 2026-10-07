@@ -11,7 +11,7 @@
     <div class="profile-name"><span id="profile-name">{{ player.display_name }}</span><span id="profile-badges"></span></div>
     <div class="profile-sub">
       <span id="profile-riot">{% if player.riot_id %}{{ player.riot_id }}{% else %}Compte non lié{% endif %}</span>
-      <span id="profile-rank" class="rank"></span>
+      <span class="profile-rank-wrap"><span id="profile-emblem"></span><span id="profile-rank" class="rank"></span></span>
     </div>
   </div>
   <div class="profile-lp">
@@ -24,6 +24,13 @@
   <div class="section-head"><span class="section-label">Statistiques</span><span class="muted" id="stats-hint">Fenêtre du challenge, remakes exclus</span></div>
   <div class="tiles" id="tiles">
     {% for i in range(10) %}<div class="card tile skeleton" style="min-height:76px"></div>{% endfor %}
+  </div>
+</section>
+
+<section class="section" id="champions-section">
+  <div class="section-head"><span class="section-label">Champions joués</span><span class="muted" id="champions-count"></span></div>
+  <div class="champ-grid" id="champions">
+    {% for i in range(4) %}<div class="card champ-card skeleton" style="min-height:170px"></div>{% endfor %}
   </div>
 </section>
 

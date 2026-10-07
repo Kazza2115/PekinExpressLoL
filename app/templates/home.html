@@ -7,7 +7,7 @@
     <span class="section-label">Un week-end, 4 duos, {{ games_per_day }} games par jour</span>
     <h1 id="hero-name">{{ challenge.name }}</h1>
     <div class="hero-meta">
-      <span id="hero-status">{% if challenge.status == 'registration' %}<span class="chip chip-blue chip-lg">Inscriptions ouvertes</span>{% elif challenge.status == 'drawn' %}<span class="chip chip-gold chip-lg">Duos tirés</span>{% elif challenge.status == 'running' %}<span class="chip chip-green chip-lg">Challenge en cours</span>{% else %}<span class="chip chip-lg">Terminé</span>{% endif %}</span>
+      <span id="hero-status">{% if challenge.status == 'registration' %}<span class="chip chip-blue chip-lg">Inscriptions ouvertes</span>{% elif challenge.status == 'drawn' %}<span class="chip chip-gold chip-lg">Duos formés</span>{% elif challenge.status == 'running' %}<span class="chip chip-green chip-lg">Challenge en cours</span>{% else %}<span class="chip chip-lg">Terminé</span>{% endif %}</span>
       <span class="hero-count" id="hero-count"><strong>—</strong> / 8 joueurs</span>
     </div>
   </div>

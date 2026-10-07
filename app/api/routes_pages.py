@@ -106,9 +106,10 @@ def home(request: Request, session: Session = Depends(get_session)) -> Response:
     return _render(request, "home.html", _context(request, "home", session))
 
 
-@router.get("/wheel", response_class=HTMLResponse, include_in_schema=False)
-def wheel(request: Request, session: Session = Depends(get_session)) -> Response:
-    return _render(request, "wheel.html", _context(request, "wheel", session))
+@router.get("/duos", response_class=HTMLResponse, include_in_schema=False)
+def duos(request: Request, session: Session = Depends(get_session)) -> Response:
+    """Page vedette : toutes les stats par duo (composés à la main dans l'admin)."""
+    return _render(request, "duos.html", _context(request, "duos", session))
 
 
 @router.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)

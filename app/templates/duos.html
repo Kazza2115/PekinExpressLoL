@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Duos · {{ challenge.name }}{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="section-label">Les duos</span>
+    <h1 class="page-title"><span id="duos-name">{{ challenge.name }}</span> <span id="duos-status"></span></h1>
+    <div class="page-sub flex wrap" style="gap:14px">
+      <span class="updated" id="duos-updated">Chargement…</span>
+      <span class="muted" id="duos-count"></span>
+    </div>
+  </div>
+  <div class="btn-row" id="duos-actions"></div>
+</div>
+
+<section class="section" style="margin-top:0">
+  <div class="duos-list" id="duos-list">
+    <div class="card skeleton" style="min-height:420px"></div>
+    <div class="card skeleton" style="min-height:420px"></div>
+    <div class="card skeleton" style="min-height:420px"></div>
+    <div class="card skeleton" style="min-height:420px"></div>
+  </div>
+</section>
+
+<section class="section" id="unassigned-section" hidden>
+  <div class="section-head"><span class="section-label">Sans duo</span><span class="muted" id="unassigned-hint"></span></div>
+  <div class="card card-flat unassigned" id="unassigned-list"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}<script src="/static/js/duos.js"></script>{% endblock %}

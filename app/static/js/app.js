@@ -122,7 +122,7 @@
   App.statusLabel = function (status) {
     switch (status) {
       case 'registration': return 'Inscriptions ouvertes';
-      case 'drawn': return 'Duos tirés';
+      case 'drawn': return 'Duos formés';
       case 'running': return 'Challenge en cours';
       case 'finished': return 'Terminé';
       default: return status || '—';
@@ -198,6 +198,82 @@
       ? `<img src="${esc(opts.src)}" alt="" loading="lazy" onerror="this.parentNode.classList.add('is-broken')">`
       : '';
     return `<span class="${cls}" style="--avatar-color:${esc(color)}" title="${esc(opts.title || opts.name || '')}"><span class="avatar-initials" aria-hidden="true">${esc(App.initials(opts.name))}</span>${img}</span>`;
+  };
+
+  /* ------------------------------------------------------------------ */
+  /* Images du jeu (Data Dragon / Community Dragon) — repli obligatoire   */
+  /* ------------------------------------------------------------------ */
+  const IMG_FALLBACK = "this.parentNode.classList.add('is-broken')";
+
+  App.positionLabel = function (pos, short) {
+    const full = { TOP: 'Top', JUNGLE: 'Jungle', MIDDLE: 'Mid', BOTTOM: 'ADC', UTILITY: 'Support' };
+    const abbr = { TOP: 'Top', JUNGLE: 'Jgl', MIDDLE: 'Mid', BOTTOM: 'Bot', UTILITY: 'Sup' };
+    const key = String(pos || '').toUpperCase();
+    return (short ? abbr : full)[key] || (pos ? String(pos) : '');
+  };
+
+  /* Winrate → classe de couleur (≥ 55 % vert, ≤ 45 % rouge). */
+  App.wrClass = function (wr) {
+    if (wr === null || wr === undefined || isNaN(wr)) return 'muted';
+    return wr >= 55 ? 'wr-good' : wr <= 45 ? 'wr-bad' : 'wr-mid';
+  };
+
+  /* Icône de champion carrée : initiales en repli, badge de niveau optionnel, `fav` = mise en avant. */
+  App.champIcon = function (opts) {
+    opts = opts || {};
+    const name = opts.name || '?';
+    const cls = ['champ-icon', opts.size ? `champ-icon-${opts.size}` : '', opts.fav ? 'is-fav' : '', opts.className || '', opts.src ? '' : 'is-broken'].filter(Boolean).join(' ');
+    const img = opts.src ? `<img src="${esc(opts.src)}" alt="" ${opts.eager ? '' : 'loading="lazy"'} onerror="${IMG_FALLBACK}">` : '';
+    const level = opts.level ? `<span class="champ-level">${esc(opts.level)}</span>` : '';
+    return `<span class="${cls}" title="${esc(opts.title || name)}"><span class="champ-initials" aria-hidden="true">${esc(App.initials(name))}</span>${img}${level}</span>`;
+  };
+
+  /* Emblème (PNG) ou mini-écusson (SVG) de rang : rien sans URL, disparaît si le chargement échoue. */
+  App.rankEmblem = function (src, size, title) {
+    if (!src) return '';
+    return `<img class="rank-emblem${size ? ` rank-emblem-${size}` : ''}" src="${esc(src)}" alt="" title="${esc(title || '')}" loading="lazy" onerror="this.remove()">`;
+  };
+
+  /* Rangée des 7 objets (6 + bibelot) ; emplacement vide ou image cassée = case sombre. */
+  App.itemRow = function (urls, opts) {
+    opts = opts || {};
+    const list = (Array.isArray(urls) ? urls : []).slice(0, 7);
+    while (list.length < 7) list.push(null);
+    const slots = list.map((u, i) => `<span class="item-slot${i === 6 ? ' is-trinket' : ''}${u ? '' : ' is-empty'}">${u ? `<img src="${esc(u)}" alt="" loading="lazy" onerror="this.parentNode.classList.add('is-empty')">` : ''}</span>`).join('');
+    return `<span class="item-row${opts.size ? ` item-row-${opts.size}` : ''}" title="${esc(opts.title || 'Objets')}">${slots}</span>`;
+  };
+
+  /* Les deux sorts d'invocateur (empilés). */
+  App.spellIcons = function (urls) {
+    const list = (Array.isArray(urls) ? urls : []).slice(0, 2);
+    while (list.length < 2) list.push(null);
+    return `<span class="spell-icons" title="Sorts d'invocateur">${list.map((u) => `<span class="spell-icon${u ? '' : ' is-broken'}">${u ? `<img src="${esc(u)}" alt="" loading="lazy" onerror="${IMG_FALLBACK}">` : ''}</span>`).join('')}</span>`;
+  };
+
+  /* Icône de poste ; texte (Top/Jgl/Mid/Bot/Sup) en repli. */
+  App.posIcon = function (src, position) {
+    const label = App.positionLabel(position, true);
+    if (!label) return '';
+    const full = App.positionLabel(position);
+    if (!src) return `<span class="pos-icon is-broken" data-label="${esc(label)}" title="${esc(full)}"></span>`;
+    return `<span class="pos-icon" data-label="${esc(label)}" title="${esc(full)}"><img src="${esc(src)}" alt="" loading="lazy" onerror="${IMG_FALLBACK}"></span>`;
+  };
+
+  /* Image de fond (splash) : à placer dans un conteneur `.splash-bg` ; disparaît si elle échoue. */
+  App.splashImg = function (src, eager) {
+    if (!src) return '';
+    return `<img class="splash-bg-img" src="${esc(src)}" alt="" ${eager ? '' : 'loading="lazy"'} onerror="this.remove()">`;
+  };
+
+  /* Vignette portrait (loading art) avec double repli : icône carrée puis initiales. */
+  App.loadingArt = function (opts) {
+    opts = opts || {};
+    const name = opts.name || '?';
+    const src = opts.src || opts.iconSrc;
+    const alt = opts.src && opts.iconSrc ? ` data-alt="${esc(opts.iconSrc)}"` : '';
+    const onerr = "if(this.dataset.alt){this.src=this.dataset.alt;this.dataset.alt='';}else{this.parentNode.classList.add('is-broken')}";
+    const img = src ? `<img src="${esc(src)}" alt="" loading="lazy"${alt} onerror="${onerr}">` : '';
+    return `<span class="loading-art${src ? '' : ' is-broken'}${opts.className ? ` ${opts.className}` : ''}" title="${esc(opts.title || name)}"><span class="champ-initials" aria-hidden="true">${esc(App.initials(name))}</span>${img}</span>`;
   };
 
   /* ------------------------------------------------------------------ */
@@ -561,7 +637,7 @@
     };
   }
 
-  /* Une page peut couper temporairement les toasts globaux d'un type (ex. la roue pendant l'animation). */
+  /* Une page peut couper temporairement les toasts globaux d'un type. */
   App.mutedEvents = new Set();
   const muted = (type) => App.mutedEvents.has(type);
 
@@ -600,8 +676,8 @@
   });
   App.onEvent('draw_done', () => {
     if (muted('draw_done')) return;
-    App.toast('🎡 Les duos ont été tirés !', { type: 'info' });
-    App.notify('🎡 Les duos ont été tirés !', 'Découvre ton partenaire sur le site.');
+    App.toast('🤝 Les duos sont formés !', { type: 'info' });
+    App.notify('🤝 Les duos sont formés !', 'Découvre ton partenaire sur la page Duos.');
   });
   App.onEvent('challenge_started', () => {
     App.toast('🚀 Le challenge a commencé, bonne chance !', { type: 'success' });

@@ -285,7 +285,7 @@ is_remake, opgg_url}` (`opgg_url` = `https://www.op.gg/summoners/euw/{game_name}
 
 ### `app/api/routes_pages.py` — HTML (Jinja2, `app/templates/`)
 
-Routes : `/` (home), `/wheel` (roue), `/dashboard` (classement), `/player/{id}` (fiche), `/admin`.
+Routes : `/` (home), `/duos` (duos + stats), `/dashboard` (classement), `/player/{id}` (fiche), `/admin`. (La roue `/wheel` a été retirée : les duos sont composés dans l'Admin.)
 Chaque page reçoit `request`, `page` (nom), `challenge` (dict), `demo_mode`, `games_per_day`,
 `player` (fiche uniquement). Les données vivantes sont chargées en JS via l'API.
 `templates = Jinja2Templates(directory=...)` ; 404 HTML simple pour un joueur inconnu.
