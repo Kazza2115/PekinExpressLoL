@@ -330,12 +330,11 @@ ngrok (`ngrok http 8000`) fonctionne pareil.
 
 Quand une nouvelle version est publiée sur GitHub :
 
-- **Windows** : double-clique sur **`MiseAJour.bat`**. Il récupère la dernière version avec
-  Git (à installer une fois : `winget install Git.Git` dans PowerShell, ou
-  https://git-scm.com/download/win), relie le dossier au dépôt la première fois, installe les
+- **Windows** : double-clique sur **`MiseAJour.bat`**. Il télécharge la dernière version
+  publiée sur GitHub (un ZIP, rien à installer), la copie par-dessus le dossier, installe les
   nouvelles dépendances, et c'est tout : le site déjà lancé **redémarre tout seul** dès que ses
   fichiers changent, et les pages ouvertes dans les navigateurs se rechargent d'elles-mêmes.
-  Tes fichiers `.env` et `data\` ne sont jamais touchés.
+  Tes fichiers `.env`, `data\` et `cloudflared.exe` ne sont jamais touchés.
 - **macOS / Linux / VPS** : `git pull` puis `pip install -r requirements.txt` ; relance le
   serveur (ou lance-le avec `--reload --reload-dir app` pour qu'il redémarre seul).
 
@@ -370,7 +369,7 @@ PekinExpressLoL/
 ├── app/
 │   ├── main.py            # application FastAPI, démarrage du poller
 │   ├── config.py          # lecture de .env (Settings)
-│   ├── events.py          # bus d'événements (SSE)
+│   ├── events.py          # bus d'événements (nouveautés interrogées toutes les 5 s)
 │   ├── state.py           # état mémoire : parties en cours, dernier cycle
 │   ├── api/               # routes JSON (/api), admin (/api/admin), pages HTML
 │   ├── db/                # modèles SQLModel et session SQLite
@@ -387,7 +386,7 @@ PekinExpressLoL/
 ```
 
 Points d'entrée utiles : `/health` (état du serveur en JSON), `/api/state`,
-`/api/leaderboard`, `/api/feed`, `/api/live`, `/api/events` (flux SSE).
+`/api/leaderboard`, `/api/feed`, `/api/live`, `/api/events/recent` (nouveautés depuis le dernier appel).
 
 ## Tests
 
