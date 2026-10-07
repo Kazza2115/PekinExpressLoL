@@ -187,7 +187,10 @@
     App.setLoading(els.btnStart, true);
     try {
       const r = await admin(() => api('/api/admin/challenge/start', { method: 'POST', admin: true, body: {} }));
-      if (r !== undefined) toast('Challenge démarré !', { type: 'success' });
+      if (r !== undefined) {
+        toast('Challenge démarré !', { type: 'success' });
+        (r.warnings || []).forEach((w) => toast(`⚠️ ${w}`, { type: 'warning', timeout: 9000 }));
+      }
     } catch (err) {
       toast(err.message, { type: 'error' });
     } finally {
@@ -469,17 +472,25 @@
 
   function renderPublicUrl() {
     if (!els.sysUrl) return;
-    const url = (state && state.base_url) || '';
-    const isLocal = /localhost|127\.0\.0\.1/.test(url);
+    const pub = (state && state.public_url) || null;
+    const url = (pub && pub.url) || (state && state.base_url) || '';
+    const source = pub ? pub.source : 'local';
+    let help;
+    if (source === 'tunnel') {
+      help = `Adresse du tunnel Cloudflare détectée automatiquement${pub.detected_at ? ` (${esc(App.timeAgo(pub.detected_at))})` : ''} : c'est celle à partager aux joueurs. Elle change à chaque relance du tunnel. Les messages Discord l'utilisent.`;
+    } else if (source === 'env') {
+      help = 'Adresse définie par BASE_URL dans .env : c\'est celle à partager aux joueurs (utilisée dans les messages Discord).';
+    } else {
+      help = 'Adresse locale : seul ce PC y accède. Lance Tunnel.bat (ou laisse PekinExpress.bat le faire) pour obtenir une adresse https://….trycloudflare.com à partager ; elle s\'affichera ici automatiquement.';
+    }
     els.sysUrl.innerHTML = `
-      <span class="section-label">Adresse du site (BASE_URL)</span>
+      <span class="section-label">Adresse du site</span>
       <div class="sys-url-row">
         <code class="sys-url-value">${esc(url || '—')}</code>
         <button type="button" class="btn btn-sm" id="btn-copy-url">Copier</button>
+        ${source === 'tunnel' ? '<span class="chip chip-success">tunnel actif</span>' : ''}
       </div>
-      <div class="muted small">${isLocal
-        ? 'Adresse locale : seul ce PC y accède. Pour les amis, mets l\'adresse du tunnel (https://….trycloudflare.com) dans BASE_URL du fichier .env, puis « Recharger .env ». Elle sert aux liens des messages Discord ; le site lui-même reste joignable par l\'adresse du tunnel.'
-        : 'C\'est l\'adresse à partager aux joueurs (utilisée dans les messages Discord).'}</div>`;
+      <div class="muted small">${help}</div>`;
     const btn = $('#btn-copy-url');
     if (btn) btn.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(url); toast('Adresse copiée.', { type: 'success' }); }

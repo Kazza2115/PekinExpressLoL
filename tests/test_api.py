@@ -249,7 +249,8 @@ def test_manual_teams_then_start(client: TestClient, admin_headers: dict) -> Non
     # Démarrage refusé tant que les duos ne sont pas complets
     assert _start(client, admin_headers, expected=400)["detail"] == "Le duo Duo Rouge est vide."
     _patch_team(client, admin_headers, t1["id"], {"player_ids": [p1["id"]]})
-    assert _start(client, admin_headers, expected=400)["detail"] == "Le duo Duo Rouge n'a qu'un joueur."
+    # Un duo d'un seul joueur est toléré, mais p2 (lié, actif) reste sans duo → refus
+    assert _start(client, admin_headers, expected=400)["detail"].startswith("Joueurs sans duo : ")
     updated = _patch_team(client, admin_headers, t1["id"], {"player_ids": [p1["id"], p2["id"]]})["team"]
     assert sorted(updated["player_ids"]) == sorted([p1["id"], p2["id"]])
 
@@ -756,3 +757,12 @@ def test_html_pages_render(client: TestClient) -> None:
         assert 'data-asset="' in response.text, path
     assert client.get("/player/999999").status_code == 404
     assert client.get("/nulle-part").status_code == 404
+
+
+def test_solo_duo_can_start_with_warning(client: TestClient, admin_headers: dict) -> None:
+    """Pour tester seul : un duo d'un seul joueur lié démarre, avec un avertissement."""
+    p1 = _register(client, *MIKE)["player"]
+    team = _admin_post(client, admin_headers, "/api/admin/teams", {"player_ids": [p1["id"]]}, expected=201)["team"]
+    started = _admin_post(client, admin_headers, "/api/admin/challenge/start")
+    assert started["challenge"]["status"] == "running"
+    assert started["warnings"] == [f"Le duo {team['name']} n'a qu'un joueur (Mike)."]

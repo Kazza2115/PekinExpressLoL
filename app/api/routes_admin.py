@@ -213,19 +213,23 @@ def _assign_players(session: Session, team: Team, player_ids: list[int]) -> None
         session.add(player)
 
 
-def _check_teams_ready(session: Session) -> None:
-    """Pré-conditions du démarrage : des duos complets (2 joueurs actifs et liés), personne sur le banc."""
+def _check_teams_ready(session: Session) -> list[str]:
+    """Pré-conditions du démarrage : des duos de joueurs actifs et liés, personne sur le banc.
+
+    Un duo d'un seul joueur est toléré (utile pour tester seul) : renvoyé en avertissement.
+    """
     teams = session.exec(select(Team).order_by(col(Team.slot), col(Team.id))).all()
     if not teams:
         raise _bad_request(NO_TEAMS_DETAIL)
     active_players = session.exec(select(Player).where(col(Player.active).is_(True)).order_by(col(Player.id))).all()
     team_ids = {team.id for team in teams}
+    warnings: list[str] = []
     for team in teams:
         members = [p for p in active_players if p.team_id == team.id]
         if len(members) == 0:
             raise _bad_request(f"Le duo {team.name} est vide.")
         if len(members) == 1:
-            raise _bad_request(f"Le duo {team.name} n'a qu'un joueur.")
+            warnings.append(f"Le duo {team.name} n'a qu'un joueur ({members[0].display_name}).")
         if len(members) > TEAM_SIZE:
             raise _bad_request(f"Le duo {team.name} a {len(members)} joueurs ({TEAM_SIZE} attendus).")
         unlinked = [p.display_name for p in members if not p.is_linked]
@@ -234,6 +238,7 @@ def _check_teams_ready(session: Session) -> None:
     benched = [p.display_name for p in active_players if p.is_linked and p.team_id not in team_ids]
     if benched:
         raise _bad_request("Joueurs sans duo : " + ", ".join(benched))
+    return warnings
 
 
 def _draw_payload(result: Any) -> dict[str, Any]:
@@ -285,7 +290,7 @@ async def start_challenge(
     if challenge.status == ChallengeStatus.RUNNING:
         raise _bad_request("Le challenge est déjà en cours.")
     # Accepté depuis registration / drawn / finished dès que les duos sont complets
-    _check_teams_ready(session)
+    warnings = _check_teams_ready(session)
 
     start_at = parse_datetime(body.start_at if body is not None else None, "start_at") or utcnow()
     challenge.status = ChallengeStatus.RUNNING
@@ -323,7 +328,7 @@ async def start_challenge(
         log.warning("Notification Discord de démarrage impossible", exc_info=True)
 
     session.refresh(challenge)
-    return {"challenge": challenge_to_dict(challenge), "poll": poll_report, "poll_errors": poll_errors}
+    return {"challenge": challenge_to_dict(challenge), "poll": poll_report, "poll_errors": poll_errors, "warnings": warnings}
 
 
 @router.post("/challenge/finish")

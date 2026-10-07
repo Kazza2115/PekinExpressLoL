@@ -149,7 +149,7 @@ class DemoRiotClient:
     """Client Riot simulé (voir docstring du module)."""
 
     seed_names: list[tuple[str, str]] = [
-        ("Mike", "La Peace#CHILL"),
+        ("Mike", "MikeLaMalice#DEMO"),
         ("Léa", "Lealicious#EUW"),
         ("Tom", "TomTomLaBombe#FR1"),
         ("Sarah", "SarahCroche#OUI"),

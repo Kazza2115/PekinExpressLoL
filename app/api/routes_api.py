@@ -51,6 +51,7 @@ from app.events import bus
 from app.riot import ddragon, get_api
 from app.riot.base import RiotAPI
 from app.services.registration import link_player, parse_riot_id, register_player
+from app.services.tunnel import public_url
 from app.state import state
 from app.version import ASSET_VERSION, SITE_VERSION
 
@@ -276,6 +277,7 @@ def get_state(
         "live_count": len(state.live_games),
         "last_poll": _last_poll_dict(),
         "base_url": get_settings().base_url,
+        "public_url": public_url().to_dict(),
         "asset_version": ASSET_VERSION,
         "site_version": SITE_VERSION,
         # Joueurs créés en mode démo (identifiants inventés) : à supprimer avant de passer en réel

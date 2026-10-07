@@ -4,6 +4,7 @@
 
 # Données locales (SQLite)
 data/*.db
+data/*.log
 data/*.db-journal
 data/*.db-wal
 data/*.db-shm

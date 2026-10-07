@@ -75,6 +75,15 @@ echo  Pour installer une nouvelle version : double-clic sur MiseAJour.bat,
 echo  le site redemarre tout seul.
 echo  LAISSE CETTE FENETRE OUVERTE pendant le challenge. Ctrl+C pour arreter.
 echo.
+rem Tunnel Internet (adresse https://....trycloudflare.com pour les amis a distance),
+rem dans sa propre fenetre, sauf AUTO_TUNNEL=false dans .env
+findstr /b /i /c:"AUTO_TUNNEL=false" ".env" >nul 2>nul
+if errorlevel 1 (
+    if exist "Tunnel.bat" (
+        echo  Ouverture du tunnel Cloudflare dans une autre fenetre ^(AUTO_TUNNEL^) ...
+        start "Pekin Express LoL - tunnel" cmd /c "Tunnel.bat"
+    )
+)
 rem Le navigateur s'ouvre 3 s plus tard, le temps que le serveur demarre
 start "" cmd /c "timeout /t 3 /nobreak >nul & start "" http://localhost:8000"
 rem --reload : le serveur redemarre de lui-meme quand les fichiers du site changent
@@ -113,6 +122,9 @@ rem Ecrit un .env complet (identique a .env.example) sans dependre de la copie
 >>".env" echo.
 >>".env" echo # Adresse publique du site (utilisee dans les messages Discord)
 >>".env" echo BASE_URL=http://localhost:8000
+>>".env" echo.
+>>".env" echo # Ouvrir aussi le tunnel Cloudflare au lancement (adresse a partager). false pour desactiver.
+>>".env" echo AUTO_TUNNEL=true
 goto :eof
 
 :fail

@@ -113,10 +113,11 @@ Copie `.env.example` en `.env` à la racine du projet et complète-le. Chaque va
 | `ADMIN_PASSWORD` | Mot de passe de l'organisateur (page admin, duos, démarrage). **À changer** (défaut `change-me`). |
 | `DATABASE_URL` | Base SQLite. Défaut : `sqlite:///./data/tracker.db` (fichier dans `data/`). |
 | `GAMES_PER_DAY` | Objectif de parties par jour et par joueur (défaut 10). Modifiable ensuite dans l'admin. |
+| `AUTO_TUNNEL` | Windows : `PekinExpress.bat` ouvre aussi le tunnel Cloudflare (défaut `true`). |
 | `MAX_PLAYERS` | Nombre maximal de joueurs inscrits (défaut 8). Au-delà, l'inscription est refusée. |
 | `TIMEZONE` | Fuseau pour découper les journées (défaut `Europe/Paris`). |
 | `DISCORD_WEBHOOK_URL` | URL d'un webhook Discord pour recevoir les annonces. Vide = désactivé. |
-| `BASE_URL` | Adresse publique du site, utilisée dans les messages Discord (défaut `http://localhost:8000`). |
+| `BASE_URL` | Adresse publique du site pour les messages Discord. Inutile avec le tunnel Cloudflare (adresse détectée automatiquement) ; à renseigner seulement si tu as ta propre adresse. |
 
 ### 3. Appliquer la configuration
 
@@ -309,12 +310,13 @@ Les amis sur le **même réseau** ouvrent `http://<IP du PC>:8000` (par exemple
 `http://192.168.1.42:8000` ; `ipconfig` sous Windows donne l'IP). Pense au pare-feu Windows
 si personne n'arrive à se connecter.
 
-Pour les amis **à distance**, ouvre un tunnel vers ton PC (gratuit, sans compte, via
-Cloudflare) : le site étant lancé, double-clique sur **`Tunnel.bat`**. Il télécharge
-`cloudflared.exe` la première fois puis affiche une adresse `https://xxxx.trycloudflare.com`
-à partager (elle change à chaque lancement ; laisse la fenêtre ouverte). Mets-la dans
-`BASE_URL` pour que les messages Discord pointent dessus. Le HTTPS du tunnel permet aussi
-les notifications navigateur.
+Pour les amis **à distance**, `PekinExpress.bat` ouvre aussi, dans une seconde fenêtre, un
+**tunnel Cloudflare** vers ton PC (gratuit, sans compte ; `Tunnel.bat`, qui télécharge
+`cloudflared.exe` la première fois). L'adresse `https://xxxx.trycloudflare.com` à partager
+s'affiche dans cette fenêtre **et dans Admin → Système** (détectée automatiquement, bouton
+Copier) ; les messages Discord l'utilisent. Elle change à chaque lancement ; laisse les deux
+fenêtres ouvertes. Pour ne pas ouvrir le tunnel : `AUTO_TUNNEL=false` dans `.env`. Le HTTPS
+du tunnel permet aussi les notifications navigateur.
 
 À la main (macOS / Linux, ou PowerShell avec le préfixe `.\`) :
 
