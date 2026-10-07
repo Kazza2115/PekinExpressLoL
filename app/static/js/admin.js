@@ -107,6 +107,37 @@
     renderTeams();
     renderPlayers();
     renderSystem(state.last_poll);
+    renderDemoPlayersNotice();
+  }
+
+  /* Joueurs créés en mode démo (identifiants inventés) alors que le site est en mode réel :
+     Riot les refuse à chaque cycle → on propose de les supprimer en un clic. */
+  function renderDemoPlayersNotice() {
+    const box = document.getElementById('demo-players-notice');
+    if (!box) return;
+    const ids = (state && state.demo_players) || [];
+    const isReal = state && state.demo_mode === false;
+    if (!isReal || !ids.length) { box.hidden = true; box.innerHTML = ''; return; }
+    const names = (state.players || []).filter((p) => ids.includes(p.id)).map((p) => p.display_name);
+    box.hidden = false;
+    box.innerHTML = `⚠️ <strong>${ids.length} joueur${ids.length > 1 ? 's' : ''} de démo</strong> (${esc(names.join(', '))})
+      ${ids.length > 1 ? 'sont encore inscrits' : 'est encore inscrit'} alors que le site est branché sur la vraie API Riot :
+      leurs identifiants sont inventés, Riot les refuse et ils bloquent le suivi.
+      <button type="button" class="btn btn-sm btn-primary" id="btn-remove-demo">Supprimer les joueurs de démo</button>`;
+    const btn = document.getElementById('btn-remove-demo');
+    if (btn) btn.addEventListener('click', async () => {
+      const res = await App.confirm({ title: 'Supprimer les joueurs de démo ?', message: `${names.join(', ')} et leurs parties simulées seront supprimés. Les vrais joueurs ne sont pas touchés.`, confirmText: 'Supprimer', danger: true });
+      if (!res || !res.ok) return;
+      App.setLoading(btn, true);
+      try {
+        const r = await admin(() => api('/api/admin/players/demo/all', { method: 'DELETE', admin: true }));
+        if (r !== undefined) { toast(`${r.deleted} joueur(s) de démo supprimé(s).`, { type: 'success' }); await load(); }
+      } catch (err) {
+        toast(err.message, { type: 'error' });
+      } finally {
+        App.setLoading(btn, false);
+      }
+    });
   }
 
   /* ------------------------------------------------------------------ */

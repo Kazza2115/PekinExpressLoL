@@ -693,3 +693,19 @@ async def test_store_match_tolerates_invalid_side_and_kp_is_capped(session: Sess
     assert _kill_participation(2, 1, 10) == 30.0
     assert _kill_participation(2, 1, 0) is None
     assert _kill_participation(2, 1, None) is None
+
+
+async def test_demo_players_are_skipped_in_real_mode(session: Session, demo_api: Any, monkeypatch: pytest.MonkeyPatch):
+    """En mode réel, un joueur au puuid `demo-…` n'est pas interrogé (Riot répondrait 400)."""
+    make_challenge(session, ChallengeStatus.REGISTRATION)
+    await demo_players(session, demo_api)
+    real_settings = Settings(
+        riot_api_key="RGAPI-x", riot_platform="euw1", riot_region="europe", demo_mode=False,
+        poll_interval_seconds=90, track_flex=False, admin_password="x", database_url="sqlite://",
+        games_per_day=10, max_players=8, timezone="Europe/Paris", discord_webhook_url="",
+        base_url="http://localhost:8000",
+    )
+    poller = Poller(demo_api, bus, state, settings=real_settings)
+    report = await poller.poll_once()
+    assert report.players_polled == 0
+    assert report.errors == []

@@ -726,3 +726,33 @@ def test_sse_hello(client: TestClient) -> None:
     assert received.startswith(b"event: hello\n")
     assert b'"challenge_status": "registration"' in received
     assert b'"live": []' in received
+
+
+def test_demo_players_are_listed_and_removable(client: TestClient, admin_headers: dict, monkeypatch) -> None:
+    """Joueurs créés en démo (puuid demo-…) : listés dans /api/state, supprimables en un appel admin."""
+    _register(client, *MIKE)
+    _register(client, "Vrai", None)  # inscrit sans compte : pas un joueur démo
+    state = client.get("/api/state").json()
+    assert state["site_version"]
+    demo_ids = state["demo_players"]
+    assert len(demo_ids) == 1
+    response = client.delete("/api/admin/players/demo/all")
+    assert response.status_code == 401
+    response = client.delete("/api/admin/players/demo/all", headers=admin_headers)
+    assert response.status_code == 200
+    assert response.json()["deleted"] == 1 and response.json()["names"] == ["Mike"]
+    state = client.get("/api/state").json()
+    assert state["demo_players"] == [] and [p["display_name"] for p in state["players"]] == ["Vrai"]
+
+
+def test_html_pages_render(client: TestClient) -> None:
+    """Chaque page HTML répond 200 avec la version du site et des fichiers statiques versionnés."""
+    player = _register(client, *MIKE)["player"]
+    for path in ("/", "/duos", "/dashboard", "/admin", f"/player/{player['id']}"):
+        response = client.get(path)
+        assert response.status_code == 200, (path, response.text[:200])
+        assert 'class="footer-version"' in response.text, path
+        assert "/static/css/app.css?v=" in response.text, path
+        assert 'data-asset="' in response.text, path
+    assert client.get("/player/999999").status_code == 404
+    assert client.get("/nulle-part").status_code == 404

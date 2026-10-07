@@ -58,6 +58,8 @@ APEX_TIERS = frozenset({"MASTER", "GRANDMASTER", "CHALLENGER"})
 # Une partie terminée depuis plus longtemps n'est plus annoncée sur Discord
 # (évite le spam si le challenge démarre avec une date de début dans le passé)
 NOTIFY_MAX_AGE = timedelta(minutes=30)
+# Préfixe des puuid inventés par le client démo (app/riot/demo.py)
+DEMO_PUUID_PREFIX = "demo-"
 # Nombre d'IDs de parties demandés par joueur et par file à chaque cycle, et pages max
 MATCH_IDS_COUNT = 20
 MATCH_IDS_MAX_PAGES = 5
@@ -392,21 +394,34 @@ class Poller:
                 log.error("Clé Riot invalide ou expirée — cycle interrompu (%s)", exc)
             ctx.unauthorized = True
         else:
-            log.warning(
-                "Poll %s — %s : %s", phase, player.display_name, exc, exc_info=not isinstance(exc, RiotNotFound)
-            )
+            # Erreurs Riot et réseau : une ligne suffit ; traceback seulement pour l'inattendu
+            expected = isinstance(exc, (RiotError, httpx.HTTPError))
+            log.warning("Poll %s — %s : %s", phase, player.display_name, exc, exc_info=not expected)
 
     # ------------------------------------------------------------------ chargement
 
-    @staticmethod
-    def _load_players(session: Session) -> list[Player]:
-        """Joueurs actifs ET liés (puuid connu), dans l'ordre d'inscription."""
+    def _load_players(self, session: Session) -> list[Player]:
+        """Joueurs actifs ET liés (puuid connu), dans l'ordre d'inscription.
+
+        En mode réel, les joueurs créés en mode démo (puuid `demo-…`, identifiants inventés)
+        sont ignorés : Riot répondrait 400 à chaque appel. L'Admin propose de les supprimer.
+        """
         statement = (
             select(Player)
             .where(Player.active == True, col(Player.puuid).is_not(None), col(Player.puuid) != "")  # noqa: E712
             .order_by(col(Player.id))
         )
-        return list(session.exec(statement).all())
+        players = list(session.exec(statement).all())
+        if not self.settings.demo_mode:
+            demo = [p for p in players if (p.puuid or "").startswith(DEMO_PUUID_PREFIX)]
+            if demo:
+                log.warning(
+                    "%d joueur(s) de démo ignoré(s) en mode réel (%s) : supprime-les dans Admin → Joueurs",
+                    len(demo),
+                    ", ".join(p.display_name for p in demo),
+                )
+                players = [p for p in players if p not in demo]
+        return players
 
     def _build_context(self, session: Session) -> _CycleContext:
         players = self._load_players(session)

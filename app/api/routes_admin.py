@@ -530,16 +530,30 @@ async def patch_player(
 @router.delete("/players/{player_id}")
 async def delete_player(player_id: EntityId, session: Session = Depends(get_session)) -> dict[str, Any]:
     player = _player_or_404(session, player_id)
-    session.execute(delete(MatchParticipant).where(col(MatchParticipant.player_id) == player_id))
-    session.execute(delete(RankSnapshot).where(col(RankSnapshot.player_id) == player_id))
-    # Parties qui ne concernent plus aucun joueur du challenge
-    session.execute(
-        delete(Match).where(~col(Match.match_id).in_(select(MatchParticipant.match_id)))
-    )
-    _drop_live_game(player)
-    session.delete(player)
+    _delete_player_rows(session, player)
     session.commit()
     return {"ok": True, "deleted_id": player_id}
+
+
+def _delete_player_rows(session: Session, player: Player) -> None:
+    """Supprime un joueur, ses photos de rang, ses participations et les parties orphelines (sans commit)."""
+    session.execute(delete(MatchParticipant).where(col(MatchParticipant.player_id) == player.id))
+    session.execute(delete(RankSnapshot).where(col(RankSnapshot.player_id) == player.id))
+    # Parties qui ne concernent plus aucun joueur du challenge
+    session.execute(delete(Match).where(~col(Match.match_id).in_(select(MatchParticipant.match_id))))
+    _drop_live_game(player)
+    session.delete(player)
+
+
+@router.delete("/players/demo/all")
+async def delete_demo_players(session: Session = Depends(get_session)) -> dict[str, Any]:
+    """Supprime les joueurs créés en mode démo (puuid `demo-…`) : inutiles et bloquants en mode réel."""
+    players = [p for p in session.exec(select(Player)).all() if (p.puuid or "").startswith("demo-")]
+    for player in players:
+        _delete_player_rows(session, player)
+    session.commit()
+    bus.publish("challenge_reset", {"demo_players_removed": len(players)}) if players else None
+    return {"ok": True, "deleted": len(players), "names": [p.display_name for p in players]}
 
 
 # ---------------------------------------------------------------------------

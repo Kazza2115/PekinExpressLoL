@@ -902,3 +902,8 @@ a.duo-card:hover .duo-arrow { color: var(--accent); }
 /* Admin : adresse publique du site */
 .sys-url-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0; }
 .sys-url-value { font-size: 0.95rem; padding: 6px 10px; border-radius: 8px; background: rgba(255,255,255,.05); border: 1px solid var(--border, rgba(255,255,255,.08)); word-break: break-all; }
+
+.footer-version { margin-left: auto; opacity: .7; font-variant-numeric: tabular-nums; }
+
+.notice-warning { border-color: rgba(229,182,77,.45); background: rgba(229,182,77,.08); }
+.notice-warning .btn { margin-left: 10px; vertical-align: middle; }

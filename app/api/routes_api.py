@@ -52,7 +52,7 @@ from app.riot import ddragon, get_api
 from app.riot.base import RiotAPI
 from app.services.registration import link_player, parse_riot_id, register_player
 from app.state import state
-from app.version import ASSET_VERSION
+from app.version import ASSET_VERSION, SITE_VERSION
 
 log = logging.getLogger("pekin.api")
 
@@ -257,6 +257,7 @@ def health(challenge: Challenge = Depends(get_challenge)) -> dict[str, Any]:
         "challenge_status": enum_value(challenge.status),
         "last_poll": _last_poll_dict(),
         "live_count": len(state.live_games),
+        "site_version": SITE_VERSION,
     }
 
 
@@ -276,6 +277,9 @@ def get_state(
         "last_poll": _last_poll_dict(),
         "base_url": get_settings().base_url,
         "asset_version": ASSET_VERSION,
+        "site_version": SITE_VERSION,
+        # Joueurs créés en mode démo (identifiants inventés) : à supprimer avant de passer en réel
+        "demo_players": [p.id for p in players if (p.puuid or "").startswith("demo-")],
     }
 
 

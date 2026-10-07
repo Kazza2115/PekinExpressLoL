@@ -26,6 +26,8 @@ from app.state import state
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("pekin")
+# Une ligne par requête HTTP, c'est trop : seules les erreurs httpx sont loguées
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 

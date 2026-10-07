@@ -9,15 +9,12 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from app.config import PROJECT_ROOT
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-VERSION_FILE = PROJECT_ROOT / "data" / "version.json"
 
 
 def compute_asset_version(static_dir: Path = STATIC_DIR) -> str:
@@ -35,21 +32,45 @@ def compute_asset_version(static_dir: Path = STATIC_DIR) -> str:
 ASSET_VERSION = compute_asset_version()
 
 
-def read_local_version(path: Path = VERSION_FILE) -> dict[str, Any] | None:
-    """Commit installé (`{"sha", "date", "message", "updated_at"}`) ou None (installation ZIP initiale)."""
+def site_version_label() -> str:
+    """Version lisible, affichée en bas des pages : « 7 oct. 11:05 · abc1234 » (commit git)
+    ou « 7 oct. 11:05 » (date du fichier le plus récent du site, ex. installation ZIP)."""
+    import subprocess
+
+    stamp: datetime | None = None
+    sha = ""
+    git_dir = PROJECT_ROOT / ".git"
+    if git_dir.exists():
+        try:
+            out = subprocess.run(
+                ["git", "log", "-1", "--format=%h %cI"], cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=5
+            )
+            if out.returncode == 0 and out.stdout.strip():
+                sha, iso = out.stdout.strip().split(" ", 1)
+                stamp = datetime.fromisoformat(iso)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            stamp = None
+    if stamp is None:
+        newest = 0.0
+        app_dir = Path(__file__).resolve().parent
+        for file in app_dir.rglob("*"):
+            if file.is_file() and file.suffix in {".py", ".js", ".css", ".html"} and "__pycache__" not in file.parts:
+                newest = max(newest, file.stat().st_mtime)
+        if newest:
+            stamp = datetime.fromtimestamp(newest, tz=timezone.utc)
+    if stamp is None:
+        return "inconnue"
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) and data.get("sha") else None
+        from zoneinfo import ZoneInfo
+
+        from app.config import get_settings
+
+        local = stamp.astimezone(ZoneInfo(get_settings().timezone))
+    except Exception:  # noqa: BLE001
+        local = stamp
+    months = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
+    label = f"{local.day} {months[local.month - 1]} {local:%H:%M}"
+    return f"{label} · {sha}" if sha else label
 
 
-def write_local_version(sha: str, *, date: str | None, message: str | None, path: Path = VERSION_FILE) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "sha": sha,
-        "date": date,
-        "message": message,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+SITE_VERSION = site_version_label()

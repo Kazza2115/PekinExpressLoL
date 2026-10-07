@@ -19,6 +19,7 @@ from sqlmodel import Session, select
 from app.config import get_settings
 from app.db.models import Challenge, Player
 from app.db.session import as_utc, get_session
+from app.version import ASSET_VERSION, SITE_VERSION
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -88,6 +89,7 @@ def _context(request: Request, page: str, session: Session, **extra: Any) -> dic
         "demo_mode": settings.demo_mode,
         "games_per_day": challenge.get("games_per_day") or settings.games_per_day,
         "asset_v": ASSET_VERSION,
+        "site_version": SITE_VERSION,
         "base_url": settings.base_url,
     }
     ctx.update(extra)
