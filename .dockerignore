@@ -1,0 +1,13 @@
+.venv/
+.env
+data/
+docs/
+tests/
+screenshots/
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/
+*.md
+*.bat
+start.sh

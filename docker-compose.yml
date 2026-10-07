@@ -1,0 +1,16 @@
+# Pékin Express LoL sur un VPS : `docker compose up -d`
+# Les variables (clé Riot, mot de passe…) sont lues depuis le fichier .env à côté.
+services:
+  pekin:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: sqlite:////app/data/tracker.db
+    ports:
+      - "8000:8000"
+    volumes:
+      - pekin-data:/app/data   # base SQLite persistante (survit aux redémarrages)
+
+volumes:
+  pekin-data:

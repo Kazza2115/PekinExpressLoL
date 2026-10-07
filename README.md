@@ -268,38 +268,73 @@ remonte pas ».
 
 ## Hébergement
 
-### Option 1 : sur le PC de l'un d'entre vous (LAN)
+> **Pourquoi pas GitHub Pages ?** GitHub Pages ne sert que des fichiers statiques (HTML, CSS,
+> JS). Or ce site a besoin d'un **serveur** qui tourne en continu : c'est lui qui interroge
+> Riot toutes les 90 s avec la clé (qui ne doit jamais être visible dans le navigateur),
+> garde l'historique des rangs dans SQLite et pousse les notifications en direct. Le code
+> est hébergé sur GitHub, mais le site doit tourner quelque part : sur le PC de l'un
+> d'entre vous (gratuit) ou sur un petit serveur.
 
-Le plus simple pour un week-end chez quelqu'un :
+### Où mettre la clé Riot
 
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
+La clé ne se partage jamais dans un chat, un message Discord ou un commit. Elle va :
 
-`--host 0.0.0.0` rend le site accessible aux autres machines du réseau local. Les autres
-ouvrent `http://<IP du PC>:8000` (par exemple `http://192.168.1.42:8000`). Le PC doit rester
-allumé pendant tout le challenge (c'est lui qui interroge Riot). Pense au pare-feu Windows
+- **sur ton PC** : dans le fichier `.env` à la racine du projet (créé automatiquement au
+  premier lancement, ignoré par git) → `RIOT_API_KEY=RGAPI-xxxx` ;
+- **sur un hébergeur** : dans ses « variables d'environnement » / « secrets »
+  (`RIOT_API_KEY`, `ADMIN_PASSWORD`, `BASE_URL`…), jamais dans le dépôt.
+
+Une clé de développement expire toutes les 24 h : quand elle change, remplace-la dans `.env`
+puis clique sur **« Recharger .env »** dans la page Admin (pas besoin de redémarrer).
+
+### Option 1 (recommandée) : sur le PC de l'organisateur
+
+Le plus simple et gratuit. Le PC doit rester allumé pendant tout le challenge (c'est lui qui
+interroge Riot).
+
+- **Windows** : double-clique sur `PekinExpress.bat`. Au premier lancement il installe tout,
+  crée `.env` et l'ouvre dans le Bloc-notes pour y coller la clé. Ensuite il démarre le site
+  et ouvre http://localhost:8000.
+- **macOS / Linux** : `./start.sh` (même comportement).
+
+Les amis sur le **même réseau** ouvrent `http://<IP du PC>:8000` (par exemple
+`http://192.168.1.42:8000` ; `ipconfig` sous Windows donne l'IP). Pense au pare-feu Windows
 si personne n'arrive à se connecter.
 
-Pour que les amis à distance y accèdent aussi, un tunnel type ngrok / Cloudflare Tunnel
-devant le port 8000 fait l'affaire (et donne du HTTPS, donc des notifications navigateur).
+Pour les amis **à distance**, ouvre un tunnel vers ton PC. Avec Cloudflare, gratuit et sans
+compte :
 
-### Option 2 : un petit VPS
+```bash
+# Télécharger cloudflared : https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/
+cloudflared tunnel --url http://localhost:8000
+```
 
-N'importe quel VPS à quelques euros suffit. Schéma classique :
+La commande affiche une adresse `https://xxxx.trycloudflare.com` à partager (elle change à
+chaque lancement). Mets-la dans `BASE_URL` pour que les messages Discord pointent dessus.
+Le HTTPS du tunnel permet aussi les notifications navigateur. ngrok (`ngrok http 8000`)
+fonctionne pareil.
 
-1. Cloner le projet, créer le venv, installer les dépendances, remplir `.env`
-   (mettre `BASE_URL` à l'adresse publique).
-2. Lancer `uvicorn app.main:app --host 127.0.0.1 --port 8000` comme service (systemd,
-   `nohup`, tmux…). Pas de `--reload` en production.
-3. Mettre un **reverse proxy** (Caddy ou nginx) devant, avec HTTPS. Le site utilise un flux
-   SSE (`/api/events`) qui reste ouvert en permanence : le serveur envoie déjà l'en-tête
-   `X-Accel-Buffering: no` pour nginx, mais prévois un `proxy_read_timeout` long (plusieurs
-   minutes) sur cette route. Caddy gère ça tout seul.
-4. La base est un simple fichier **SQLite dans `data/`** : à sauvegarder si tu y tiens, à
-   supprimer pour repartir de zéro.
+### Option 2 : un petit serveur (VPS ou hébergeur de conteneurs)
 
-Une seule instance du serveur doit tourner à la fois (une seule tâche de polling).
+Le projet contient un `Dockerfile` et un `docker-compose.yml` :
+
+```bash
+git clone https://github.com/Kazza2115/PekinExpressLoL.git && cd PekinExpressLoL
+cp .env.example .env     # remplir RIOT_API_KEY, ADMIN_PASSWORD, BASE_URL
+docker compose up -d     # site sur le port 8000, base SQLite dans un volume persistant
+```
+
+Devant, un **reverse proxy** avec HTTPS (Caddy fait tout seul : `reverse_proxy localhost:8000`).
+Le site utilise un flux SSE (`/api/events`) qui reste ouvert : avec nginx, prévois un
+`proxy_read_timeout` long sur cette route (l'en-tête `X-Accel-Buffering: no` est déjà envoyé).
+
+Sur Railway, Fly.io ou Render, déployer le dépôt avec le `Dockerfile` fonctionne aussi :
+renseigne les variables d'environnement dans leur interface et **attache un volume persistant
+sur `/app/data`** (sans ça, l'historique du challenge disparaît à chaque redémarrage — et les
+offres gratuites redémarrent souvent).
+
+Dans tous les cas, une seule instance du serveur doit tourner à la fois (une seule tâche de
+polling).
 
 ---
 
