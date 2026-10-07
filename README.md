@@ -311,7 +311,7 @@ les notifications navigateur.
 À la main (macOS / Linux, ou PowerShell avec le préfixe `.\`) :
 
 ```bash
-cloudflared tunnel --url http://localhost:8000      # PowerShell : .\cloudflared.exe tunnel --url http://localhost:8000
+cloudflared tunnel --url http://127.0.0.1:8000      # PowerShell : .\cloudflared.exe tunnel --url http://127.0.0.1:8000
 ```
 
 ngrok (`ngrok http 8000`) fonctionne pareil.
