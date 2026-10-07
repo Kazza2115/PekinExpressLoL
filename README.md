@@ -1,12 +1,12 @@
 # Pékin Express LoL
 
 Un petit site pour organiser un **challenge ranked League of Legends entre 8 amis**, sur un
-week-end : la roue tire 4 duos au sort, chacun joue ses parties classées, et le site suit
+week-end : l'organisateur compose 4 duos, chacun joue ses parties classées, et le site suit
 tout en temps réel grâce à l'API Riot. Le duo qui gagne le plus de LP l'emporte.
 
-| Accueil (inscriptions) | La roue des duos |
+| Accueil (inscriptions) | Les duos |
 |---|---|
-| ![Accueil](docs/screenshots/accueil.png) | ![La roue](docs/screenshots/roue.png) |
+| ![Accueil](docs/screenshots/accueil.png) | ![Les duos](docs/screenshots/duos.png) |
 
 | Classement en direct | Fiche joueur |
 |---|---|
@@ -19,7 +19,7 @@ tout en temps réel grâce à l'API Riot. Le duo qui gagne le plus de LP l'empor
 ## Le jeu en deux minutes
 
 - **8 joueurs**, inscrits sur la page d'accueil avec leur Riot ID (`Pseudo#TAG`).
-- **La roue** tire les joueurs un par un : deux joueurs à la suite forment un duo → **4 duos**.
+- L'organisateur compose les **4 duos** dans la page Admin (ou les tire au sort en un clic).
 - Objectif : **10 games classées par jour et par joueur** (réglable).
 - **Le duo gagnant est celui qui a gagné le plus de LP nets**, c'est-à-dire la somme des LP
   gagnés (ou perdus) par ses deux joueurs depuis le début du challenge.
@@ -73,7 +73,7 @@ Puis ouvre **http://localhost:8000**. Sans fichier `.env` (ou avec `RIOT_API_KEY
 site démarre automatiquement en **MODE DÉMO** (badge dans la barre de navigation).
 
 Sur la page d'accueil, clique sur **« Remplir avec des joueurs démo »** : 8 joueurs fictifs
-sont inscrits et liés. Tu peux ensuite aller sur **La roue**, tirer les duos, démarrer le
+sont inscrits et liés. Tu peux ensuite composer les duos dans **Admin → Duos**, démarrer le
 challenge et regarder le classement bouger tout seul (les parties simulées durent entre 45
 et 90 secondes).
 
@@ -110,7 +110,7 @@ Copie `.env.example` en `.env` à la racine du projet et complète-le. Chaque va
 | `DEMO_MODE` | `true` pour forcer la simulation même avec une clé, `false` pour forcer le réel. Vide = automatique (démo si pas de clé). |
 | `POLL_INTERVAL_SECONDS` | Secondes entre deux interrogations de l'API Riot (défaut : 90 en réel, 10 en démo ; minimum 3). |
 | `TRACK_FLEX` | `true` pour suivre aussi la file Flex (défaut `false`). Modifiable ensuite dans l'admin. |
-| `ADMIN_PASSWORD` | Mot de passe de l'organisateur (page admin, roue, démarrage). **À changer** (défaut `change-me`). |
+| `ADMIN_PASSWORD` | Mot de passe de l'organisateur (page admin, duos, démarrage). **À changer** (défaut `change-me`). |
 | `DATABASE_URL` | Base SQLite. Défaut : `sqlite:///./data/tracker.db` (fichier dans `data/`). |
 | `GAMES_PER_DAY` | Objectif de parties par jour et par joueur (défaut 10). Modifiable ensuite dans l'admin. |
 | `MAX_PLAYERS` | Nombre maximal de joueurs inscrits (défaut 8). Au-delà, l'inscription est refusée. |
@@ -151,7 +151,7 @@ expirée »).
 
 ## Déroulé d'un challenge
 
-Le challenge passe par 4 états : **inscriptions** → **duos tirés** → **en cours** → **terminé**.
+Le challenge passe par 3 états : **inscriptions** (et composition des duos) → **en cours** → **terminé**.
 
 ### 1. Inscriptions (page d'accueil `/`)
 
@@ -160,8 +160,8 @@ Chaque joueur entre son pseudo pour le challenge et son **Riot ID** au format `P
 Le site vérifie le compte auprès de Riot et affiche le rang actuel. On peut s'inscrire sans
 Riot ID et le lier plus tard avec le bouton **« Lier mon compte »** sur sa carte.
 
-Quand tous les joueurs actifs sont liés et qu'ils sont en nombre pair (au moins 2), le
-bouton **« Tirer les duos »** apparaît.
+Les duos apparaissent sur l'accueil et dans l'onglet **Duos** dès que l'organisateur les a
+composés.
 
 Une fois le challenge démarré, un compte déjà lié ne peut plus être changé par n'importe qui
 (sinon l'historique de rang serait remplacé) : seul l'organisateur, avec son mot de passe,
@@ -170,14 +170,22 @@ peut corriger un Riot ID. Un joueur inscrit sans compte peut toujours lier le si
 Astuce : l'organisateur peut pré-inscrire tout le monde dans `players.yaml` (lu une seule
 fois, au premier démarrage, si aucun joueur n'existe encore).
 
-### 2. La roue (`/wheel`)
+### 2. Les duos (`/duos` et Admin → Duos)
 
-L'organisateur clique sur **« Lancer la roue »** (le **mot de passe organisateur** est
-demandé une fois par session de navigateur). La roue tourne, s'arrête sur chaque joueur et
-révèle les duos deux par deux. Pas content du tirage ? **« Relancer la roue »**.
+Dans la page **Admin** (mot de passe organisateur, demandé une fois par session de
+navigateur), section **Duos** : **« Ajouter un duo »**, puis choisir ses deux joueurs dans
+les menus, lui donner un nom et une couleur, **Enregistrer**. Un joueur déplacé d'un duo à
+l'autre est retiré du précédent. Pressé ? **« Former les duos au hasard »** fait les 4 duos
+en un clic. Tant que le challenge n'a pas démarré, tout peut être modifié.
 
-Puis **« Démarrer le challenge »** : à partir de cet instant, les parties comptent. Le site
-prend immédiatement la « photo » de rang de référence de chaque joueur.
+L'onglet **Duos** montre ensuite, pour chaque duo, toutes ses statistiques : LP nets,
+victoires / défaites, winrate, parties (et objectif du jour), KDA moyen, parties jouées
+ensemble, et un **face-à-face des deux joueurs** stat par stat (LP nets, V–D, winrate, KDA,
+CS/min, vision, dégâts, séries, champion favori) avec le **MVP du duo** (le plus de LP nets).
+
+Puis, dans Admin, **« Démarrer le challenge »** : à partir de cet instant, les parties
+comptent. Le site prend immédiatement la « photo » de rang de référence de chaque joueur.
+Le démarrage est refusé tant qu'un joueur inscrit n'est pas dans un duo complet.
 
 ### 3. Le classement (`/dashboard`)
 
@@ -221,11 +229,11 @@ l'encourager (ou le troller).
 
 - Sur chaque page, des **toasts** (petits messages en bas de l'écran) annoncent les
   événements en direct : un joueur lance une partie, une partie est enregistrée, les duos
-  sont tirés, le challenge démarre…
+  sont composés, le challenge démarre…
 - Le bouton **🔔 « Activer les notifications »** (barre de navigation) demande
   l'autorisation d'envoyer des **notifications système** même quand l'onglet n'est pas au
   premier plan. Elles sont envoyées pour : lancement d'une partie, partie enregistrée
-  (résultat + LP), tirage des duos, démarrage du challenge.
+  (résultat + LP), composition des duos, démarrage du challenge.
 - Les navigateurs n'autorisent ces notifications que sur **`localhost` ou en HTTPS**. Sur une
   adresse `http://192.168.x.x` du LAN, le bouton n'aura pas d'effet (les toasts, eux,
   marchent toujours).
@@ -249,11 +257,11 @@ Protégée par le mot de passe `ADMIN_PASSWORD`. Une fois connecté :
 | Section | Action | Effet |
 |---|---|---|
 | Challenge | **Enregistrer** | Modifie le nom, le nombre de games par jour, les dates de début/fin et l'option « Suivre aussi la file Flex ». |
-| Challenge | **🚀 Démarrer** | Passe le challenge « en cours » (il faut avoir tiré les duos). |
+| Challenge | **🚀 Démarrer** | Passe le challenge « en cours » (il faut que chaque joueur soit dans un duo complet). |
 | Challenge | **🏁 Terminer** | Fige le classement. |
 | Challenge | **Réinitialiser** | Supprime duos, photos de rang et parties ; retour aux inscriptions. Case à cocher pour garder ou non les joueurs inscrits. |
-| Duos | **Enregistrer** (par duo) | Renomme le duo, change sa couleur, définit sa fenêtre de dates optionnelle. Lien « Relancer la roue → ». |
-| Joueurs | interrupteur **Actif** | Désactive un joueur (exclu du suivi et de la roue) sans le supprimer. |
+| Duos | **Ajouter un duo** / **Enregistrer** / **Supprimer** | Compose les duos (deux joueurs par duo), nom, couleur, fenêtre de dates optionnelle. **Former les duos au hasard** en un clic. Verrouillé une fois le challenge démarré. |
+| Joueurs | interrupteur **Actif** | Désactive un joueur (exclu du suivi) sans le supprimer. |
 | Joueurs | **Supprimer** | Supprime le joueur, ses photos de rang et ses parties. Définitif. |
 | Système | **Forcer un rafraîchissement** | Lance un cycle d'interrogation Riot immédiatement. |
 | Système | **Recharger .env** | Relit `.env` (nouvelle clé, mode démo…) sans redémarrer. |
@@ -352,8 +360,8 @@ PekinExpressLoL/
 │   ├── api/               # routes JSON (/api), admin (/api/admin), pages HTML
 │   ├── db/                # modèles SQLModel et session SQLite
 │   ├── riot/              # client Riot réel, client démo, Data Dragon
-│   ├── services/          # poller, stats, tirage des duos, inscription, Discord
-│   ├── templates/         # pages Jinja2 (accueil, roue, classement, fiche, admin)
+│   ├── services/          # poller, stats, duos, inscription, Discord
+│   ├── templates/         # pages Jinja2 (accueil, duos, classement, fiche, admin)
 │   └── static/            # CSS, JS vanilla, Chart.js
 ├── data/                  # base SQLite (créée au premier lancement)
 ├── tests/                 # tests pytest
