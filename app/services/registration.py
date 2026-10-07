@@ -28,6 +28,7 @@ from app.riot.base import (
     RiotNotFound,
     RiotRateLimited,
     RiotUnauthorized,
+    RiotUnreachable,
 )
 from app.services.stats import APEX_TIERS, absolute_lp
 
@@ -40,6 +41,7 @@ TAG_LINE_RE = re.compile(r"^[^\W_]{3,5}$")  # lettres/chiffres Unicode, sans esp
 ERR_NOT_FOUND = "Riot ID introuvable : vérifie le pseudo et le tag."
 ERR_UNAUTHORIZED = "Clé Riot invalide ou expirée (voir .env)."
 ERR_RATE_LIMITED = "API Riot saturée, réessaie dans une minute."
+ERR_UNREACHABLE = "API Riot injoignable : vérifie la connexion et réessaie."
 
 
 def parse_riot_id(raw: str | None) -> tuple[str, str]:
@@ -65,6 +67,8 @@ def _link_error_message(exc: Exception) -> str:
         return ERR_UNAUTHORIZED
     if isinstance(exc, RiotRateLimited):
         return ERR_RATE_LIMITED
+    if isinstance(exc, RiotUnreachable):
+        return ERR_UNREACHABLE
     return f"Erreur API Riot : {exc}"
 
 

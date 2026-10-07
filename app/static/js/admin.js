@@ -131,7 +131,13 @@
       App.setLoading(btn, true);
       try {
         const r = await admin(() => api('/api/admin/players/demo/all', { method: 'DELETE', admin: true }));
-        if (r !== undefined) { toast(`${r.deleted} joueur(s) de démo supprimé(s).`, { type: 'success' }); await load(); }
+        if (r !== undefined) {
+          const duos = r.teams_removed ? ` · ${r.teams_removed} duo(s) vide(s) retiré(s)` : '';
+          toast(`${r.deleted} joueur(s) de démo supprimé(s)${duos}.`, { type: 'success' });
+          // Challenge en cours / terminé : les duos sont figés, on explique quoi faire
+          if (r.hint) toast(r.hint, { type: 'warning', timeout: 12000 });
+          await load();
+        }
       } catch (err) {
         toast(err.message, { type: 'error' });
       } finally {
@@ -270,9 +276,15 @@
     els.teamsNotice.hidden = !readOnly;
     els.teamsNotice.textContent = status === 'running'
       ? '🔒 Le challenge est en cours : les duos sont figés. Termine ou réinitialise le challenge pour les modifier.'
-      : '🔒 Le challenge est terminé : les duos sont figés.';
+      : '🔒 Le challenge est terminé : les duos sont figés. Clique « Réinitialiser » (en gardant les joueurs inscrits) pour recomposer les duos et rouvrir les inscriptions.';
     els.teamsHelp.hidden = readOnly;
     els.teamsActions.hidden = readOnly;
+    // Duos tirés puis vidés (joueurs supprimés un à un, duos supprimés…) : le statut reste « Duos formés »
+    // et rien ne dit que l'accueil accepte encore les inscriptions ni que « Réinitialiser » rouvre tout.
+    if (!readOnly && status === 'drawn' && !(state.players || []).some((p) => p.active !== false)) {
+      els.teamsNotice.hidden = false;
+      els.teamsNotice.textContent = 'Aucun joueur inscrit : les inscriptions restent ouvertes sur l\'accueil, ou clique sur « Réinitialiser » pour repartir des inscriptions.';
+    }
 
     if (!teams.length) {
       els.teams.innerHTML = readOnly
@@ -396,7 +408,10 @@
     App.setLoading(els.btnTeamAuto, true);
     try {
       const r = await admin(() => api('/api/admin/teams/auto', { method: 'POST', admin: true, body: {} }));
-      if (r !== undefined) toast(`${(r && r.teams && r.teams.length) || 'Les'} duos formés au hasard.`, { type: 'success' });
+      if (r !== undefined) {
+        const n = (r && r.teams && r.teams.length) || 0;
+        toast(n ? `${n} duo${n > 1 ? 's' : ''} formé${n > 1 ? 's' : ''} au hasard.` : 'Les duos ont été formés au hasard.', { type: 'success' });
+      }
       await load();
     } catch (err) {
       toast(err.message, { type: 'error' });
@@ -432,11 +447,17 @@
     $$('[data-toggle-active]', els.players).forEach((input) => input.addEventListener('change', async () => {
       const id = input.dataset.toggleActive;
       const active = input.checked;
+      // Désactiver retire aussi le joueur de son duo (côté serveur) : on le dit dans le toast
+      const before = (state.players || []).find((p) => String(p.id) === id);
+      const hadDuo = !active && !!(before && before.team_id);
       input.disabled = true;
       try {
         const r = await admin(() => api(`/api/admin/players/${id}`, { method: 'PATCH', admin: true, body: { active } }));
         if (r === undefined) input.checked = !active;
-        else toast(active ? 'Joueur réactivé.' : 'Joueur désactivé.', { type: 'success', timeout: 3000 });
+        else if (active) toast('Joueur réactivé.', { type: 'success', timeout: 3000 });
+        else if (!hadDuo) toast('Joueur désactivé.', { type: 'success', timeout: 3000 });
+        else if (teamsReadOnly()) toast('Joueur désactivé et retiré de son duo. Les duos étant figés, le réactiver ne l\'y remettra pas avant une réinitialisation.', { type: 'warning', timeout: 8000 });
+        else toast('Joueur désactivé et retiré de son duo.', { type: 'success', timeout: 4000 });
         await load();
       } catch (err) {
         input.checked = !active;

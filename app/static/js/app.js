@@ -613,6 +613,9 @@
         if (ev.type && ev.type !== 'ping') dispatch(ev.type, ev.data || {});
       });
       if (typeof r.last_id === 'number' && (lastEventId === null || r.last_id > lastEventId)) lastEventId = r.last_id;
+      // Le serveur a redémarré (compteur d'événements reparti à 1) : on repart de son dernier id,
+      // sinon `since` resterait figé et plus aucun toast / notification n'arriverait.
+      if (typeof r.last_id === 'number' && lastEventId !== null && r.last_id < lastEventId) lastEventId = r.last_id;
       if (lastEventId === null) lastEventId = 0;
     } catch (e) {
       if (App.connected) { App.connected = false; document.dispatchEvent(new CustomEvent('pekin:disconnected')); }

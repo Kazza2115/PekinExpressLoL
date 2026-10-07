@@ -6,12 +6,16 @@ La clé Riot n'est jamais exposée côté client : seul le backend lit `Settings
 
 from __future__ import annotations
 
+import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import timezone, tzinfo
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
+
+log = logging.getLogger("pekin.config")
 
 # Racine du projet (dossier contenant `app/`)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -50,11 +54,36 @@ class Settings:
     timezone: str
     discord_webhook_url: str
     base_url: str
+    # Fuseau résolu une seule fois (`tz` est lu pour chaque joueur à chaque requête de stats)
+    _tz: tzinfo | None = field(default=None, init=False, repr=False, compare=False)
+    _tz_fallback: bool = field(default=False, init=False, repr=False, compare=False)
 
     @property
-    def tz(self) -> ZoneInfo:
-        """Fuseau horaire utilisé pour découper les journées du challenge."""
-        return ZoneInfo(self.timezone)
+    def tz(self) -> tzinfo:
+        """Fuseau horaire utilisé pour découper les journées du challenge.
+
+        Sous Windows, Python n'a pas de base de fuseaux système : sans le paquet `tzdata`,
+        `ZoneInfo("Europe/Paris")` échoue. Plutôt qu'une erreur 500 sur toutes les pages de
+        stats, on se replie sur UTC (journalisé une seule fois, signalé par `tz_fallback`).
+        """
+        if self._tz is None:
+            try:
+                self._tz = ZoneInfo(self.timezone)
+            except ZoneInfoNotFoundError:
+                log.warning(
+                    "Fuseau %s introuvable (paquet tzdata manquant ?) : repli sur UTC — "
+                    "les journées du challenge sont découpées à minuit UTC",
+                    self.timezone,
+                )
+                self._tz = timezone.utc
+                self._tz_fallback = True
+        return self._tz
+
+    @property
+    def tz_fallback(self) -> bool:
+        """True si le fuseau configuré est introuvable (`tz` vaut alors UTC)."""
+        _ = self.tz  # force la résolution (et l'avertissement) si elle n'a pas encore eu lieu
+        return self._tz_fallback
 
     @property
     def platform_host(self) -> str:

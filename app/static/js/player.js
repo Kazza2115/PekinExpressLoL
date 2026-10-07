@@ -254,6 +254,7 @@
     player_linked: (d) => { if (!d.player_id || d.player_id === playerId) refresh(); },
     challenge_started: refresh,
     challenge_reset: refresh,
+    teams_changed: refresh,
     draw_done: refresh,
   });
   setInterval(() => { if (!document.hidden) refresh(); }, 60000);

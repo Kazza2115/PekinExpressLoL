@@ -411,6 +411,7 @@
     challenge_started: refreshAll,
     challenge_finished: refreshAll,
     challenge_reset: refreshAll,
+    teams_changed: refreshAll,
     player_registered: refreshAll,
     player_linked: refreshAll,
   });

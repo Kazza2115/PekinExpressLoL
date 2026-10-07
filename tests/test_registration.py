@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 from app.config import get_settings
 from app.db.models import Challenge, Player, Queue, RankSnapshot
 from app.events import bus
-from app.riot.base import RiotError, RiotNotFound, RiotRateLimited, RiotUnauthorized
+from app.riot.base import RiotError, RiotNotFound, RiotRateLimited, RiotUnauthorized, RiotUnreachable
 from app.services.bootstrap import ensure_challenge, load_players_yaml
 from app.services.registration import link_player, parse_riot_id, register_player
 
@@ -133,6 +133,8 @@ async def test_puuid_already_linked_to_another_player(session, demo_api):
         (RiotNotFound("404", status=404), "Riot ID introuvable : vérifie le pseudo et le tag."),
         (RiotUnauthorized("403", status=403), "Clé Riot invalide ou expirée (voir .env)."),
         (RiotRateLimited("429", status=429), "API Riot saturée, réessaie dans une minute."),
+        (RiotUnreachable("Erreur réseau Riot sur /x : ReadTimeout"),
+         "API Riot injoignable : vérifie la connexion et réessaie."),
         (RiotError("Riot 500 sur /x", status=500), "Erreur API Riot : Riot 500 sur /x"),
         (httpx.ConnectError("boom"), "Erreur API Riot : boom"),
     ],

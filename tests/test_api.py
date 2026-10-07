@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+from datetime import timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tests.conftest import ADMIN_PASSWORD
@@ -274,6 +278,34 @@ def test_manual_teams_then_start(client: TestClient, admin_headers: dict) -> Non
     assert restarted["challenge"]["status"] == "running" and restarted["challenge"]["end_at"] is None
 
 
+def test_teams_composition_locked_after_finish(client: TestClient, admin_headers: dict) -> None:
+    """Challenge terminé : le classement final est figé, donc la composition des duos aussi (comme
+    l'affiche l'Admin : « 🔒 Le challenge est terminé : les duos sont figés. »). Création, changement
+    de joueurs et suppression sont refusés ; nom / couleur restent modifiables. Seul
+    « Réinitialiser » (en gardant les joueurs) rouvre la composition."""
+    p1, p2, draw, _ = _setup_duo(client, admin_headers)
+    team_id = draw["teams"][0]["id"]
+    _admin_post(client, admin_headers, "/api/admin/challenge/finish")
+    assert client.get("/api/state").json()["challenge"]["status"] == "finished"
+
+    assert _create_team(client, admin_headers, {}, expected=400)["detail"] == TEAMS_LOCKED
+    assert _patch_team(client, admin_headers, team_id, {"player_ids": [p1["id"]]}, 400)["detail"] == TEAMS_LOCKED
+    response = client.delete(f"/api/admin/teams/{team_id}", headers=admin_headers)
+    assert response.status_code == 400 and response.json()["detail"] == TEAMS_LOCKED
+    assert _patch_team(client, admin_headers, team_id, {"name": "Les Loups"})["team"]["name"] == "Les Loups"
+
+    state = client.get("/api/state").json()
+    assert state["challenge"]["status"] == "finished"
+    assert [t["id"] for t in state["teams"]] == [team_id]
+    assert sorted(state["teams"][0]["player_ids"]) == sorted([p1["id"], p2["id"]])
+
+    # Réinitialiser (en gardant les joueurs) rouvre bien la composition des duos
+    reset = _admin_post(client, admin_headers, "/api/admin/challenge/reset", {"keep_players": True})
+    assert reset["challenge"]["status"] == "registration"
+    team = _create_team(client, admin_headers, {"player_ids": [p1["id"], p2["id"]]})["team"]
+    assert sorted(team["player_ids"]) == sorted([p1["id"], p2["id"]])
+
+
 def test_start_refuses_benched_or_unlinked_players(client: TestClient, admin_headers: dict) -> None:
     p1 = _register(client, *MIKE)["player"]
     p2 = _register(client, *LEA)["player"]
@@ -292,6 +324,45 @@ def test_start_refuses_benched_or_unlinked_players(client: TestClient, admin_hea
     for player in (sam, nolink):
         response = client.patch(f"/api/admin/players/{player['id']}", json={"active": False}, headers=admin_headers)
         assert response.status_code == 200
+    assert _start(client, admin_headers)["challenge"]["status"] == "running"
+
+
+def test_deactivating_a_duo_member_releases_him_from_the_duo(client: TestClient, admin_headers: dict) -> None:
+    """« Désactiver (exclu du suivi et des duos) » : le duo ne garde pas un membre fantôme.
+
+    Sinon l'éditeur Admin (qui ne liste que les actifs) affichait « — Personne — » sous une légende
+    « Alpha & Bravo » et « Enregistrer » sans rien toucher éjectait Bravo en silence.
+    """
+    from app.events import bus
+
+    alpha = _register(client, "Alpha", "Alpha#EUW")["player"]
+    bravo = _register(client, "Bravo", "Bravo#EUW")["player"]
+    team = _create_team(client, admin_headers, {"player_ids": [alpha["id"], bravo["id"]]})["team"]
+
+    response = client.patch(f"/api/admin/players/{bravo['id']}", json={"active": False}, headers=admin_headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["player"]["active"] is False
+    assert response.json()["player"]["team_id"] is None
+
+    # /api/state (Admin) et /api/duos (public) racontent la même histoire : Alpha seul dans le duo
+    assert [t["player_ids"] for t in client.get("/api/state").json()["teams"]] == [[alpha["id"]]]
+    changed = bus.recent(types={"teams_changed"})
+    assert changed and changed[-1]["data"] == {"action": "updated", "team_id": team["id"], "player_ids": [bravo["id"]]}
+    duos = client.get("/api/duos").json()
+    assert [p["player_id"] for p in duos["teams"][0]["players"]] == [alpha["id"]]
+    assert bravo["id"] not in [p["id"] for p in duos["unassigned_players"]]  # inactif : pas « sans duo »
+
+    # « Enregistrer » sans rien toucher (ce que l'éditeur envoie) ne change plus rien
+    _patch_team(client, admin_headers, team["id"], {"player_ids": [alpha["id"]]})
+    assert client.get("/api/state").json()["teams"][0]["player_ids"] == [alpha["id"]]
+
+    # Réactivé, Bravo revient « sans duo » et bloque le démarrage tant qu'il n'est pas replacé
+    response = client.patch(f"/api/admin/players/{bravo['id']}", json={"active": True}, headers=admin_headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["player"]["team_id"] is None
+    assert [p["id"] for p in client.get("/api/duos").json()["unassigned_players"]] == [bravo["id"]]
+    assert _start(client, admin_headers, expected=400)["detail"] == "Joueurs sans duo : Bravo"
+    _patch_team(client, admin_headers, team["id"], {"player_ids": [alpha["id"], bravo["id"]]})
     assert _start(client, admin_headers)["challenge"]["status"] == "running"
 
 
@@ -417,6 +488,36 @@ def test_unlinked_player_can_still_link_after_start(client: TestClient, admin_he
     response = client.post(f"/api/players/{late['id']}/link", json={"riot_id": "Retard#EUW"})
     assert response.status_code == 200, response.text
     assert response.json()["player"]["is_linked"] is True
+
+
+def test_registration_and_linking_stay_open_after_draw(client: TestClient, admin_headers: dict) -> None:
+    """`drawn` (duos tirés, challenge pas démarré) : l'inscription et la liaison restent ouvertes
+    (REGISTRATION_OPEN_STATUSES = registration + drawn), même sans plus aucun duo. C'est le contrat
+    sur lequel s'appuie l'accueil (home.js), qui affiche alors encore le formulaire et « Lier mon
+    compte » ; avant, il annonçait « Les inscriptions sont closes. » dès « Former les duos au hasard »,
+    et l'organisateur qui avait tiré des duos démo puis supprimé ces joueurs ne pouvait plus inscrire
+    personne depuis l'interface alors que l'API acceptait."""
+    _register(client, *MIKE)
+    _register(client, *LEA)
+    team = _admin_post(client, admin_headers, "/api/admin/draw")["teams"][0]
+    assert client.get("/api/state").json()["challenge"]["status"] == "drawn"
+
+    late = _register(client, "Retardataire")["player"]
+    assert late["is_linked"] is False
+    response = client.post(f"/api/players/{late['id']}/link", json={"riot_id": "Retard#EUW"})
+    assert response.status_code == 200, response.text
+    assert response.json()["player"]["is_linked"] is True
+    # L'inscription ne touche pas au tirage ; « Démarrer » dit en clair qui n'a pas de duo
+    assert client.get("/api/state").json()["challenge"]["status"] == "drawn"
+    assert _start(client, admin_headers, expected=400)["detail"] == "Joueurs sans duo : Retardataire"
+
+    # Duos tirés puis supprimés : le statut reste `drawn` (seul « Réinitialiser » le change) et les
+    # inscriptions doivent toujours être acceptées — l'accueil ne doit donc pas les cacher.
+    assert client.delete(f"/api/admin/teams/{team['id']}", headers=admin_headers).status_code == 200
+    state = client.get("/api/state").json()
+    assert state["teams"] == [] and state["challenge"]["status"] == "drawn"
+    _register(client, *SAM)
+    assert len(client.get("/api/state").json()["players"]) == 4
 
 
 def test_player_cap(client: TestClient) -> None:
@@ -731,7 +832,7 @@ def test_sse_hello(client: TestClient) -> None:
 
 def test_demo_players_are_listed_and_removable(client: TestClient, admin_headers: dict, monkeypatch) -> None:
     """Joueurs créés en démo (puuid demo-…) : listés dans /api/state, supprimables en un appel admin."""
-    _register(client, *MIKE)
+    mike_id = _register(client, *MIKE)["player"]["id"]
     _register(client, "Vrai", None)  # inscrit sans compte : pas un joueur démo
     state = client.get("/api/state").json()
     assert state["site_version"]
@@ -739,11 +840,173 @@ def test_demo_players_are_listed_and_removable(client: TestClient, admin_headers
     assert len(demo_ids) == 1
     response = client.delete("/api/admin/players/demo/all")
     assert response.status_code == 401
+    # Point de repère du polling des pages (app.js) : seuls les événements publiés par la suppression comptent
+    since = client.get("/api/events/recent").json()["last_id"]
     response = client.delete("/api/admin/players/demo/all", headers=admin_headers)
     assert response.status_code == 200
     assert response.json()["deleted"] == 1 and response.json()["names"] == ["Mike"]
     state = client.get("/api/state").json()
     assert state["demo_players"] == [] and [p["display_name"] for p in state["players"]] == ["Vrai"]
+    # Régression : la suppression publiait `challenge_reset`, donc toutes les pages ouvertes affichaient
+    # « ♻️ Le challenge a été réinitialisé. » alors que le statut n'avait pas bougé (duos figés, inscriptions
+    # closes). Elle publie `teams_changed` (rechargement silencieux des duos) ; `challenge_reset` reste
+    # réservé au vrai « Réinitialiser ».
+    events = client.get("/api/events/recent", params={"since": since}).json()["events"]
+    assert [e["type"] for e in events] == ["teams_changed"], events
+    assert events[0]["data"]["action"] == "demo_removed"
+    assert events[0]["data"]["player_ids"] == [mike_id] and events[0]["data"]["team_ids"] == []
+    assert "challenge_reset" not in _event_types()
+
+
+def _insert_real_player(engine, display_name: str) -> int:  # noqa: ANN001
+    """Joueur lié HORS démo (puuid sans préfixe `demo-`), inséré directement en base :
+    le client Riot de test ne sait créer que des puuid `demo-…`."""
+    from sqlmodel import Session
+
+    from app.db.models import Player, utcnow
+
+    with Session(engine) as session:
+        player = Player(
+            display_name=display_name,
+            game_name=display_name,
+            tag_line="EUW",
+            puuid=f"real-{display_name.lower()}",
+            summoner_id=f"sum-{display_name.lower()}",
+            linked_at=utcnow(),
+        )
+        session.add(player)
+        session.commit()
+        session.refresh(player)
+        assert player.id is not None
+        return player.id
+
+
+def _delete_demo(client: TestClient, headers: dict) -> dict:
+    response = client.delete("/api/admin/players/demo/all", headers=headers)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _event_types() -> list[str]:
+    from app.events import bus
+
+    return [e["type"] for e in bus.recent(limit=500)]
+
+
+def test_demo_removal_drops_emptied_duos_and_unblocks_start(client: TestClient, admin_headers: dict, engine) -> None:  # noqa: ANN001
+    """Scénario de l'organisateur : duos tirés avec des joueurs démo → « Supprimer les joueurs de démo »
+    → inscription de deux vrais joueurs → Démarrer. Les duos vidés par la suppression disparaissent
+    (sinon « Le duo Duo Rouge est vide. ») et le statut revient à `registration`."""
+    for who in (MIKE, LEA, SAM, ZOE):
+        _register(client, *who)
+    _admin_post(client, admin_headers, "/api/admin/draw")
+    assert client.get("/api/state").json()["challenge"]["status"] == "drawn"
+
+    result = _delete_demo(client, admin_headers)
+    assert result["deleted"] == 4 and result["teams_removed"] == 2
+    assert result["status"] == "registration" and result["hint"] is None
+
+    state = client.get("/api/state").json()
+    assert state["teams"] == [] and state["players"] == []
+    assert state["challenge"]["status"] == "registration"
+    assert client.get("/api/duos").json()["teams"] == []
+
+    # Événements : rechargement des duos (teams_changed), jamais le faux « challenge réinitialisé »
+    types = _event_types()
+    assert "challenge_reset" not in types
+    from app.events import bus
+
+    changed = bus.recent(types={"teams_changed"})
+    assert len(changed) == 1
+    assert changed[0]["data"]["action"] == "demo_removed"
+    assert len(changed[0]["data"]["team_ids"]) == 2 and len(changed[0]["data"]["player_ids"]) == 4
+
+    # Deux vrais joueurs liés → duo → le challenge démarre sans avoir à nettoyer quoi que ce soit
+    real1 = _insert_real_player(engine, "Alice")
+    real2 = _insert_real_player(engine, "Bob")
+    team = _create_team(client, admin_headers, {"player_ids": [real1, real2]})["team"]
+    assert team["name"] == "Duo Rouge"
+    started = _start(client, admin_headers)
+    assert started["challenge"]["status"] == "running" and started["warnings"] == []
+
+
+def test_demo_removal_keeps_mixed_and_manual_empty_duos(client: TestClient, admin_headers: dict, engine) -> None:  # noqa: ANN001
+    """Seuls les duos vidés PAR la suppression disparaissent : un duo mixte (1 démo + 1 réel) garde
+    son vrai joueur, un duo vide créé à la main (emplacement) est conservé, le statut ne bouge pas."""
+    demo = _register(client, *MIKE)["player"]
+    real = _insert_real_player(engine, "Alice")
+    mixed = _create_team(client, admin_headers, {"player_ids": [demo["id"], real]})["team"]
+    placeholder = _create_team(client, admin_headers, {"name": "Duo libre"})["team"]
+    demo_only = _create_team(client, admin_headers, {"player_ids": [_register(client, *LEA)["player"]["id"]]})["team"]
+    assert client.get("/api/state").json()["challenge"]["status"] == "registration"
+
+    result = _delete_demo(client, admin_headers)
+    assert result["deleted"] == 2 and result["teams_removed"] == 1 and result["hint"] is None
+
+    state = client.get("/api/state").json()
+    assert state["challenge"]["status"] == "registration"
+    teams = {t["id"]: t for t in state["teams"]}
+    assert set(teams) == {mixed["id"], placeholder["id"]}, "le duo 100 % démo disparaît, les autres restent"
+    assert demo_only["id"] not in teams
+    assert teams[mixed["id"]]["player_ids"] == [real]
+    assert teams[placeholder["id"]]["player_ids"] == []
+    assert [p["display_name"] for p in state["players"]] == ["Alice"]
+    assert "challenge_reset" not in _event_types()
+
+
+def test_demo_removal_in_drawn_state_keeps_status_when_a_duo_survives(
+    client: TestClient, admin_headers: dict, engine
+) -> None:  # noqa: ANN001
+    """`drawn` : si au moins un duo subsiste après la suppression, le tirage reste valable."""
+    _register(client, *MIKE)
+    _register(client, *LEA)
+    _admin_post(client, admin_headers, "/api/admin/draw")
+    real = _insert_real_player(engine, "Alice")
+    kept = _create_team(client, admin_headers, {"player_ids": [real]})["team"]
+
+    result = _delete_demo(client, admin_headers)
+    assert result["deleted"] == 2 and result["teams_removed"] == 1 and result["status"] == "drawn"
+    state = client.get("/api/state").json()
+    assert state["challenge"]["status"] == "drawn"
+    assert [t["id"] for t in state["teams"]] == [kept["id"]]
+
+
+def test_demo_removal_while_running_keeps_duos_and_hints_reset(
+    client: TestClient, admin_headers: dict, engine
+) -> None:  # noqa: ANN001
+    """Challenge en cours : les duos sont figés (snapshots / parties intacts), rien d'autre n'est
+    supprimé ; la réponse explique qu'il faut « Réinitialiser » pour recomposer les duos."""
+    _, _, draw, _ = _setup_duo(client, admin_headers)
+    team_id = draw["teams"][0]["id"]
+
+    result = _delete_demo(client, admin_headers)
+    assert result["deleted"] == 2 and result["teams_removed"] == 0 and result["status"] == "running"
+    assert result["hint"] and "Réinitialiser" in result["hint"] and "en cours" in result["hint"]
+
+    state = client.get("/api/state").json()
+    assert state["challenge"]["status"] == "running"
+    assert [t["id"] for t in state["teams"]] == [team_id] and state["teams"][0]["player_ids"] == []
+    types = _event_types()
+    assert "challenge_reset" not in types and "teams_changed" in types
+
+    # Terminé : même garde-fou, message adapté (inscriptions closes → joueur démo inséré en base)
+    _admin_post(client, admin_headers, "/api/admin/challenge/finish")
+    from sqlmodel import Session
+
+    from app.db.models import Player, utcnow
+
+    with Session(engine) as session:
+        session.add(Player(display_name="Sam", puuid="demo-late", team_id=team_id, linked_at=utcnow()))
+        session.commit()
+    result = _delete_demo(client, admin_headers)
+    assert result["deleted"] == 1 and result["status"] == "finished"
+    assert result["hint"] and "Réinitialiser" in result["hint"] and "terminé" in result["hint"]
+    assert client.get("/api/state").json()["challenge"]["status"] == "finished"
+
+    # Réinitialiser (en gardant les joueurs) débloque bien la recomposition des duos
+    reset = _admin_post(client, admin_headers, "/api/admin/challenge/reset", {"keep_players": True})
+    assert reset["challenge"]["status"] == "registration"
+    assert client.get("/api/state").json()["teams"] == []
 
 
 def test_html_pages_render(client: TestClient) -> None:
@@ -768,6 +1031,46 @@ def test_solo_duo_can_start_with_warning(client: TestClient, admin_headers: dict
     assert started["warnings"] == [f"Le duo {team['name']} n'a qu'un joueur (Mike)."]
 
 
+def test_missing_tzdata_falls_back_to_utc(
+    client: TestClient, admin_headers: dict, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Windows sans le paquet tzdata : `ZoneInfo("Europe/Paris")` échoue. Les pages de stats doivent
+    rester à 200 (repli UTC, journalisé une seule fois) et l'Admin être prévenu au démarrage."""
+    import app.config as config
+
+    def _no_tz_database(key: str) -> ZoneInfo:
+        raise ZoneInfoNotFoundError(f"No time zone found with key {key}")
+
+    monkeypatch.setattr(config, "ZoneInfo", _no_tz_database)
+    settings = config.reload_settings()
+    assert settings.timezone == "Europe/Paris"
+    p1 = _register(client, *MIKE)["player"]
+    p2 = _register(client, *LEA)["player"]
+    _admin_post(client, admin_headers, "/api/admin/teams", {"player_ids": [p1["id"], p2["id"]]}, expected=201)
+    with caplog.at_level(logging.WARNING, logger="pekin.config"):
+        for path in ("/api/duos", "/api/leaderboard", f"/api/players/{p1['id']}", "/api/state"):
+            response = client.get(path)
+            assert response.status_code == 200, (path, response.text[:200])
+        assert settings.tz is timezone.utc and settings.tz_fallback is True
+    tz_logs = [r for r in caplog.records if r.name == "pekin.config" and "tzdata" in r.getMessage()]
+    assert len(tz_logs) == 1, "l'avertissement de repli doit être journalisé une seule fois"
+    started = _admin_post(client, admin_headers, "/api/admin/challenge/start")
+    assert started["challenge"]["status"] == "running"
+    assert started["warnings"] == [
+        "Fuseau horaire Europe/Paris introuvable : installe le paquet tzdata (relance PekinExpress.bat). "
+        "En attendant, les journées sont comptées en UTC."
+    ]
+
+
+def test_timezone_resolved_once_without_fallback() -> None:
+    """Cas nominal : le fuseau est résolu et mémorisé, sans avertissement ni repli."""
+    from app.config import get_settings
+
+    settings = get_settings()
+    assert settings.tz is settings.tz and settings.tz.key == "Europe/Paris"  # type: ignore[attr-defined]
+    assert settings.tz_fallback is False
+
+
 def test_recent_events_polling(client: TestClient, admin_headers: dict) -> None:
     """Interrogation des nouveautés : pas de rejeu au premier appel, puis seulement les nouveaux événements."""
     first = client.get("/api/events/recent").json()
@@ -779,3 +1082,22 @@ def test_recent_events_polling(client: TestClient, admin_headers: dict) -> None:
     types = [e["type"] for e in data["events"]]
     assert "player_registered" in types and data["last_id"] > since
     assert client.get(f"/api/events/recent?since={data['last_id']}").json()["events"] == []
+
+
+def test_recent_events_after_restart_reports_lower_last_id(client: TestClient) -> None:
+    """Après un redémarrage le bus repart à 1 : un onglet qui demande `since=230` doit voir le vrai
+    `last_id` (plus petit) pour se recaler dessus, sans qu'on lui rejoue l'historique du nouveau processus."""
+    from app.events import bus
+
+    previous_counter = bus._counter  # noqa: SLF001
+    bus._counter = 0  # noqa: SLF001 — nouveau processus
+    try:
+        for _ in range(3):
+            bus.publish("poll_done", {})
+        data = client.get("/api/events/recent?since=230").json()
+        assert data["events"] == [] and data["last_id"] == 3
+        bus.publish("live_start", {"player_id": 1, "display_name": "Alice"})
+        data = client.get("/api/events/recent?since=3").json()
+        assert [e["type"] for e in data["events"]] == ["live_start"] and data["last_id"] == 4
+    finally:
+        bus._counter = max(previous_counter, bus._counter)  # noqa: SLF001

@@ -6,7 +6,8 @@
   d'une clé de développement) : verrou asyncio + horodatages, sans boucle active ;
 - retries : 429 → attente `Retry-After` (2 s par défaut), 5xx et erreurs réseau →
   backoff exponentiel 1 / 2 / 4 s ; 3 nouvelles tentatives au maximum ;
-- 404 → `RiotNotFound`, 401/403 → `RiotUnauthorized`, autres → `RiotError(status)`.
+- 404 → `RiotNotFound`, 401/403 → `RiotUnauthorized`, réseau / timeout épuisés →
+  `RiotUnreachable`, autres → `RiotError(status)`.
 
 `sleep` / `clock` / `rate_limits` sont injectables (tests sans attente réelle).
 """
@@ -33,6 +34,7 @@ from app.riot.base import (
     RiotNotFound,
     RiotRateLimited,
     RiotUnauthorized,
+    RiotUnreachable,
     SummonerDTO,
 )
 
@@ -144,7 +146,8 @@ class RiotClient:
                 # Erreur réseau / timeout : même traitement qu'un 5xx
                 retries_5xx += 1
                 if retries_5xx > self._max_retries:
-                    raise RiotError(f"Erreur réseau Riot sur {path} : {exc}") from exc
+                    # `str(httpx.ReadTimeout)` est vide : on nomme le type pour un message lisible
+                    raise RiotUnreachable(f"Erreur réseau Riot sur {path} : {type(exc).__name__}") from exc
                 delay = BACKOFF_BASE_S * 2 ** (retries_5xx - 1)
                 log.warning("Riot : erreur réseau sur %s (%s), nouvel essai dans %.0fs (%d/%d)",
                             path, type(exc).__name__, delay, retries_5xx, self._max_retries)

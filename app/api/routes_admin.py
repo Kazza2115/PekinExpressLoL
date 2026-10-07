@@ -178,8 +178,9 @@ def _parse_color(value: str) -> str:
 
 
 def _ensure_teams_editable(challenge: Challenge) -> None:
-    """La composition des duos est figée pendant le challenge (`running`)."""
-    if challenge.status == ChallengeStatus.RUNNING:
+    """La composition des duos est figée une fois le challenge démarré : en cours (`running`) comme
+    terminé (`finished`, le classement final ne doit plus bouger). « Réinitialiser » la rouvre."""
+    if challenge.status in (ChallengeStatus.RUNNING, ChallengeStatus.FINISHED):
         raise _bad_request(TEAMS_LOCKED_DETAIL)
 
 
@@ -291,6 +292,12 @@ async def start_challenge(
         raise _bad_request("Le challenge est déjà en cours.")
     # Accepté depuis registration / drawn / finished dès que les duos sont complets
     warnings = _check_teams_ready(session)
+    settings = get_settings()
+    if settings.tz_fallback:
+        warnings.append(
+            f"Fuseau horaire {settings.timezone} introuvable : installe le paquet tzdata "
+            "(relance PekinExpress.bat). En attendant, les journées sont comptées en UTC."
+        )
 
     start_at = parse_datetime(body.start_at if body is not None else None, "start_at") or utcnow()
     challenge.status = ChallengeStatus.RUNNING
@@ -517,11 +524,18 @@ async def patch_player(
         if clash is not None:
             raise _bad_request("Ce pseudo est déjà pris.")
         player.display_name = name
+    released_from: int | None = None
     if "active" in fields and body.active is not None:
         player.active = body.active
         if not body.active:
             _drop_live_game(player)
-    if "team_id" in fields:
+            if player.team_id is not None:
+                # « Désactiver (exclu du suivi et des duos) » : le duo ne garde pas un membre fantôme.
+                # Sinon l'éditeur Admin (actifs seulement) affiche « — Personne — » sous une légende
+                # « Alpha & Bravo » et « Enregistrer » sans rien toucher éjecte le joueur en silence.
+                released_from = player.team_id
+                player.team_id = None
+    if "team_id" in fields:  # traité après `active` : un `team_id` explicite garde la priorité
         if body.team_id is None:
             player.team_id = None
         else:
@@ -529,6 +543,9 @@ async def patch_player(
     session.add(player)
     session.commit()
     session.refresh(player)
+    if released_from is not None:
+        # Admin et /duos rechargent sur `teams_changed`
+        bus.publish("teams_changed", {"action": "updated", "team_id": released_from, "player_ids": [player.id]})
     return {"player": player_public(player, _last_solo_snapshot(session, player_id))}
 
 
@@ -550,15 +567,72 @@ def _delete_player_rows(session: Session, player: Player) -> None:
     session.delete(player)
 
 
+DEMO_REMOVED_HINT_RUNNING = (
+    "Le challenge est toujours en cours : les duos sont figés. Clique « Réinitialiser » "
+    "(en gardant les joueurs) pour recomposer les duos avec les vrais joueurs."
+)
+DEMO_REMOVED_HINT_FINISHED = (
+    "Le challenge est terminé : les duos sont figés. Clique « Réinitialiser » "
+    "(en gardant les joueurs) pour recomposer les duos."
+)
+
+
 @router.delete("/players/demo/all")
-async def delete_demo_players(session: Session = Depends(get_session)) -> dict[str, Any]:
-    """Supprime les joueurs créés en mode démo (puuid `demo-…`) : inutiles et bloquants en mode réel."""
+async def delete_demo_players(
+    session: Session = Depends(get_session),
+    challenge: Challenge = Depends(get_challenge),
+) -> dict[str, Any]:
+    """Supprime les joueurs créés en mode démo (puuid `demo-…`) : inutiles et bloquants en mode réel.
+
+    Avant le démarrage (`registration` / `drawn`), les duos vidés PAR cette suppression sont retirés
+    aussi : un duo sans joueur bloque « Démarrer » (« Le duo X est vide. ») et s'affiche vide sur
+    /duos. Un duo vide créé à la main (sans joueur démo) ou un duo gardant un vrai joueur est
+    conservé. Pendant / après le challenge, les duos sont figés : rien d'autre n'est touché et la
+    réponse porte un `hint` invitant à « Réinitialiser » (en gardant les joueurs).
+    """
     players = [p for p in session.exec(select(Player)).all() if (p.puuid or "").startswith("demo-")]
+    names = [p.display_name for p in players]
+    deleted_ids = [p.id for p in players if p.id is not None]
+    # Duos qui contenaient au moins un joueur démo : seuls ceux-là peuvent avoir été vidés ici
+    touched = {p.team_id for p in players if p.team_id is not None}
     for player in players:
         _delete_player_rows(session, player)
+    session.flush()  # clé étrangère player.team_id : les joueurs partent avant les duos
+
+    removed_team_ids: list[int] = []
+    hint: str | None = None
+    if challenge.status in (ChallengeStatus.REGISTRATION, ChallengeStatus.DRAWN):
+        for team_id in sorted(touched):
+            team = session.get(Team, team_id)
+            if team is not None and not _team_player_ids(session, team_id):
+                session.delete(team)
+                removed_team_ids.append(team_id)
+        session.flush()
+        if challenge.status == ChallengeStatus.DRAWN and session.exec(select(Team.id)).first() is None:
+            # Plus aucun duo : le tirage n'existe plus, on revient à la phase d'inscription
+            challenge.status = ChallengeStatus.REGISTRATION
+            session.add(challenge)
+    elif touched and challenge.status == ChallengeStatus.RUNNING:
+        hint = DEMO_REMOVED_HINT_RUNNING
+    elif touched and challenge.status == ChallengeStatus.FINISHED:
+        hint = DEMO_REMOVED_HINT_FINISHED
     session.commit()
-    bus.publish("challenge_reset", {"demo_players_removed": len(players)}) if players else None
-    return {"ok": True, "deleted": len(players), "names": [p.display_name for p in players]}
+    session.refresh(challenge)
+    if players:
+        # `teams_changed` : Admin et /duos rechargent ; pas `challenge_reset`, qui afficherait
+        # partout « ♻️ Le challenge a été réinitialisé. » alors que le statut n'a pas changé
+        bus.publish(
+            "teams_changed",
+            {"action": "demo_removed", "team_ids": removed_team_ids, "player_ids": deleted_ids},
+        )
+    return {
+        "ok": True,
+        "deleted": len(players),
+        "names": names,
+        "teams_removed": len(removed_team_ids),
+        "status": challenge.status,
+        "hint": hint,
+    }
 
 
 # ---------------------------------------------------------------------------

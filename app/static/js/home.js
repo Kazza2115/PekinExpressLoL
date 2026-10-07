@@ -97,7 +97,7 @@
           </div>
         </div>
         ${p.link_error && !p.is_linked ? `<div class="link-error">⚠ ${esc(p.link_error)}</div>` : ''}
-        ${!p.is_linked && status === 'registration' ? `
+        ${!p.is_linked && (status === 'registration' || status === 'drawn') ? `
           <form class="slot-link-form" data-link-form="${p.id}">
             <input type="text" name="riot_id" placeholder="Pseudo#TAG" value="${esc(p.riot_id || '')}" aria-label="Riot ID de ${esc(p.display_name)}" autocapitalize="off" spellcheck="false">
             <button type="submit" class="btn btn-sm btn-primary">Lier mon compte</button>
@@ -143,7 +143,9 @@
 
   function renderLayout() {
     const status = (state.challenge && state.challenge.status) || 'registration';
-    const registration = status === 'registration';
+    // Même règle que l'API (REGISTRATION_OPEN_STATUSES = registration + drawn) : les duos tirés
+    // n'empêchent ni de s'inscrire ni de lier son compte tant que le challenge n'a pas démarré.
+    const registration = status === 'registration' || status === 'drawn';
     els.registerCard.hidden = !registration;
     if (els.demoCard) els.demoCard.hidden = !registration;
     els.side.hidden = !registration;
@@ -267,6 +269,7 @@
     challenge_started: reload,
     challenge_finished: reload,
     challenge_reset: reload,
+    teams_changed: reload,
     rank_changed: reload,
   });
   setInterval(() => { if (!document.hidden) load(); }, 15000);

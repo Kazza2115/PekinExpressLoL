@@ -32,6 +32,10 @@ class RiotRateLimited(RiotError):
     """429 persistant malgré les retries."""
 
 
+class RiotUnreachable(RiotError):
+    """API Riot injoignable : erreur réseau ou timeout après retries."""
+
+
 @dataclass
 class AccountDTO:
     puuid: str

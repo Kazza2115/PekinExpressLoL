@@ -44,7 +44,15 @@ from app.db.models import (
 from app.db.session import as_utc, session_scope
 from app.events import EventBus
 from app.riot import ddragon
-from app.riot.base import LeagueEntryDTO, RiotAPI, RiotError, RiotNotFound, RiotRateLimited, RiotUnauthorized
+from app.riot.base import (
+    LeagueEntryDTO,
+    RiotAPI,
+    RiotError,
+    RiotNotFound,
+    RiotRateLimited,
+    RiotUnauthorized,
+    RiotUnreachable,
+)
 from app.services.notifications import format_live_start, format_match_recorded, send_discord
 from app.services.stats import absolute_lp
 from app.state import AppState, LiveGameState, PollReport
@@ -79,10 +87,12 @@ def public_error_label(exc: Exception) -> str:
         return "API Riot saturée (limite de requêtes)"
     if isinstance(exc, RiotNotFound):
         return "introuvable côté Riot"
+    if isinstance(exc, (RiotUnreachable, httpx.HTTPError)):
+        # RiotClient convertit toute erreur réseau épuisée en RiotUnreachable (status None) ;
+        # une httpx.HTTPError brute ne vient que d'un client tiers
+        return "API Riot injoignable"
     if isinstance(exc, RiotError):
         return f"erreur API Riot ({exc.status or '?'})"
-    if isinstance(exc, httpx.HTTPError):
-        return "API Riot injoignable"
     return type(exc).__name__
 
 
@@ -157,6 +167,12 @@ class _CycleContext:
     players_by_puuid: dict[str, Player]
     teams_by_id: dict[int, Team]
     unauthorized: bool = False  # clé Riot refusée : on arrête le cycle (loggé une fois)
+    unreachable: bool = False  # Riot injoignable : on arrête le cycle (loggé une fois)
+
+    @property
+    def aborted(self) -> bool:
+        """Cycle à interrompre : inutile d'enchaîner les requêtes (clé refusée ou Riot injoignable)."""
+        return self.unauthorized or self.unreachable
 
 
 # Signature commune des trois étapes par joueur
@@ -297,6 +313,10 @@ class Poller:
     # ------------------------------------------------------------------ cycle
 
     async def _run_cycle(self) -> PollReport:
+        # Version Data Dragon rafraîchie avant le cycle (cache 1 h, jamais bloquant) : sans ça, les
+        # icônes (avatars, champions, objets) restaient figées sur la version de repli tant
+        # qu'aucune partie en cours n'avait été détectée — hors mesure de `duration_s` (Riot seul)
+        await ddragon.get_version()
         report = PollReport(started_at=_utcnow())
         started = time.monotonic()
         requests_before = getattr(self.api, "request_count", None)
@@ -315,7 +335,7 @@ class Poller:
                 # A. rangs, B. parties, C. parties en cours — chaque étape pour tous les joueurs
                 for name, phase in self._phases():
                     for player in players:
-                        if ctx.unauthorized:
+                        if ctx.aborted:
                             break
                         await self._run_phase(name, phase, session, player, challenge, report, ctx)
         except Exception as exc:  # noqa: BLE001 — ex. base indisponible
@@ -354,7 +374,7 @@ class Poller:
         if ctx is None:
             ctx = self._build_context(session)
         for name, phase in self._phases():
-            if ctx.unauthorized:
+            if ctx.aborted:
                 break
             await self._run_phase(name, phase, session, player, challenge, report, ctx)
 
@@ -393,6 +413,11 @@ class Poller:
             if not ctx.unauthorized:
                 log.error("Clé Riot invalide ou expirée — cycle interrompu (%s)", exc)
             ctx.unauthorized = True
+        elif isinstance(exc, RiotUnreachable):
+            # Chaque requête a déjà épuisé ses retries : on n'enchaîne pas les suivantes
+            if not ctx.unreachable:
+                log.warning("API Riot injoignable — cycle interrompu (%s)", exc)
+            ctx.unreachable = True
         else:
             # Erreurs Riot et réseau : une ligne suffit ; traceback seulement pour l'inattendu
             expected = isinstance(exc, (RiotError, httpx.HTTPError))

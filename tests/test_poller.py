@@ -29,6 +29,7 @@ from app.riot.base import (
     RiotError,
     RiotNotFound,
     RiotUnauthorized,
+    RiotUnreachable,
     SummonerDTO,
 )
 from app.services.poller import Poller, backfill_lp_changes
@@ -492,6 +493,34 @@ async def test_errors_are_reported_not_raised(session: Session):
     api.entries["p-mike"] = gold_iv(50)
     report = await poller.poll_once()
     assert report.errors == []
+    assert report.new_snapshots == 2  # Mike (Gold) + Jean (unranked)
+
+
+async def test_unreachable_riot_stops_the_cycle_after_first_error(session: Session):
+    """Riot injoignable : chaque requête a déjà épuisé ses retries, on n'enchaîne pas les 5 autres."""
+    make_challenge(session, ChallengeStatus.RUNNING, start_at=utcnow() - timedelta(hours=1))
+    make_player(session, "Mike", "p-mike")
+    make_player(session, "Jean", "p-jean")
+    api = ScriptedAPI()
+    poller = Poller(api, bus, state)
+
+    api.league_error = RiotUnreachable("Erreur réseau Riot sur /lol/league/v4 : ReadTimeout")
+    report = await poller.poll_once()
+    # Une seule entrée, libellé public explicite (pas « erreur API Riot (?) »)
+    assert report.errors == ["Mike [league] : API Riot injoignable"]
+    # Aucune requête league / matches / spectator pour Jean ni pour les étapes suivantes de Mike
+    assert report.requests == 1
+    assert api.calls == []  # pas de Match-V5
+    assert report.duration_s < 1.0  # pas d'attente supplémentaire côté poller
+    assert events_of("poll_done")[-1]["data"]["errors"] == report.errors
+    assert state.polling is False
+
+    # Le cycle suivant repart normalement une fois Riot de retour
+    api.league_error = None
+    api.entries["p-mike"] = gold_iv(50)
+    report = await poller.poll_once()
+    assert report.errors == []
+    assert report.requests == 6
     assert report.new_snapshots == 2  # Mike (Gold) + Jean (unranked)
 
 

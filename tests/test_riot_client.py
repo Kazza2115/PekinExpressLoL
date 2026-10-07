@@ -13,8 +13,9 @@ import httpx
 import pytest
 
 from app.config import get_settings, reload_settings
-from app.riot.base import RiotError, RiotNotFound, RiotRateLimited, RiotUnauthorized
+from app.riot.base import RiotError, RiotNotFound, RiotRateLimited, RiotUnauthorized, RiotUnreachable
 from app.riot.client import RiotClient
+from app.services.poller import public_error_label
 
 
 @pytest.fixture
@@ -136,6 +137,29 @@ async def test_network_error_is_retried_like_5xx():
     account = await client.get_account_by_riot_id("La Peace", "CHILL")
     assert account.puuid == "puuid-1"
     assert clock.sleeps == [1.0]
+
+
+@pytest.mark.anyio
+async def test_network_error_exhausted_raises_unreachable():
+    """Riot ne répond jamais : 4 tentatives (1 + 3 retries), backoff 1/2/4 s, puis `RiotUnreachable`."""
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        raise httpx.ReadTimeout("", request=request)  # str() vide, comme en production
+
+    client, clock = make_client(handler)
+    with pytest.raises(RiotUnreachable) as excinfo:
+        await client.get_league_entries_by_puuid("puuid-1")
+    assert isinstance(excinfo.value, RiotError)  # reste une RiotError pour les appelants génériques
+    assert excinfo.value.status is None
+    assert "ReadTimeout" in str(excinfo.value)  # le type est nommé, le message ne finit pas par " : "
+    # Libellé public (Admin → Système, /health, poll_done) : « injoignable », pas « erreur API Riot (?) »
+    assert public_error_label(excinfo.value) == "API Riot injoignable"
+    assert attempts == 4
+    assert client.request_count == 4
+    assert clock.sleeps == [1.0, 2.0, 4.0]
 
 
 @pytest.mark.anyio
