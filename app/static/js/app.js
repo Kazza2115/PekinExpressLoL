@@ -9,6 +9,7 @@
 
   App.page = body.dataset.page || '';
   App.demoMode = body.dataset.demo === 'true';
+  App.assetVersion = body.dataset.asset || '';
   App.gamesPerDay = parseInt(body.dataset.gamesPerDay || '10', 10) || 10;
   App.reducedMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
@@ -575,6 +576,7 @@
   const EVENT_TYPES = [
     'player_registered', 'player_linked', 'draw_done', 'challenge_started', 'challenge_finished',
     'challenge_reset', 'live_start', 'live_end', 'match_recorded', 'rank_changed', 'poll_done', 'ping',
+    'hello', 'teams_changed',
   ];
   const listeners = {}; // type → [fn]
   let source = null;
@@ -684,6 +686,18 @@
     App.notify('🚀 Le challenge a commencé !', 'Que le meilleur duo gagne.');
   });
   App.onEvent('challenge_finished', () => App.toast('🏁 Le challenge est terminé.', { type: 'info' }));
+
+  /* Après une mise à jour du site, le serveur redémarre : quand la page se reconnecte au flux
+     SSE et voit (via `hello`) que la version des fichiers a changé, elle se recharge d'elle-même. */
+  let reloadScheduled = false;
+  App.onEvent('hello', (d) => {
+    if (reloadScheduled || !d || !d.asset_version || !App.assetVersion) return;
+    if (d.asset_version !== App.assetVersion) {
+      reloadScheduled = true;
+      App.toast('⬆️ Nouvelle version du site, rechargement…', { type: 'info', timeout: 3000 });
+      setTimeout(() => location.reload(), 1200);
+    }
+  });
   App.onEvent('challenge_reset', () => App.toast('♻️ Le challenge a été réinitialisé.', { type: 'warning' }));
   App.onEvent('player_registered', (d) => App.toast(`👋 ${who(d)} a rejoint le challenge`, { type: 'info', timeout: 4000 }));
   App.onEvent('player_linked', (d) => App.toast(`🔗 ${who(d)} a lié son compte`, { type: 'success', timeout: 4000 }));

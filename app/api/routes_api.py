@@ -52,6 +52,7 @@ from app.riot import ddragon, get_api
 from app.riot.base import RiotAPI
 from app.services.registration import link_player, parse_riot_id, register_player
 from app.state import state
+from app.version import ASSET_VERSION
 
 log = logging.getLogger("pekin.api")
 
@@ -274,6 +275,7 @@ def get_state(
         "live_count": len(state.live_games),
         "last_poll": _last_poll_dict(),
         "base_url": get_settings().base_url,
+        "asset_version": ASSET_VERSION,
     }
 
 
@@ -504,6 +506,7 @@ async def get_events(
             "challenge": challenge_to_dict(challenge),
             "live_count": len(state.live_games),
             "last_event_id": recent[-1]["id"] if recent else 0,
+            "asset_version": ASSET_VERSION,
         }
     headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     return StreamingResponse(

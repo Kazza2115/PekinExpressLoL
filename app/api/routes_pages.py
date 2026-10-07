@@ -6,7 +6,6 @@ Chaque page reçoit : `request`, `page` (nom), `challenge` (dict), `demo_mode`,
 
 from __future__ import annotations
 
-import hashlib
 
 from pathlib import Path
 from typing import Annotated, Any
@@ -77,20 +76,6 @@ def _load_challenge(session: Session) -> Challenge | None:
         return None
 
 
-def _compute_asset_version() -> str:
-    """Empreinte des fichiers statiques : change à chaque mise à jour du site, donc les
-    navigateurs rechargent CSS/JS au lieu de servir une ancienne version en cache."""
-    digest = hashlib.sha1()
-    static_dir = Path(__file__).resolve().parent.parent / "static"
-    for file in sorted(static_dir.rglob("*")):
-        if file.is_file():
-            digest.update(file.name.encode("utf-8"))
-            digest.update(str(file.stat().st_mtime_ns).encode("utf-8"))
-            digest.update(str(file.stat().st_size).encode("utf-8"))
-    return digest.hexdigest()[:10]
-
-
-ASSET_VERSION = _compute_asset_version()
 
 
 def _context(request: Request, page: str, session: Session, **extra: Any) -> dict[str, Any]:

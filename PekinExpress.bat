@@ -2,8 +2,9 @@
 rem =====================================================================
 rem  Pekin Express LoL - lancement en un double-clic (Windows)
 rem  1) cree le fichier .env (cle Riot, mot de passe) s'il n'existe pas
-rem  2) installe Python/venv + dependances au premier lancement
-rem  3) demarre le site et l'ouvre dans le navigateur
+rem  2) installe Python/venv + dependances (mises a jour comprises)
+rem  3) demarre le site ; il redemarre tout seul quand ses fichiers
+rem     changent (apres MiseAJour.bat par exemple)
 rem  Les autres joueurs se connectent sur http://<IP de ce PC>:8000
 rem =====================================================================
 setlocal
@@ -53,16 +54,16 @@ if errorlevel 1 (
     echo  ERREUR : la creation de l'environnement a echoue ^(voir ci-dessus^).
     goto fail
 )
-echo  Installation des dependances ^(1 a 2 minutes^) ...
 ".venv\Scripts\python.exe" -m pip install --upgrade pip
-".venv\Scripts\python.exe" -m pip install -r requirements.txt
+:venv_ok
+echo  [2/3] Dependances ^(installation / mise a jour^) ...
+".venv\Scripts\python.exe" -m pip install --quiet --disable-pip-version-check -r requirements.txt
 if errorlevel 1 (
     echo.
     echo  ERREUR : l'installation des dependances a echoue ^(voir ci-dessus^).
     echo  Verifie la connexion Internet, puis relance ce fichier.
     goto fail
 )
-:venv_ok
 echo  [2/3] Dependances : OK
 
 rem --- 3. Lancement -------------------------------------------------------
@@ -70,11 +71,14 @@ echo  [3/3] Demarrage du site ...
 echo.
 echo  Site : http://localhost:8000
 echo  Autres PC du reseau : http://^<IP de ce PC^>:8000  ^(ipconfig pour l'IP^)
+echo  Pour installer une nouvelle version : double-clic sur MiseAJour.bat,
+echo  le site redemarre tout seul.
 echo  LAISSE CETTE FENETRE OUVERTE pendant le challenge. Ctrl+C pour arreter.
 echo.
 rem Le navigateur s'ouvre 3 s plus tard, le temps que le serveur demarre
 start "" cmd /c "timeout /t 3 /nobreak >nul & start "" http://localhost:8000"
-".venv\Scripts\python.exe" -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+rem --reload : le serveur redemarre de lui-meme quand les fichiers du site changent
+".venv\Scripts\python.exe" -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app
 echo.
 echo  Le serveur s'est arrete.
 goto end
@@ -93,7 +97,7 @@ rem Ecrit un .env complet (identique a .env.example) sans dependre de la copie
 >>".env" echo POLL_INTERVAL_SECONDS=90
 >>".env" echo TRACK_FLEX=false
 >>".env" echo.
->>".env" echo # Mot de passe de l'organisateur (page Admin, roue, demarrage)
+>>".env" echo # Mot de passe de l'organisateur (page Admin, duos, demarrage)
 >>".env" echo ADMIN_PASSWORD=change-me
 >>".env" echo.
 >>".env" echo # Base SQLite

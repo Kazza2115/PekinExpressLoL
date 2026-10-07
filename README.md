@@ -324,6 +324,19 @@ cloudflared tunnel --url http://127.0.0.1:8000      # PowerShell : .\cloudflared
 
 ngrok (`ngrok http 8000`) fonctionne pareil.
 
+### Mettre à jour le site
+
+Quand une nouvelle version est publiée sur GitHub :
+
+- **Windows** : double-clique sur **`MiseAJour.bat`**. Il récupère la dernière version avec
+  Git (à installer une fois : `winget install Git.Git` dans PowerShell, ou
+  https://git-scm.com/download/win), relie le dossier au dépôt la première fois, installe les
+  nouvelles dépendances, et c'est tout : le site déjà lancé **redémarre tout seul** dès que ses
+  fichiers changent, et les pages ouvertes dans les navigateurs se rechargent d'elles-mêmes.
+  Tes fichiers `.env` et `data\` ne sont jamais touchés.
+- **macOS / Linux / VPS** : `git pull` puis `pip install -r requirements.txt` ; relance le
+  serveur (ou lance-le avec `--reload --reload-dir app` pour qu'il redémarre seul).
+
 ### Option 2 : un petit serveur (VPS ou hébergeur de conteneurs)
 
 Le projet contient un `Dockerfile` et un `docker-compose.yml` :
