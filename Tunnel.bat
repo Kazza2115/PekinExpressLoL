@@ -26,11 +26,11 @@ if errorlevel 1 (
 )
 
 :run
-echo  Le site doit deja tourner (PekinExpress.bat) sur http://localhost:8000
+echo  Le site doit deja tourner (PekinExpress.bat) : verifie http://localhost:8000
 echo  L'adresse a partager apparait ci-dessous (ligne https://....trycloudflare.com).
 echo  Elle change a chaque lancement. LAISSE CETTE FENETRE OUVERTE. Ctrl+C pour arreter.
 echo.
-"cloudflared.exe" tunnel --url http://localhost:8000
+"cloudflared.exe" tunnel --url http://127.0.0.1:8000
 echo.
 echo  Le tunnel s'est arrete.
 goto end
