@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -69,9 +70,22 @@ async def lifespan(app: FastAPI):
         await api.aclose()
 
 
+SLOW_REQUEST_S = 2.0
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Pékin Express LoL", version="0.1.0", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    @app.middleware("http")
+    async def log_slow_requests(request, call_next):  # noqa: ANN001
+        """Toute requête de plus de SLOW_REQUEST_S est signalée (diagnostic de lenteur)."""
+        started = time.monotonic()
+        response = await call_next(request)
+        elapsed = time.monotonic() - started
+        if elapsed > SLOW_REQUEST_S and request.url.path != "/api/events":
+            log.warning("Requête lente : %s %s en %.1f s", request.method, request.url.path, elapsed)
+        return response
 
     from app.api.routes_admin import router as admin_router
     from app.api.routes_api import router as api_router

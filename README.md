@@ -350,8 +350,8 @@ docker compose up -d     # site sur le port 8000, base SQLite dans un volume per
 ```
 
 Devant, un **reverse proxy** avec HTTPS (Caddy fait tout seul : `reverse_proxy localhost:8000`).
-Le site utilise un flux SSE (`/api/events`) qui reste ouvert : avec nginx, prévois un
-`proxy_read_timeout` long sur cette route (l'en-tête `X-Accel-Buffering: no` est déjà envoyé).
+Les pages n'utilisent que des requêtes courtes (elles demandent les nouveautés toutes les 5 s) :
+aucun réglage particulier n'est nécessaire côté proxy.
 
 Sur Railway, Fly.io ou Render, déployer le dépôt avec le `Dockerfile` fonctionne aussi :
 renseigne les variables d'environnement dans leur interface et **attache un volume persistant

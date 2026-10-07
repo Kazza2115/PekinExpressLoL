@@ -766,3 +766,16 @@ def test_solo_duo_can_start_with_warning(client: TestClient, admin_headers: dict
     started = _admin_post(client, admin_headers, "/api/admin/challenge/start")
     assert started["challenge"]["status"] == "running"
     assert started["warnings"] == [f"Le duo {team['name']} n'a qu'un joueur (Mike)."]
+
+
+def test_recent_events_polling(client: TestClient, admin_headers: dict) -> None:
+    """Interrogation des nouveautés : pas de rejeu au premier appel, puis seulement les nouveaux événements."""
+    first = client.get("/api/events/recent").json()
+    assert first["events"] == [] and "last_id" in first
+    assert first["hello"]["asset_version"] and first["hello"]["challenge_status"] == "registration"
+    since = first["last_id"]
+    _register(client, *MIKE)
+    data = client.get(f"/api/events/recent?since={since}").json()
+    types = [e["type"] for e in data["events"]]
+    assert "player_registered" in types and data["last_id"] > since
+    assert client.get(f"/api/events/recent?since={data['last_id']}").json()["events"] == []

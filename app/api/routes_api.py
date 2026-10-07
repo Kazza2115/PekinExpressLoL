@@ -484,6 +484,27 @@ async def _event_stream(since_id: int | None, hello: dict[str, Any], max_events:
             await pump
 
 
+@router.get("/api/events/recent")
+def get_recent_events(since: int | None = None, limit: int = Query(default=200, ge=1, le=500)) -> dict[str, Any]:
+    """Nouveautés depuis `since` (id d'événement) : interrogé toutes les 5 s par les pages.
+
+    Sans `since` (premier appel d'une page) : aucun événement n'est rejoué, seulement l'état
+    courant (`hello`) et le dernier id à partir duquel suivre.
+    """
+    recent = bus.recent(limit=limit)
+    last_id = recent[-1]["id"] if recent else 0
+    events = [] if since is None else [e for e in recent if e["id"] > since]
+    with session_scope() as session:
+        challenge = get_challenge(session)
+        hello = {
+            "challenge_status": enum_value(challenge.status),
+            "challenge": challenge_to_dict(challenge),
+            "live_count": len(state.live_games),
+            "asset_version": ASSET_VERSION,
+        }
+    return {"events": events, "last_id": last_id, "hello": hello, "asset_version": ASSET_VERSION}
+
+
 @router.get("/api/events")
 async def get_events(
     request: Request,

@@ -571,73 +571,67 @@
   App.refreshLiveCount();
 
   /* ------------------------------------------------------------------ */
-  /* SSE : flux d'événements                                              */
+  /* Événements : le site demande les nouveautés toutes les 5 s           */
+  /* (pas de connexion permanente : ne bloque jamais les autres requêtes  */
+  /*  du navigateur et passe par n'importe quel tunnel ou proxy)          */
   /* ------------------------------------------------------------------ */
-  const EVENT_TYPES = [
-    'player_registered', 'player_linked', 'draw_done', 'challenge_started', 'challenge_finished',
-    'challenge_reset', 'live_start', 'live_end', 'match_recorded', 'rank_changed', 'poll_done', 'ping',
-    'hello', 'teams_changed',
-  ];
+  const POLL_MS = 5000;
+  const POLL_HIDDEN_MS = 20000;
   const listeners = {}; // type → [fn]
-  let source = null;
-  let lastEventId = null;
-  let reconnectDelay = 1000;
-  let reconnectTimer = null;
-  let seenIds = new Set();
+  let lastEventId = null; // null = premier appel (on ne rejoue pas l'historique)
+  let pollTimer = null;
+  let polling = false;
+  let started = false;
+  let needHello = true;
 
   App.onEvent = function (type, fn) {
     (listeners[type] = listeners[type] || []).push(fn);
-    if (source && !EVENT_TYPES.includes(type)) attachType(type);
     return () => { listeners[type] = (listeners[type] || []).filter((f) => f !== fn); };
   };
 
-  function dispatch(type, raw) {
-    let data = {};
-    try { data = raw ? JSON.parse(raw) : {}; } catch (e) { data = { raw }; }
-    // Certains serveurs enveloppent {id,type,ts,data} : on déballe.
-    if (data && typeof data === 'object' && data.data && typeof data.data === 'object' && data.type) data = data.data;
+  function dispatch(type, data) {
+    if (!data || typeof data !== 'object') data = {};
     (listeners[type] || []).forEach((fn) => { try { fn(data, type); } catch (e) { console.error('[events]', type, e); } });
     (listeners['*'] || []).forEach((fn) => { try { fn(data, type); } catch (e) { console.error('[events]', type, e); } });
   }
 
-  function attachType(type) {
-    source.addEventListener(type, (ev) => {
-      if (ev.lastEventId) {
-        if (seenIds.has(ev.lastEventId)) return;
-        seenIds.add(ev.lastEventId);
-        if (seenIds.size > 500) seenIds = new Set(Array.from(seenIds).slice(-250));
-        lastEventId = ev.lastEventId;
-      }
-      if (type !== 'ping') dispatch(type, ev.data);
-    });
+  function schedule(delay) {
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(pollOnce, delay !== undefined ? delay : (document.hidden ? POLL_HIDDEN_MS : POLL_MS));
+  }
+
+  async function pollOnce() {
+    if (polling) return;
+    polling = true;
+    try {
+      const url = lastEventId === null ? '/api/events/recent' : `/api/events/recent?since=${encodeURIComponent(lastEventId)}`;
+      const r = await App.api(url);
+      if (!App.connected) { App.connected = true; document.dispatchEvent(new CustomEvent('pekin:connected')); }
+      if (needHello) { needHello = false; dispatch('hello', r.hello || {}); }
+      (r.events || []).forEach((ev) => {
+        if (typeof ev.id === 'number' && (lastEventId === null || ev.id > lastEventId)) lastEventId = ev.id;
+        if (ev.type && ev.type !== 'ping') dispatch(ev.type, ev.data || {});
+      });
+      if (typeof r.last_id === 'number' && (lastEventId === null || r.last_id > lastEventId)) lastEventId = r.last_id;
+      if (lastEventId === null) lastEventId = 0;
+    } catch (e) {
+      if (App.connected) { App.connected = false; document.dispatchEvent(new CustomEvent('pekin:disconnected')); }
+      needHello = true; // à la reconnexion, les pages rechargent leurs données
+    } finally {
+      polling = false;
+      schedule();
+    }
   }
 
   App.connectEvents = function (handlers) {
     if (handlers) Object.keys(handlers).forEach((t) => App.onEvent(t, handlers[t]));
-    if (source || !('EventSource' in window)) return source;
-    open();
-    return source;
+    if (!started) {
+      started = true;
+      pollOnce();
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) schedule(0); });
+    }
+    return true;
   };
-
-  function open() {
-    const url = lastEventId ? `/api/events?since=${encodeURIComponent(lastEventId)}` : '/api/events';
-    try { source = new EventSource(url); } catch (e) { source = null; return; }
-    EVENT_TYPES.forEach(attachType);
-    Object.keys(listeners).forEach((t) => { if (!EVENT_TYPES.includes(t) && t !== '*') attachType(t); });
-    source.onopen = () => { reconnectDelay = 1000; App.connected = true; document.dispatchEvent(new CustomEvent('pekin:connected')); };
-    source.onmessage = (ev) => { if (ev.lastEventId) lastEventId = ev.lastEventId; };
-    source.onerror = () => {
-      App.connected = false;
-      document.dispatchEvent(new CustomEvent('pekin:disconnected'));
-      // EventSource réessaie seul ; si le navigateur a fermé la connexion, on relance avec `since`.
-      if (source && source.readyState === EventSource.CLOSED) {
-        source = null;
-        clearTimeout(reconnectTimer);
-        reconnectTimer = setTimeout(open, reconnectDelay);
-        reconnectDelay = Math.min(reconnectDelay * 2, 30000);
-      }
-    };
-  }
 
   /* Une page peut couper temporairement les toasts globaux d'un type. */
   App.mutedEvents = new Set();
