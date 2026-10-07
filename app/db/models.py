@@ -131,6 +131,7 @@ class MatchParticipant(SQLModel, table=True):
     champion_name: str
     champion_id: int | None = None
     position: str | None = None  # TOP, JUNGLE, MIDDLE, BOTTOM, UTILITY
+    team_side: int | None = None  # `teamId` Match-V5 : 100 (bleu) ou 200 (rouge) ; None si inconnu
     win: bool
     kills: int = 0
     deaths: int = 0
@@ -140,6 +141,10 @@ class MatchParticipant(SQLModel, table=True):
     damage_to_champions: int = 0
     vision_score: int = 0
     lp_change: int | None = None  # calculé par diff de snapshots (approximation)
+    items: str | None = None  # JSON : liste des 7 ids `item0`..`item6` (0 = emplacement vide)
+    spells: str | None = None  # "summoner1Id,summoner2Id", ex. "4,14"
+    champ_level: int | None = None
+    kill_participation: float | None = None  # (K + A) / kills de l'équipe × 100 ; None si 0 kill
 
 
 def game_end_of(row: Match | MatchParticipant) -> datetime:

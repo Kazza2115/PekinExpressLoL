@@ -593,3 +593,103 @@ async def test_backfill_lp_changes(session: Session):
     assert session.get(MatchParticipant, game_f.id).lp_change == -17
     assert session.get(MatchParticipant, game_a.id).lp_change == 20
     assert backfill_lp_changes(session, player) == 0
+
+
+async def test_store_match_extracts_side_items_spells_level_and_kp(session: Session):
+    """`team_side`, `items`, `spells`, `champ_level`, `kill_participation` depuis le JSON Match-V5,
+    puis `together_record` sur les participations de deux joueurs du même côté."""
+    from app.api.leaderboard import together_record
+
+    start_at = utcnow() - timedelta(hours=1)
+    make_challenge(session, ChallengeStatus.RUNNING, start_at=start_at)
+    mike = make_player(session, "Mike", "p-mike")
+    jean = make_player(session, "Jean", "p-jean")
+    sam = make_player(session, "Sam", "p-sam")
+
+    api = ScriptedAPI()
+    for puuid in ("p-mike", "p-jean", "p-sam"):
+        api.entries[puuid] = gold_iv(50)
+        api.match_ids[puuid] = ["EUW1_7"]
+    t_end = utcnow()
+    raw = match_json(
+        "EUW1_7",
+        [("p-mike", "Ahri", True), ("p-jean", "Lux", True), ("p-sam", "Garen", False)],
+        t_end - timedelta(seconds=1500),
+        1500,
+    )
+    parts = raw["info"]["participants"]
+    mike_part, jean_part, sam_part = parts[0], parts[1], parts[2]
+    # Côté bleu (100) : Mike 7 kills / 5 assists, Jean 3 / 0, figurants 1 + 0 + 4 → 15 kills d'équipe
+    mike_part.update(
+        teamId=100, kills=7, assists=5, item0=3031, item1=3006, item2=0, item3=0, item4=0, item5=0, item6=3340,
+        summoner1Id=4, summoner2Id=14, champLevel=16,
+    )
+    jean_part.update(teamId=100, kills=3, assists=0, summoner1Id=7, summoner2Id=4, champLevel=13)
+    # Côté rouge (200) : aucun kill → kill participation indéterminée ; Sam sans objets ni sorts
+    sam_part.update(teamId=200, kills=0, assists=0)
+    for key in ("summoner1Id", "summoner2Id", "champLevel"):
+        sam_part.pop(key, None)
+    # Figurants : deux côté bleu (1 et 4 kills → 7 + 3 + 1 + 4 = 15), les autres côté rouge sans kill
+    strangers = parts[3:]
+    assert len(strangers) == 7
+    strangers[0].update(teamId=100, kills=1)
+    strangers[1].update(teamId=100, kills=4)
+    for stranger in strangers[2:]:
+        stranger.update(teamId=200, kills=0)
+    api.matches["EUW1_7"] = raw
+
+    poller = Poller(api, bus, state)
+    report = await poller.poll_once()
+    assert report.errors == [] and report.new_matches == 1
+
+    session.expire_all()
+    rows = {mp.player_id: mp for mp in session.exec(select(MatchParticipant)).all()}
+    assert set(rows) == {mike.id, jean.id, sam.id}
+
+    mike_row = rows[mike.id]
+    assert mike_row.team_side == 100
+    assert mike_row.items == "[3031,3006,0,0,0,0,3340]"
+    assert mike_row.spells == "4,14"
+    assert mike_row.champ_level == 16
+    assert mike_row.kill_participation == 80.0  # (7 + 5) / 15
+
+    jean_row = rows[jean.id]
+    assert jean_row.team_side == 100
+    assert jean_row.items is None  # aucun `itemN` dans le JSON
+    assert jean_row.spells == "7,4"
+    assert jean_row.champ_level == 13
+    assert jean_row.kill_participation == 20.0  # (3 + 0) / 15
+
+    sam_row = rows[sam.id]
+    assert sam_row.team_side == 200
+    assert sam_row.items is None and sam_row.spells is None and sam_row.champ_level is None
+    assert sam_row.kill_participation is None  # équipe sans kill
+
+    # Mike et Jean ont joué ensemble (même partie, même côté) ; Mike contre Sam ne compte pas
+    assert together_record([mike_row], [jean_row], start_at, None) == (1, 1, 0)
+    assert together_record([mike_row], [sam_row], start_at, None) == (0, 0, 0)
+
+
+async def test_store_match_tolerates_invalid_side_and_kp_is_capped(session: Session):
+    make_challenge(session, ChallengeStatus.RUNNING, start_at=utcnow() - timedelta(hours=1))
+    mike = make_player(session, "Mike", "p-mike")
+    api = ScriptedAPI()
+    api.entries["p-mike"] = gold_iv(50)
+    api.match_ids["p-mike"] = ["EUW1_8"]
+    raw = match_json("EUW1_8", [("p-mike", "Ahri", True)], utcnow() - timedelta(seconds=1500), 1500)
+    raw["info"]["participants"][0].update(teamId="bleu", kills=2, assists=9, champLevel="18")
+    api.matches["EUW1_8"] = raw
+    await Poller(api, bus, state).poll_once()
+    session.expire_all()
+    row = session.exec(select(MatchParticipant).where(MatchParticipant.player_id == mike.id)).one()
+    assert row.team_side is None
+    assert row.kill_participation is None  # côté inconnu → pas de kills d'équipe
+    assert row.champ_level is None  # chaîne : ignorée
+
+    # Kills d'équipe < K + A (données incohérentes) → borné à 100
+    from app.services.poller import _kill_participation
+
+    assert _kill_participation(2, 9, 10) == 100.0
+    assert _kill_participation(2, 1, 10) == 30.0
+    assert _kill_participation(2, 1, 0) is None
+    assert _kill_participation(2, 1, None) is None

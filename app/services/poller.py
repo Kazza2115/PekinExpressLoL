@@ -93,6 +93,60 @@ def _game_end(participant: MatchParticipant) -> datetime:
     return game_end_of(participant)
 
 
+def _int_or_none(value: Any) -> int | None:
+    """Entier depuis une valeur JSON (bool exclu) ; None si absent ou invalide."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _team_side_of(part: dict[str, Any]) -> int | None:
+    """`teamId` Match-V5 d'un participant (100 / 200) ; None si absent ou invalide."""
+    side = _int_or_none(part.get("teamId"))
+    return side if side in (100, 200) else None
+
+
+# Emplacements d'objets Match-V5 (6 objets + bibelot)
+ITEM_SLOTS = tuple(f"item{i}" for i in range(7))
+
+
+def _items_json(part: dict[str, Any]) -> str | None:
+    """`item0`..`item6` → JSON "[3031,3006,0,0,0,0,3340]" ; None si aucun emplacement n'est renseigné."""
+    if not any(slot in part for slot in ITEM_SLOTS):
+        return None
+    return json.dumps([_int_or_none(part.get(slot)) or 0 for slot in ITEM_SLOTS], separators=(",", ":"))
+
+
+def _spells_of(part: dict[str, Any]) -> str | None:
+    """`summoner1Id,summoner2Id` → "4,14" ; None si absents."""
+    first = _int_or_none(part.get("summoner1Id"))
+    second = _int_or_none(part.get("summoner2Id"))
+    if first is None and second is None:
+        return None
+    return f"{first or 0},{second or 0}"
+
+
+def _team_kills(parts: list[dict[str, Any]]) -> dict[int, int]:
+    """Kills cumulés par côté (`teamId`) à partir des participants."""
+    totals: dict[int, int] = {}
+    for part in parts:
+        side = _team_side_of(part)
+        if side is None:
+            continue
+        totals[side] = totals.get(side, 0) + (_int_or_none(part.get("kills")) or 0)
+    return totals
+
+
+def _kill_participation(kills: int, assists: int, team_kills: int | None) -> float | None:
+    """(K + A) / kills de l'équipe × 100, 1 décimale, borné à 100 ; None si l'équipe n'a aucun kill."""
+    if not team_kills or team_kills <= 0:
+        return None
+    return round(min(100.0, (kills + assists) / team_kills * 100), 1)
+
+
 @dataclass
 class _CycleContext:
     """Données partagées par toutes les étapes d'un cycle."""
@@ -599,15 +653,19 @@ class Poller:
             )
         )
         rows: list[tuple[Player, MatchParticipant]] = []
-        for part in info.get("participants") or []:
-            if not isinstance(part, dict):
-                continue
+        all_parts = [part for part in info.get("participants") or [] if isinstance(part, dict)]
+        team_kills = _team_kills(all_parts)
+        for part in all_parts:
             participant_player = ctx.players_by_puuid.get(part.get("puuid") or "")
             if participant_player is None:
                 continue
             if self._participant_exists(session, match_id, participant_player.id):
                 continue
             champion_id = part.get("championId")
+            kills = int(part.get("kills") or 0)
+            assists = int(part.get("assists") or 0)
+            side = _team_side_of(part)
+            champ_level = part.get("champLevel")
             participant = MatchParticipant(
                 match_id=match_id,
                 player_id=participant_player.id,
@@ -619,15 +677,20 @@ class Poller:
                 champion_name=part.get("championName") or f"Champion {champion_id}",
                 champion_id=int(champion_id) if champion_id is not None else None,
                 position=part.get("teamPosition") or None,
+                team_side=side,
                 win=bool(part.get("win")),
-                kills=int(part.get("kills") or 0),
+                kills=kills,
                 deaths=int(part.get("deaths") or 0),
-                assists=int(part.get("assists") or 0),
+                assists=assists,
                 cs=int(part.get("totalMinionsKilled") or 0) + int(part.get("neutralMinionsKilled") or 0),
                 gold=int(part.get("goldEarned") or 0),
                 damage_to_champions=int(part.get("totalDamageDealtToChampions") or 0),
                 vision_score=int(part.get("visionScore") or 0),
                 lp_change=None,
+                items=_items_json(part),
+                spells=_spells_of(part),
+                champ_level=int(champ_level) if isinstance(champ_level, int) and not isinstance(champ_level, bool) else None,
+                kill_participation=_kill_participation(kills, assists, team_kills.get(side) if side is not None else None),
             )
             session.add(participant)
             rows.append((participant_player, participant))

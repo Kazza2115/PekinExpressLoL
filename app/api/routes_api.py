@@ -232,6 +232,8 @@ def _live_items(session: Session, now: datetime | None = None) -> list[dict[str,
                 "team_color": team.color if team is not None else None,
                 "champion_name": game.champion_name,
                 "champion_icon_url": ddragon.champion_icon_url(ddragon.CURRENT_VERSION, game.champion_name),
+                "champion_loading_url": ddragon.champion_loading_url(game.champion_name),
+                "champion_splash_url": ddragon.champion_splash_url(game.champion_name),
                 "game_start": iso(game_start),
                 "elapsed_s": game.elapsed_seconds(now),
                 "queue_id": game.queue_id,
@@ -291,6 +293,23 @@ def get_leaderboard(
         "challenge": challenge_to_dict(challenge),
         "teams": [team.to_dict() for team in teams],
         "players": [player.to_dict() for player in players],
+        "generated_at": now.isoformat(),
+    }
+
+
+@router.get("/api/duos")
+def get_duos(
+    session: Session = Depends(get_session), challenge: Challenge = Depends(get_challenge)
+) -> dict[str, Any]:
+    """Page « Duos » : stats complètes par duo (classées) + joueurs actifs sans duo."""
+    now = utcnow()
+    teams, _players = build_leaderboard(session, challenge, now=now)
+    unassigned = [p for p in _all_players(session) if p.active and p.team_id is None]
+    return {
+        "challenge": challenge_to_dict(challenge),
+        "teams": [team.to_dict() for team in teams],
+        "unassigned_players": _players_public(session, unassigned),
+        "games_per_day": challenge.games_per_day,
         "generated_at": now.isoformat(),
     }
 

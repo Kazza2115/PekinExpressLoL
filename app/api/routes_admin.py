@@ -26,7 +26,7 @@ from app.db.session import get_session
 from app.events import bus
 from app.riot import get_api, reset_api
 from app.services import notifications
-from app.services.draw import perform_draw
+from app.services.draw import perform_draw, team_identity
 from app.state import state
 
 log = logging.getLogger("pekin.admin")
@@ -34,10 +34,13 @@ log = logging.getLogger("pekin.admin")
 router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
 
 HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
-DRAW_FIRST_DETAIL = "Tire d'abord les duos."
+NO_TEAMS_DETAIL = "Aucun duo : compose-les dans Admin → Duos."
+TEAMS_LOCKED_DETAIL = "Les duos ne peuvent plus changer pendant le challenge."
 TEAM_NOT_FOUND_DETAIL = "Duo introuvable."
 PLAYER_NOT_FOUND_DETAIL = "Joueur introuvable."
 TEST_NOTIFICATION_CONTENT = "🔔 Test de notification — Pékin Express LoL : le webhook Discord fonctionne."
+# Taille d'un duo
+TEAM_SIZE = 2
 
 
 # ---------------------------------------------------------------------------
@@ -61,11 +64,18 @@ class ChallengePatch(BaseModel):
     track_flex: bool | None = None
 
 
+class TeamCreate(BaseModel):
+    name: str | None = Field(default=None, max_length=40)  # défaut : palette (`team_identity(slot)`)
+    color: str | None = None
+    player_ids: list[int] = Field(default_factory=list)  # 0 à 2 joueurs (contrôlé en 400 FR)
+
+
 class TeamPatch(BaseModel):
     name: str | None = Field(default=None, max_length=40)
     color: str | None = None
     window_start: str | None = None
     window_end: str | None = None
+    player_ids: list[int] | None = None  # remplace la composition (0 à 2 joueurs)
 
 
 class PlayerPatch(BaseModel):
@@ -160,6 +170,77 @@ def _bad_request(detail: str) -> HTTPException:
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
 
+def _parse_color(value: str) -> str:
+    color = value.strip().lower()
+    if not HEX_COLOR_RE.match(color):
+        raise _bad_request("Couleur invalide (format attendu : #rrggbb).")
+    return color
+
+
+def _ensure_teams_editable(challenge: Challenge) -> None:
+    """La composition des duos est figée pendant le challenge (`running`)."""
+    if challenge.status == ChallengeStatus.RUNNING:
+        raise _bad_request(TEAMS_LOCKED_DETAIL)
+
+
+def _assign_players(session: Session, team: Team, player_ids: list[int]) -> None:
+    """Remplace la composition du duo par `player_ids` (0 à 2 joueurs existants et actifs).
+
+    Un joueur déjà dans un autre duo en est retiré ; les anciens membres absents de la
+    liste sont désassignés. Ne commit pas.
+    """
+    unique_ids = list(dict.fromkeys(player_ids))
+    if len(unique_ids) != len(player_ids):
+        raise _bad_request("Un joueur ne peut pas être deux fois dans le même duo.")
+    if len(unique_ids) > TEAM_SIZE:
+        raise _bad_request(f"Un duo compte au plus {TEAM_SIZE} joueurs.")
+    players: list[Player] = []
+    for player_id in unique_ids:
+        player = session.get(Player, player_id)
+        if player is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Joueur {player_id} introuvable."
+            )
+        if not player.active:
+            raise _bad_request(f"{player.display_name} est désactivé : réactive-le avant de le mettre dans un duo.")
+        players.append(player)
+    for member in session.exec(select(Player).where(col(Player.team_id) == team.id)).all():
+        if member.id not in unique_ids:
+            member.team_id = None
+            session.add(member)
+    for player in players:
+        player.team_id = team.id
+        session.add(player)
+
+
+def _check_teams_ready(session: Session) -> None:
+    """Pré-conditions du démarrage : des duos complets (2 joueurs actifs et liés), personne sur le banc."""
+    teams = session.exec(select(Team).order_by(col(Team.slot), col(Team.id))).all()
+    if not teams:
+        raise _bad_request(NO_TEAMS_DETAIL)
+    active_players = session.exec(select(Player).where(col(Player.active).is_(True)).order_by(col(Player.id))).all()
+    team_ids = {team.id for team in teams}
+    for team in teams:
+        members = [p for p in active_players if p.team_id == team.id]
+        if len(members) == 0:
+            raise _bad_request(f"Le duo {team.name} est vide.")
+        if len(members) == 1:
+            raise _bad_request(f"Le duo {team.name} n'a qu'un joueur.")
+        if len(members) > TEAM_SIZE:
+            raise _bad_request(f"Le duo {team.name} a {len(members)} joueurs ({TEAM_SIZE} attendus).")
+        unlinked = [p.display_name for p in members if not p.is_linked]
+        if unlinked:
+            raise _bad_request(f"Le duo {team.name} a un compte non lié : {', '.join(unlinked)}.")
+    benched = [p.display_name for p in active_players if p.is_linked and p.team_id not in team_ids]
+    if benched:
+        raise _bad_request("Joueurs sans duo : " + ", ".join(benched))
+
+
+def _draw_payload(result: Any) -> dict[str, Any]:
+    to_dict = getattr(result, "to_dict", None)
+    return to_dict() if callable(to_dict) else asdict(result)
+
+
 # ---------------------------------------------------------------------------
 # Session admin
 # ---------------------------------------------------------------------------
@@ -176,14 +257,15 @@ async def login() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/draw")
+@router.post("/teams/auto")
+@router.post("/draw")  # alias historique (roue de tirage)
 async def draw(session: Session = Depends(get_session)) -> dict[str, Any]:
+    """Tirage aléatoire des duos (remplace tous les duos existants)."""
     try:
         result = perform_draw(session)
     except ValueError as exc:
         raise _bad_request(str(exc)) from exc
-    to_dict = getattr(result, "to_dict", None)
-    payload = to_dict() if callable(to_dict) else asdict(result)
+    payload = _draw_payload(result)
     # Annonce des duos sur Discord (optionnel, jamais bloquant)
     try:
         players_by_id = {p.id: p for p in session.exec(select(Player)).all()}
@@ -202,9 +284,8 @@ async def start_challenge(
 ) -> dict[str, Any]:
     if challenge.status == ChallengeStatus.RUNNING:
         raise _bad_request("Le challenge est déjà en cours.")
-    has_teams = session.exec(select(Team.id).limit(1)).first() is not None
-    if challenge.status == ChallengeStatus.REGISTRATION or not has_teams:
-        raise _bad_request(DRAW_FIRST_DETAIL)
+    # Accepté depuis registration / drawn / finished dès que les duos sont complets
+    _check_teams_ready(session)
 
     start_at = parse_datetime(body.start_at if body is not None else None, "start_at") or utcnow()
     challenge.status = ChallengeStatus.RUNNING
@@ -335,9 +416,38 @@ async def patch_challenge(
 # ---------------------------------------------------------------------------
 
 
+@router.post("/teams", status_code=status.HTTP_201_CREATED)
+async def create_team(
+    body: TeamCreate | None = None,
+    session: Session = Depends(get_session),
+    challenge: Challenge = Depends(get_challenge),
+) -> dict[str, Any]:
+    """Crée un duo à la main (nom / couleur de la palette par défaut, 0 à 2 joueurs)."""
+    _ensure_teams_editable(challenge)
+    body = body if body is not None else TeamCreate()
+    max_slot = session.exec(select(func.max(Team.slot))).one()
+    slot = int(max_slot or 0) + 1
+    default_name, default_color = team_identity(slot)
+    name = (body.name or "").strip() or default_name
+    color = _parse_color(body.color) if body.color and body.color.strip() else default_color
+    team = Team(name=name, color=color, slot=slot)
+    session.add(team)
+    session.flush()  # récupère team.id
+    _assign_players(session, team, list(body.player_ids))
+    session.commit()
+    session.refresh(team)
+    assert team.id is not None
+    payload = team_public(team, _team_player_ids(session, team.id))
+    bus.publish("teams_changed", {"action": "created", "team": payload})
+    return {"team": payload}
+
+
 @router.patch("/teams/{team_id}")
 async def patch_team(
-    body: TeamPatch, team_id: EntityId, session: Session = Depends(get_session)
+    body: TeamPatch,
+    team_id: EntityId,
+    session: Session = Depends(get_session),
+    challenge: Challenge = Depends(get_challenge),
 ) -> dict[str, Any]:
     team = _team_or_404(session, team_id)
     fields = body.model_fields_set
@@ -347,18 +457,43 @@ async def patch_team(
             raise _bad_request("Le nom du duo ne peut pas être vide.")
         team.name = name
     if "color" in fields and body.color is not None:
-        color = body.color.strip().lower()
-        if not HEX_COLOR_RE.match(color):
-            raise _bad_request("Couleur invalide (format attendu : #rrggbb).")
-        team.color = color
+        team.color = _parse_color(body.color)
     if "window_start" in fields:
         team.window_start = parse_datetime(body.window_start, "window_start")
     if "window_end" in fields:
         team.window_end = parse_datetime(body.window_end, "window_end")
+    if "player_ids" in fields and body.player_ids is not None:
+        # Nom, couleur et fenêtre restent modifiables en cours de challenge ; pas la composition
+        _ensure_teams_editable(challenge)
+        _assign_players(session, team, list(body.player_ids))
     session.add(team)
     session.commit()
     session.refresh(team)
-    return {"team": team_public(team, _team_player_ids(session, team_id))}
+    payload = team_public(team, _team_player_ids(session, team_id))
+    bus.publish("teams_changed", {"action": "updated", "team": payload})
+    return {"team": payload}
+
+
+@router.delete("/teams/{team_id}")
+async def delete_team(
+    team_id: EntityId,
+    session: Session = Depends(get_session),
+    challenge: Challenge = Depends(get_challenge),
+) -> dict[str, Any]:
+    """Supprime un duo ; ses joueurs sont désassignés (jamais supprimés)."""
+    _ensure_teams_editable(challenge)
+    team = _team_or_404(session, team_id)
+    released: list[int] = []
+    for member in session.exec(select(Player).where(col(Player.team_id) == team_id)).all():
+        member.team_id = None
+        session.add(member)
+        if member.id is not None:
+            released.append(member.id)
+    session.flush()
+    session.delete(team)
+    session.commit()
+    bus.publish("teams_changed", {"action": "deleted", "team_id": team_id, "player_ids": released})
+    return {"ok": True, "deleted_id": team_id, "player_ids": released}
 
 
 @router.patch("/players/{player_id}")

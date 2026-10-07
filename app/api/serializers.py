@@ -6,6 +6,7 @@ datetimes naïfs). Fonctions pures : aucun accès à la base ici.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -17,6 +18,41 @@ from app.riot import ddragon
 from app.services.stats import format_rank, kda, rank_color
 
 OPGG_BASE = "https://www.op.gg/summoners/euw"
+# Emplacements d'objets Match-V5 : 6 objets + bibelot
+ITEM_SLOT_COUNT = 7
+
+
+def parse_items(raw: str | None) -> list[int]:
+    """Colonne `MatchParticipant.items` (JSON) → 7 ids (0 = vide) ; 7 zéros si absente/illisible."""
+    empty = [0] * ITEM_SLOT_COUNT
+    if not raw:
+        return empty
+    try:
+        values = json.loads(raw)
+    except (TypeError, ValueError):
+        return empty
+    if not isinstance(values, list):
+        return empty
+    items: list[int] = []
+    for value in values[:ITEM_SLOT_COUNT]:
+        try:
+            items.append(max(0, int(value)))
+        except (TypeError, ValueError):
+            items.append(0)
+    return items + [0] * (ITEM_SLOT_COUNT - len(items))
+
+
+def parse_spells(raw: str | None) -> list[int]:
+    """Colonne `MatchParticipant.spells` ("4,14") → [4, 14] ; [] si absente/illisible."""
+    if not raw:
+        return []
+    spells: list[int] = []
+    for part in raw.split(","):
+        try:
+            spells.append(int(part.strip()))
+        except ValueError:
+            continue
+    return spells
 
 
 def iso(dt: datetime | None) -> str | None:
@@ -73,6 +109,8 @@ def player_public(player: Player, last_solo_snapshot: RankSnapshot | None = None
         "lp": lp,
         "rank_label": format_rank(tier, rank, lp),
         "rank_color": rank_color(tier),
+        "rank_emblem_url": ddragon.rank_emblem_url(tier),
+        "rank_crest_url": ddragon.rank_mini_crest_url(tier),
         "created_at": iso(player.created_at),
         "linked_at": iso(player.linked_at),
     }
@@ -99,6 +137,9 @@ def match_row(
     """`MatchRow` : la ligne d'un joueur dans une partie (feed, fiche joueur)."""
     duration = participant.game_duration or (match.game_duration if match is not None else 0) or 0
     cs_per_min = round(participant.cs / (duration / 60), 1) if duration > 0 else 0.0
+    version = ddragon.CURRENT_VERSION
+    items = parse_items(participant.items)
+    spells = parse_spells(participant.spells)
     return {
         "match_id": participant.match_id,
         "player_id": participant.player_id,
@@ -107,8 +148,18 @@ def match_row(
         "game_end": game_end_of(participant).isoformat(),
         "game_duration": duration,
         "champion_name": participant.champion_name,
-        "champion_icon_url": ddragon.champion_icon_url(ddragon.CURRENT_VERSION, participant.champion_name),
+        "champion_icon_url": ddragon.champion_icon_url(version, participant.champion_name),
+        "champion_splash_url": ddragon.champion_splash_url(participant.champion_name),
+        "champion_loading_url": ddragon.champion_loading_url(participant.champion_name),
         "position": participant.position,
+        "position_icon_url": ddragon.position_icon_url(participant.position),
+        "team_side": participant.team_side,
+        "champ_level": participant.champ_level,
+        "kill_participation": participant.kill_participation,
+        "items": items,
+        "item_urls": [ddragon.item_icon_url(version, item) for item in items],
+        "spells": spells,
+        "spell_urls": [ddragon.spell_icon_url(version, spell) for spell in spells],
         "win": participant.win,
         "kills": participant.kills,
         "deaths": participant.deaths,

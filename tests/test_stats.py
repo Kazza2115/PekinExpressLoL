@@ -605,6 +605,78 @@ class TestComputePlayerStats:
         assert s.live["champion_icon_url"] is None
         assert s.games == 5  # le reste des stats est intact
 
+    def test_champions_list_sorted_with_images(self):
+        s = compute()
+        assert [c["champion_name"] for c in s.champions] == ["Zed", "Ahri"]  # parties desc
+        zed, ahri = s.champions
+        assert (zed["games"], zed["wins"], zed["losses"], zed["winrate"]) == (3, 3, 0, 100.0)
+        assert zed["avg_kda"] == 4.67  # (10 + 2 + 2) / 3 (7/0/3 → KDA parfait = 10)
+        assert zed["avg_cs_per_min"] == 6.0
+        assert (ahri["games"], ahri["wins"], ahri["losses"], ahri["winrate"]) == (2, 1, 1, 50.0)
+        assert ahri["avg_kda"] == 4.58  # (7.5 + 1.667) / 2
+        assert ahri["avg_cs_per_min"] == 6.33
+        assert zed["image_name"] == "Zed"
+        assert zed["icon_url"].endswith("/img/champion/Zed.png")
+        assert zed["splash_url"] == "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Zed_0.jpg"
+        assert zed["loading_url"] == "https://ddragon.leagueoflegends.com/cdn/img/champion/loading/Zed_0.jpg"
+        assert set(zed) == set(stats.ChampionStats.__dataclass_fields__)
+        # Le champion favori expose les mêmes images
+        assert s.top_champion == "Zed"
+        assert s.top_champion_icon_url == zed["icon_url"]
+        assert s.top_champion_splash_url == zed["splash_url"]
+        assert s.top_champion_loading_url == zed["loading_url"]
+
+    def test_champions_tie_on_games_uses_winrate_then_name(self):
+        participants = [
+            game(utc(2026, 10, 10, 8, 0), win=False, champion="Zed"),
+            game(utc(2026, 10, 10, 9, 0), win=True, champion="Ahri"),
+            game(utc(2026, 10, 10, 10, 0), win=True, champion="Lux"),
+        ]
+        s = compute(participants=participants)
+        assert [c["champion_name"] for c in s.champions] == ["Ahri", "Lux", "Zed"]
+
+    def test_champions_empty_without_games(self):
+        s = compute(participants=[])
+        assert s.champions == []
+        assert s.top_champion_icon_url is None and s.top_champion_splash_url is None
+
+    def test_rank_images(self):
+        s = compute()
+        assert s.rank_emblem_url.endswith("/images/ranked-emblem/emblem-gold.png")
+        assert s.rank_crest_url.endswith("/images/ranked-mini-crests/gold.svg")
+        unranked = compute(snapshots=[])
+        assert unranked.rank_emblem_url is None and unranked.rank_crest_url is None
+
+    def test_live_has_loading_and_splash(self):
+        live = LiveGameState(
+            player_id=1, game_id=42, champion_id=62, champion_name="Wukong",
+            queue_id=420, game_mode="CLASSIC", game_start=NOW, detected_at=NOW,
+        )
+        s = compute(live=live)
+        assert s.live["champion_loading_url"].endswith("/img/champion/loading/MonkeyKing_0.jpg")
+        assert s.live["champion_splash_url"].endswith("/img/champion/splash/MonkeyKing_0.jpg")
+
+    def test_partial_ddragon_stub_gives_none_for_missing_helpers(self, monkeypatch):
+        """Un module Data Dragon sans les nouveaux helpers → champs image None, le reste intact."""
+        import sys
+        import types
+
+        import app.riot as riot_pkg
+
+        fake = types.ModuleType("app.riot.ddragon")
+        fake.CURRENT_VERSION = "15.1.1"  # type: ignore[attr-defined]
+        fake.profile_icon_url = lambda version, icon_id: f"https://ddragon/{version}/profileicon/{icon_id}.png"  # type: ignore[attr-defined]
+        fake.champion_icon_url = lambda version, name: f"https://ddragon/{version}/champion/{name}.png"  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "app.riot.ddragon", fake)
+        monkeypatch.setattr(riot_pkg, "ddragon", fake, raising=False)
+        s = compute()
+        assert s.rank_emblem_url is None and s.rank_crest_url is None
+        assert s.top_champion_icon_url == "https://ddragon/15.1.1/champion/Zed.png"
+        assert s.top_champion_splash_url is None
+        assert s.champions[0]["icon_url"] == "https://ddragon/15.1.1/champion/Zed.png"
+        assert s.champions[0]["splash_url"] is None
+        assert s.champions[0]["image_name"] == "Zed"  # repli : le nom lui-même
+
     def test_to_dict_is_json_plain(self):
         import json
 
@@ -684,6 +756,103 @@ class TestTeamStats:
         assert d["players"][0]["display_name"] == "Mike"
         assert isinstance(d["players"][0], dict)
         assert set(d) == set(TeamStats.__dataclass_fields__)
+        for key in (
+            "mvp_player_id", "avg_kda", "avg_cs_per_min", "avg_vision", "avg_damage", "together_games",
+            "together_wins", "together_losses", "together_winrate", "mvp_top_champion_splash_url",
+        ):
+            assert key in d
+
+
+TEAM = Team(id=1, name="Duo Rouge", color="#ef4444", slot=1)
+
+
+class TestTeamMvp:
+    def test_lp_net_wins(self):
+        a = make_stats(player_id=1, lp_net=10, winrate=80.0, games=5)
+        b = make_stats(player_id=2, lp_net=30, winrate=20.0, games=5)
+        assert compute_team_stats(TEAM, [a, b]).mvp_player_id == 2
+
+    def test_tie_on_lp_net_uses_winrate_none_is_lowest(self):
+        a = make_stats(player_id=1, lp_net=10, winrate=None)
+        b = make_stats(player_id=2, lp_net=10, winrate=0.0, games=2, losses=2)
+        assert compute_team_stats(TEAM, [a, b]).mvp_player_id == 2
+        a = make_stats(player_id=1, lp_net=10, winrate=60.0)
+        b = make_stats(player_id=2, lp_net=10, winrate=40.0)
+        assert compute_team_stats(TEAM, [a, b]).mvp_player_id == 1
+
+    def test_tie_on_winrate_uses_kda_then_games(self):
+        a = make_stats(player_id=1, lp_net=10, winrate=50.0, avg_kda=2.0)
+        b = make_stats(player_id=2, lp_net=10, winrate=50.0, avg_kda=3.5)
+        assert compute_team_stats(TEAM, [a, b]).mvp_player_id == 2
+        a = make_stats(player_id=1, lp_net=10, winrate=50.0, avg_kda=None)
+        b = make_stats(player_id=2, lp_net=10, winrate=50.0, avg_kda=0.5)
+        assert compute_team_stats(TEAM, [a, b]).mvp_player_id == 2
+        a = make_stats(player_id=1, lp_net=10, winrate=50.0, avg_kda=3.0, games=4)
+        b = make_stats(player_id=2, lp_net=10, winrate=50.0, avg_kda=3.0, games=8)
+        assert compute_team_stats(TEAM, [a, b]).mvp_player_id == 2
+
+    def test_full_tie_keeps_first(self):
+        a = make_stats(player_id=1)
+        b = make_stats(player_id=2)
+        assert compute_team_stats(TEAM, [a, b]).mvp_player_id == 1
+        assert compute_team_stats(TEAM, [b, a]).mvp_player_id == 2
+
+    def test_single_player_and_empty(self):
+        assert compute_team_stats(TEAM, [make_stats(player_id=7)]).mvp_player_id == 7
+        assert compute_team_stats(TEAM, []).mvp_player_id is None
+
+    def test_mvp_top_champion_splash(self):
+        a = make_stats(player_id=1, lp_net=5, top_champion_splash_url="https://x/Ahri_0.jpg")
+        b = make_stats(player_id=2, lp_net=50, top_champion_splash_url="https://x/Zed_0.jpg")
+        assert compute_team_stats(TEAM, [a, b]).mvp_top_champion_splash_url == "https://x/Zed_0.jpg"
+        assert compute_team_stats(TEAM, [make_stats()]).mvp_top_champion_splash_url is None
+        assert compute_team_stats(TEAM, []).mvp_top_champion_splash_url is None
+
+
+class TestTeamAverages:
+    def test_mean_of_both_players(self):
+        a = make_stats(player_id=1, avg_kda=3.0, avg_cs_per_min=6.5, avg_vision=20.0, avg_damage=15000)
+        b = make_stats(player_id=2, avg_kda=4.0, avg_cs_per_min=7.0, avg_vision=25.5, avg_damage=20001)
+        t = compute_team_stats(TEAM, [a, b])
+        assert t.avg_kda == 3.5
+        assert t.avg_cs_per_min == 6.75
+        assert t.avg_vision == 22.8  # 1 décimale, comme les stats joueur
+        assert t.avg_damage == 17500  # entier (17500.5 → arrondi banquier → 17500)
+
+    def test_none_values_are_ignored(self):
+        a = make_stats(player_id=1, avg_kda=3.0, avg_cs_per_min=None, avg_vision=None, avg_damage=None)
+        b = make_stats(player_id=2, avg_kda=None, avg_cs_per_min=5.0, avg_vision=None, avg_damage=12000)
+        t = compute_team_stats(TEAM, [a, b])
+        assert t.avg_kda == 3.0
+        assert t.avg_cs_per_min == 5.0
+        assert t.avg_vision is None
+        assert t.avg_damage == 12000
+
+    def test_rounding(self):
+        a = make_stats(player_id=1, avg_kda=1.0)
+        b = make_stats(player_id=2, avg_kda=2.0)
+        c = make_stats(player_id=3, avg_kda=2.0)
+        assert compute_team_stats(TEAM, [a, b, c]).avg_kda == 1.67
+
+    def test_no_players(self):
+        t = compute_team_stats(TEAM, [])
+        assert (t.avg_kda, t.avg_cs_per_min, t.avg_vision, t.avg_damage) == (None, None, None, None)
+
+
+class TestTeamTogether:
+    def test_default_is_zero(self):
+        t = compute_team_stats(TEAM, [make_stats()])
+        assert (t.together_games, t.together_wins, t.together_losses, t.together_winrate) == (0, 0, 0, None)
+
+    def test_record_is_copied_and_winrate_computed(self):
+        t = compute_team_stats(TEAM, [make_stats()], together=(5, 3, 2))
+        assert (t.together_games, t.together_wins, t.together_losses) == (5, 3, 2)
+        assert t.together_winrate == 60.0
+        assert compute_team_stats(TEAM, [], together=(1, 0, 1)).together_winrate == 0.0
+
+    def test_to_dict_carries_together(self):
+        d = compute_team_stats(TEAM, [make_stats()], together=(2, 2, 0)).to_dict()
+        assert d["together_games"] == 2 and d["together_winrate"] == 100.0
 
 
 class TestRankTeams:

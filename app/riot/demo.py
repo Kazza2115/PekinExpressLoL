@@ -75,6 +75,22 @@ CHAMPIONS_BY_POSITION: dict[str, list[tuple[str, int]]] = {
 }
 CHAMPION_POOL: list[tuple[str, int]] = [c for pool in CHAMPIONS_BY_POSITION.values() for c in pool]
 
+# Objets plausibles (ids Data Dragon) : 6 objets tirés dans ce pool + bibelot en `item6`
+ITEM_POOL: list[int] = [
+    3031, 3006, 3072, 3036, 3094, 3046, 3047, 3157, 3089, 3020, 3135, 6653, 3065, 3068, 3110, 3190,
+    3107, 3222, 3504, 3153, 3142, 6672, 6673, 6692, 3078, 3100, 3115, 3124, 3165, 3742, 4005, 6662,
+]
+TRINKETS: list[int] = [3340, 3363, 3364]
+# Sorts d'invocateur : Flash (4) + un second sort selon le poste (ids Match-V5)
+FLASH_SPELL_ID = 4
+SECOND_SPELLS_BY_POSITION: dict[str, list[int]] = {
+    "TOP": [12, 14],  # Téléportation, Embrasement
+    "JUNGLE": [11],  # Châtiment
+    "MIDDLE": [14, 12],
+    "BOTTOM": [7, 3],  # Soin, Épuisement
+    "UTILITY": [14, 3, 7],
+}
+
 BOT_NAMES = [
     "xXDariusMainXx", "Baguette Volante", "JeanMichelGank", "FlashSurF", "Croissant Furtif",
     "LaVieEnRoze", "MidOrAFK", "TontonYasuo", "Pépito", "CamembertFlash", "Zinedine Zed",
@@ -318,6 +334,14 @@ class DemoRiotClient:
                 )
                 bot_index += 1
 
+        # Cohérence par équipe : un joueur ne participe pas à plus de kills que son équipe n'en a
+        # (kill participation ≤ 100 %) ; sans kill d'équipe, aucune assist
+        for team_id in (100, 200):
+            members = [p for p in participants if p["teamId"] == team_id]
+            team_kills = sum(p["kills"] for p in members)
+            for member in members:
+                member["assists"] = max(0, min(member["assists"], team_kills - member["kills"]))
+
         def objective(team_win: bool, win_range: tuple[int, int], lose_range: tuple[int, int]) -> dict[str, Any]:
             kills = 0 if remake else self.rng.randint(*(win_range if team_win else lose_range))
             return {"first": team_win and not remake, "kills": kills}
@@ -414,6 +438,13 @@ class DemoRiotClient:
                 "goldEarned": gold, "totalDamageDealtToChampions": damage,
                 "visionScore": vision, "champLevel": level,
             }
+        # Objets : 1 à 2 en remake, sinon de 3 à 6 selon la durée ; bibelot en `item6`
+        item_count = rng.randint(1, 2) if remake else max(3, min(6, int(minutes / 4.5) + rng.randint(0, 1)))
+        items = rng.sample(ITEM_POOL, item_count) + [0] * (6 - item_count)
+        item_slots = {f"item{i}": items[i] for i in range(6)}
+        item_slots["item6"] = rng.choice(TRINKETS)
+        spells = [FLASH_SPELL_ID, rng.choice(SECOND_SPELLS_BY_POSITION[position])]
+        rng.shuffle(spells)  # Flash en D ou en F, comme dans la vraie vie
         return {
             "participantId": participant_id,
             "puuid": puuid,
@@ -430,6 +461,9 @@ class DemoRiotClient:
             "win": win,
             "gameEndedInEarlySurrender": remake,
             "teamEarlySurrendered": remake,
+            "summoner1Id": spells[0],
+            "summoner2Id": spells[1],
+            **item_slots,
             **stats,
         }
 

@@ -85,6 +85,107 @@ def champion_icon_url(version: str, champion_name: str | None) -> str | None:
     return f"{DDRAGON_BASE}/cdn/{version or CURRENT_VERSION}/img/champion/{image}.png"
 
 
+def champion_splash_url(champion_name: str | None) -> str | None:
+    """Splash art (1215×717) du skin de base ; sans version (chemin stable)."""
+    image = champion_image_name(champion_name or "")
+    if not image:
+        return None
+    return f"{DDRAGON_BASE}/cdn/img/champion/splash/{image}_0.jpg"
+
+
+def champion_loading_url(champion_name: str | None) -> str | None:
+    """Illustration verticale « écran de chargement » (308×560) du skin de base."""
+    image = champion_image_name(champion_name or "")
+    if not image:
+        return None
+    return f"{DDRAGON_BASE}/cdn/img/champion/loading/{image}_0.jpg"
+
+
+def item_icon_url(version: str, item_id: int | None) -> str | None:
+    """Icône d'un objet ; None pour un emplacement vide (0 / None)."""
+    if item_id is None:
+        return None
+    try:
+        item = int(item_id)
+    except (TypeError, ValueError):
+        return None
+    if item <= 0:
+        return None
+    return f"{DDRAGON_BASE}/cdn/{version or CURRENT_VERSION}/img/item/{item}.png"
+
+
+# Sorts d'invocateur : `summoner1Id` / `summoner2Id` Match-V5 → nom d'image Data Dragon
+SUMMONER_SPELLS: dict[int, str] = {
+    1: "SummonerBoost",  # Purification
+    3: "SummonerExhaust",  # Épuisement
+    4: "SummonerFlash",  # Flash
+    6: "SummonerHaste",  # Fantôme
+    7: "SummonerHeal",  # Soin
+    11: "SummonerSmite",  # Châtiment
+    12: "SummonerTeleport",  # Téléportation
+    13: "SummonerMana",  # Clarté
+    14: "SummonerDot",  # Embrasement
+    21: "SummonerBarrier",  # Barrière
+    32: "SummonerSnowball",  # Boule de neige (ARAM)
+}
+
+
+def spell_icon_url(version: str, spell_id: int | None) -> str | None:
+    """Icône d'un sort d'invocateur ; None si l'identifiant est inconnu."""
+    if spell_id is None:
+        return None
+    try:
+        name = SUMMONER_SPELLS.get(int(spell_id))
+    except (TypeError, ValueError):
+        return None
+    if name is None:
+        return None
+    return f"{DDRAGON_BASE}/cdn/{version or CURRENT_VERSION}/img/spell/{name}.png"
+
+
+# Emblèmes / écussons de rang et icônes de poste : Community Dragon (assets du client LoL)
+CDRAGON_STATIC_BASE = "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-static-assets/global/default"
+RANKED_TIERS = frozenset(
+    {"iron", "bronze", "silver", "gold", "platinum", "emerald", "diamond", "master", "grandmaster", "challenger"}
+)
+POSITION_ICONS: dict[str, str] = {
+    "TOP": "top",
+    "JUNGLE": "jungle",
+    "MIDDLE": "middle",
+    "BOTTOM": "bottom",
+    "UTILITY": "utility",
+}
+
+
+def _tier_slug(tier: str | None) -> str | None:
+    slug = (tier or "").strip().lower()
+    return slug if slug in RANKED_TIERS else None
+
+
+def rank_emblem_url(tier: str | None) -> str | None:
+    """Emblème du tier (grande image) ; None si Unranked / inconnu."""
+    slug = _tier_slug(tier)
+    if slug is None:
+        return None
+    return f"{CDRAGON_STATIC_BASE}/images/ranked-emblem/emblem-{slug}.png"
+
+
+def rank_mini_crest_url(tier: str | None) -> str | None:
+    """Petit écusson SVG du tier ; None si Unranked / inconnu."""
+    slug = _tier_slug(tier)
+    if slug is None:
+        return None
+    return f"{CDRAGON_STATIC_BASE}/images/ranked-mini-crests/{slug}.svg"
+
+
+def position_icon_url(position: str | None) -> str | None:
+    """Icône SVG du poste (`teamPosition` Match-V5) ; None si inconnu."""
+    slug = POSITION_ICONS.get((position or "").strip().upper())
+    if slug is None:
+        return None
+    return f"{CDRAGON_STATIC_BASE}/svg/position-{slug}.svg"
+
+
 async def get_version() -> str:
     """Dernière version Data Dragon (cache 1 h) ; `CURRENT_VERSION` en repli si réseau KO."""
     global CURRENT_VERSION, _version_cache

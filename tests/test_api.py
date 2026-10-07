@@ -13,20 +13,30 @@ LEA = ("Léa", "Lea#0001")
 
 MATCH_ROW_KEYS = {
     "match_id", "player_id", "queue", "game_start", "game_duration", "champion_name", "champion_icon_url",
-    "position", "win", "kills", "deaths", "assists", "kda", "cs", "cs_per_min", "gold", "damage_to_champions",
+    "champion_splash_url", "champion_loading_url", "position", "position_icon_url", "team_side", "champ_level",
+    "kill_participation", "items", "item_urls", "spells", "spell_urls",
+    "win", "kills", "deaths", "assists", "kda", "cs", "cs_per_min", "gold", "damage_to_champions",
     "vision_score", "lp_change", "is_remake", "opgg_url",
 }
 FEED_EXTRA_KEYS = {"display_name", "team_id", "team_name", "team_color", "ago_s"}
 LIVE_KEYS = {
     "player_id", "display_name", "team_id", "team_name", "team_color", "champion_name", "champion_icon_url",
-    "game_start", "elapsed_s", "queue_id", "game_mode",
+    "champion_loading_url", "champion_splash_url", "game_start", "elapsed_s", "queue_id", "game_mode",
 }
 PLAYER_PUBLIC_KEYS = {
     "id", "display_name", "riot_id", "game_name", "tag_line", "is_linked", "link_error", "active", "team_id",
     "profile_icon_id", "icon_url", "summoner_level", "tier", "rank", "lp", "rank_label", "rank_color",
-    "created_at", "linked_at",
+    "rank_emblem_url", "rank_crest_url", "created_at", "linked_at",
+}
+TEAM_PUBLIC_KEYS = {"id", "name", "color", "slot", "window_start", "window_end", "player_ids"}
+TEAM_STATS_NEW_KEYS = {
+    "mvp_player_id", "avg_kda", "avg_cs_per_min", "avg_vision", "avg_damage", "together_games", "together_wins",
+    "together_losses", "together_winrate", "mvp_top_champion_splash_url",
 }
 POINT_KEYS = {"t", "absolute_lp", "tier", "rank", "lp"}
+SAM = ("Sam", "Sam#EUW")
+ZOE = ("Zoé", "Zoe#EUW")
+TEAMS_LOCKED = "Les duos ne peuvent plus changer pendant le challenge."
 
 
 # ---------------------------------------------------------------------------
@@ -181,12 +191,199 @@ def test_draw_creates_teams(client: TestClient, admin_headers: dict) -> None:
     assert all(p["team_id"] == team["id"] for p in state["players"])
 
 
-def test_start_requires_draw(client: TestClient, admin_headers: dict) -> None:
+def test_start_requires_teams(client: TestClient, admin_headers: dict) -> None:
     _register(client, *MIKE)
     _register(client, *LEA)
     response = client.post("/api/admin/challenge/start", headers=admin_headers)
     assert response.status_code == 400, response.text
-    assert response.json()["detail"] == "Tire d'abord les duos."
+    assert response.json()["detail"] == "Aucun duo : compose-les dans Admin → Duos."
+
+
+# ---------------------------------------------------------------------------
+# Duos composés à la main
+# ---------------------------------------------------------------------------
+
+
+def _create_team(client: TestClient, headers: dict, json: Any = None, expected: int = 201) -> dict:
+    return _admin_post(client, headers, "/api/admin/teams", json=json, expected=expected)
+
+
+def _patch_team(client: TestClient, headers: dict, team_id: int, json: Any, expected: int = 200) -> dict:
+    response = client.patch(f"/api/admin/teams/{team_id}", json=json, headers=headers)
+    assert response.status_code == expected, response.text
+    return response.json()
+
+
+def _start(client: TestClient, headers: dict, expected: int = 200) -> dict:
+    return _admin_post(client, headers, "/api/admin/challenge/start", expected=expected)
+
+
+def test_manual_teams_then_start(client: TestClient, admin_headers: dict) -> None:
+    p1 = _register(client, *MIKE)["player"]
+    p2 = _register(client, *LEA)["player"]
+    p3 = _register(client, *SAM)["player"]
+    p4 = _register(client, *ZOE)["player"]
+
+    # Duo vide : nom et couleur de la palette, slot 1
+    assert client.post("/api/admin/teams").status_code == 401
+    t1 = _create_team(client, admin_headers, {})["team"]
+    assert TEAM_PUBLIC_KEYS <= set(t1)
+    assert (t1["name"], t1["color"], t1["slot"], t1["player_ids"]) == ("Duo Rouge", "#ef4444", 1, [])
+    # Duo nommé avec deux joueurs : couleur par défaut du slot 2
+    t2 = _create_team(client, admin_headers, {"name": " Les Pandas ", "player_ids": [p3["id"], p4["id"]]})["team"]
+    assert (t2["name"], t2["color"], t2["slot"]) == ("Les Pandas", "#3b82f6", 2)
+    assert sorted(t2["player_ids"]) == sorted([p3["id"], p4["id"]])
+    assert _create_team(client, admin_headers, {"color": "bleu"}, expected=400)["detail"]
+    # Corps absent : accepté (duo vide)
+    t3 = _admin_post(client, admin_headers, "/api/admin/teams", expected=201)["team"]
+    assert t3["slot"] == 3 and t3["name"] == "Duo Vert"
+    assert client.delete(f"/api/admin/teams/{t3['id']}", headers=admin_headers).status_code == 200
+
+    state = client.get("/api/state").json()
+    assert state["challenge"]["status"] == "registration"  # pas de changement de statut à la main
+    assert [t["id"] for t in state["teams"]] == [t1["id"], t2["id"]]
+    assert {p["id"]: p["team_id"] for p in state["players"]} == {
+        p1["id"]: None, p2["id"]: None, p3["id"]: t2["id"], p4["id"]: t2["id"],
+    }
+
+    # Démarrage refusé tant que les duos ne sont pas complets
+    assert _start(client, admin_headers, expected=400)["detail"] == "Le duo Duo Rouge est vide."
+    _patch_team(client, admin_headers, t1["id"], {"player_ids": [p1["id"]]})
+    assert _start(client, admin_headers, expected=400)["detail"] == "Le duo Duo Rouge n'a qu'un joueur."
+    updated = _patch_team(client, admin_headers, t1["id"], {"player_ids": [p1["id"], p2["id"]]})["team"]
+    assert sorted(updated["player_ids"]) == sorted([p1["id"], p2["id"]])
+
+    # Démarrage direct depuis `registration`
+    started = _start(client, admin_headers)
+    assert started["challenge"]["status"] == "running"
+    assert started["challenge"]["start_at"] is not None
+    assert client.get("/api/state").json()["challenge"]["status"] == "running"
+
+    # Composition figée pendant le challenge ; nom / couleur toujours modifiables
+    assert _create_team(client, admin_headers, {}, expected=400)["detail"] == TEAMS_LOCKED
+    assert _patch_team(client, admin_headers, t1["id"], {"player_ids": [p1["id"], p3["id"]]}, 400)["detail"] == TEAMS_LOCKED
+    response = client.delete(f"/api/admin/teams/{t1['id']}", headers=admin_headers)
+    assert response.status_code == 400 and response.json()["detail"] == TEAMS_LOCKED
+    assert _patch_team(client, admin_headers, t1["id"], {"name": "Les Loups"})["team"]["name"] == "Les Loups"
+    assert _start(client, admin_headers, expected=400)["detail"] == "Le challenge est déjà en cours."
+
+    # Terminé → on peut redémarrer avec les mêmes duos
+    _admin_post(client, admin_headers, "/api/admin/challenge/finish")
+    restarted = _start(client, admin_headers)
+    assert restarted["challenge"]["status"] == "running" and restarted["challenge"]["end_at"] is None
+
+
+def test_start_refuses_benched_or_unlinked_players(client: TestClient, admin_headers: dict) -> None:
+    p1 = _register(client, *MIKE)["player"]
+    p2 = _register(client, *LEA)["player"]
+    sam = _register(client, *SAM)["player"]
+    team = _create_team(client, admin_headers, {"player_ids": [p1["id"], p2["id"]]})["team"]
+    assert _start(client, admin_headers, expected=400)["detail"] == "Joueurs sans duo : Sam"
+
+    # Un joueur sans compte lié dans un duo bloque aussi
+    nolink = _register(client, "Sans Compte")["player"]
+    _patch_team(client, admin_headers, team["id"], {"player_ids": [p1["id"], nolink["id"]]})
+    detail = _start(client, admin_headers, expected=400)["detail"]
+    assert detail == "Le duo Duo Rouge a un compte non lié : Sans Compte."
+    _patch_team(client, admin_headers, team["id"], {"player_ids": [p1["id"], p2["id"]]})
+
+    # Désactiver les joueurs sur le banc débloque le démarrage (un non lié inactif est ignoré)
+    for player in (sam, nolink):
+        response = client.patch(f"/api/admin/players/{player['id']}", json={"active": False}, headers=admin_headers)
+        assert response.status_code == 200
+    assert _start(client, admin_headers)["challenge"]["status"] == "running"
+
+
+def test_patch_team_player_ids_moves_players(client: TestClient, admin_headers: dict) -> None:
+    p1 = _register(client, *MIKE)["player"]
+    p2 = _register(client, *LEA)["player"]
+    p3 = _register(client, *SAM)["player"]
+    p4 = _register(client, *ZOE)["player"]
+    t1 = _create_team(client, admin_headers, {"player_ids": [p1["id"], p2["id"]]})["team"]
+    t2 = _create_team(client, admin_headers, {"player_ids": [p3["id"], p4["id"]]})["team"]
+
+    # p1 passe dans le duo 2 (retiré du duo 1), p4 est désassigné
+    moved = _patch_team(client, admin_headers, t2["id"], {"player_ids": [p1["id"], p3["id"]]})["team"]
+    assert sorted(moved["player_ids"]) == sorted([p1["id"], p3["id"]])
+    state = client.get("/api/state").json()
+    teams = {t["id"]: t for t in state["teams"]}
+    assert teams[t1["id"]]["player_ids"] == [p2["id"]]
+    assert {p["id"]: p["team_id"] for p in state["players"]} == {
+        p1["id"]: t2["id"], p2["id"]: t1["id"], p3["id"]: t2["id"], p4["id"]: None,
+    }
+    # Liste vide : duo vidé
+    assert _patch_team(client, admin_headers, t1["id"], {"player_ids": []})["team"]["player_ids"] == []
+
+    # Règles : 2 joueurs max, pas de doublon, joueur existant et actif
+    assert "au plus 2" in _patch_team(client, admin_headers, t1["id"], {"player_ids": [p1["id"], p2["id"], p4["id"]]}, 400)["detail"]
+    assert _patch_team(client, admin_headers, t1["id"], {"player_ids": [p2["id"], p2["id"]]}, 400)["detail"]
+    assert _patch_team(client, admin_headers, t1["id"], {"player_ids": [9999]}, 404)["detail"]
+    client.patch(f"/api/admin/players/{p4['id']}", json={"active": False}, headers=admin_headers)
+    assert "désactivé" in _patch_team(client, admin_headers, t1["id"], {"player_ids": [p4["id"]]}, 400)["detail"]
+    assert _create_team(client, admin_headers, {"player_ids": [p4["id"]]}, expected=400)["detail"]
+
+
+def test_delete_team_unassigns_players(client: TestClient, admin_headers: dict) -> None:
+    p1 = _register(client, *MIKE)["player"]
+    p2 = _register(client, *LEA)["player"]
+    team = _create_team(client, admin_headers, {"player_ids": [p1["id"], p2["id"]]})["team"]
+    assert client.delete(f"/api/admin/teams/{team['id']}").status_code == 401
+    response = client.delete(f"/api/admin/teams/{team['id']}", headers=admin_headers)
+    assert response.status_code == 200, response.text
+    assert response.json()["ok"] is True and response.json()["deleted_id"] == team["id"]
+    assert sorted(response.json()["player_ids"]) == sorted([p1["id"], p2["id"]])
+    state = client.get("/api/state").json()
+    assert state["teams"] == []
+    assert all(p["team_id"] is None for p in state["players"])
+    assert len(state["players"]) == 2  # les joueurs ne sont pas supprimés
+    assert client.delete(f"/api/admin/teams/{team['id']}", headers=admin_headers).status_code == 404
+    # Le slot suivant repart après le dernier slot existant
+    assert _create_team(client, admin_headers, {})["team"]["slot"] == 1
+
+
+def test_teams_auto_is_the_draw(client: TestClient, admin_headers: dict) -> None:
+    p1 = _register(client, *MIKE)["player"]
+    p2 = _register(client, *LEA)["player"]
+    _create_team(client, admin_headers, {"name": "À remplacer"})
+    data = _admin_post(client, admin_headers, "/api/admin/teams/auto")
+    assert sorted(data["order"]) == sorted([p1["id"], p2["id"]])
+    assert len(data["teams"]) == 1 and data["teams"][0]["name"] == "Duo Rouge"
+    state = client.get("/api/state").json()
+    assert state["challenge"]["status"] == "drawn"
+    assert [t["name"] for t in state["teams"]] == ["Duo Rouge"]  # l'ancien duo manuel a été remplacé
+    assert _start(client, admin_headers)["challenge"]["status"] == "running"
+
+
+def test_duos_endpoint(client: TestClient, admin_headers: dict) -> None:
+    p1 = _register(client, *MIKE)["player"]
+    p2 = _register(client, *LEA)["player"]
+    sam = _register(client, *SAM)["player"]
+    inactive = _register(client, "Inactif")["player"]
+    client.patch(f"/api/admin/players/{inactive['id']}", json={"active": False}, headers=admin_headers)
+    team = _create_team(client, admin_headers, {"player_ids": [p1["id"], p2["id"]]})["team"]
+
+    data = client.get("/api/duos").json()
+    assert set(data) == {"challenge", "teams", "unassigned_players", "games_per_day", "generated_at"}
+    assert data["challenge"]["status"] == "registration"
+    assert data["games_per_day"] == 10 and data["generated_at"]
+    assert len(data["teams"]) == 1
+    duo = data["teams"][0]
+    assert duo["team_id"] == team["id"] and duo["position"] == 1
+    assert TEAM_STATS_NEW_KEYS <= set(duo)
+    assert duo["mvp_player_id"] in (p1["id"], p2["id"])
+    assert (duo["together_games"], duo["together_wins"], duo["together_losses"], duo["together_winrate"]) == (0, 0, 0, None)
+    assert duo["avg_kda"] is None and duo["mvp_top_champion_splash_url"] is None
+    assert sorted(p["player_id"] for p in duo["players"]) == sorted([p1["id"], p2["id"]])
+    for player in duo["players"]:
+        assert "champions" in player and player["champions"] == []
+        assert player["rank_emblem_url"] is not None and player["rank_crest_url"].endswith(".svg")
+    # Joueurs actifs sans duo uniquement (l'inactif n'apparaît pas)
+    assert [p["id"] for p in data["unassigned_players"]] == [sam["id"]]
+    assert PLAYER_PUBLIC_KEYS <= set(data["unassigned_players"][0])
+
+    # Le classement porte aussi les nouveaux champs de duo
+    board = client.get("/api/leaderboard").json()
+    assert TEAM_STATS_NEW_KEYS <= set(board["teams"][0])
 
 
 def test_registration_closed_after_start(client: TestClient, admin_headers: dict) -> None:
@@ -301,6 +498,15 @@ def test_challenge_flow(client: TestClient, admin_headers: dict) -> None:
         assert item["ago_s"] >= 0
         assert item["team_name"] == "Duo Rouge"
         assert item["opgg_url"].startswith("https://www.op.gg/summoners/euw/")
+        # Images et détails de partie (client démo : objets, sorts, niveau, KP, côté)
+        assert item["team_side"] in (100, 200)
+        assert len(item["items"]) == 7 and len(item["item_urls"]) == 7
+        assert item["items"][6] > 0 and item["item_urls"][6].endswith(f"/img/item/{item['items'][6]}.png")
+        assert len(item["spells"]) == 2 and all(url and url.endswith(".png") for url in item["spell_urls"])
+        assert item["champ_level"] and 1 <= item["champ_level"] <= 18
+        assert item["kill_participation"] is None or 0 <= item["kill_participation"] <= 100
+        assert item["champion_splash_url"].endswith(f"/img/champion/splash/{item['champion_name']}_0.jpg")
+        assert item["position_icon_url"].endswith(f"/svg/position-{item['position'].lower()}.svg")
     assert client.get("/api/feed?limit=0").status_code == 200  # borné à 1..100
     assert len(client.get("/api/feed?limit=1000").json()["items"]) <= 100
 
@@ -324,10 +530,19 @@ def test_challenge_flow(client: TestClient, admin_headers: dict) -> None:
     detail = client.get(f"/api/players/{p1['id']}").json()
     assert detail["player"]["id"] == p1["id"]
     assert PLAYER_PUBLIC_KEYS <= set(detail["player"])
+    assert detail["player"]["rank_emblem_url"].endswith(f"/emblem-{detail['player']['tier'].lower()}.png")
     assert detail["team"]["name"] == "Duo Rouge"
     assert detail["stats"]["player_id"] == p1["id"]
     assert isinstance(detail["matches"], list)
     assert all(MATCH_ROW_KEYS <= set(row) for row in detail["matches"])
+    # Champions joués : liste complète triée (parties desc), avec images
+    champions = detail["stats"]["champions"]
+    assert isinstance(champions, list) and len(champions) >= 1
+    assert sum(c["games"] for c in champions) == detail["stats"]["games"]
+    assert [c["games"] for c in champions] == sorted((c["games"] for c in champions), reverse=True)
+    assert champions[0]["champion_name"] == detail["stats"]["top_champion"]
+    assert champions[0]["splash_url"] == detail["stats"]["top_champion_splash_url"]
+    assert champions[0]["icon_url"].endswith(f"/img/champion/{champions[0]['image_name']}.png")
     assert detail["snapshots"] and all(s["queue"] == "SOLO" for s in detail["snapshots"])
     assert client.get("/api/players/9999").status_code == 404
 

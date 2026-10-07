@@ -265,3 +265,32 @@ def test_seed_names_are_valid_riot_ids():
     for display_name, riot_id in DemoRiotClient.seed_names:
         assert 2 <= len(display_name) <= 20
         parse_riot_id(riot_id)
+
+
+@pytest.mark.anyio
+async def test_match_has_items_spells_and_coherent_kills(api):
+    account = await api.get_account_by_riot_id("La Peace", "CHILL")
+    ids = await play_games(api, account.puuid, 3)
+    for match_id in ids:
+        info = (await api.get_match(match_id))["info"]
+        remake = info["gameDuration"] < 300
+        for participant in info["participants"]:
+            items = [participant[f"item{i}"] for i in range(7)]
+            assert all(isinstance(item, int) and item >= 0 for item in items)
+            assert items[6] in (3340, 3363, 3364)  # bibelot
+            filled = [item for item in items[:6] if item]
+            assert len(filled) == len(set(filled))  # pas de doublon d'objet
+            assert (1 <= len(filled) <= 2) if remake else (3 <= len(filled) <= 6)
+            spells = {participant["summoner1Id"], participant["summoner2Id"]}
+            assert 4 in spells and len(spells) == 2
+            second = next(iter(spells - {4}))
+            expected = {"TOP": {12, 14}, "JUNGLE": {11}, "MIDDLE": {14, 12}, "BOTTOM": {7, 3}, "UTILITY": {14, 3, 7}}
+            assert second in expected[participant["teamPosition"]]
+            assert 1 <= participant["champLevel"] <= 18
+        # Cohérence par équipe : K + A d'un joueur ≤ kills de son équipe (KP ≤ 100 %)
+        for team in info["teams"]:
+            members = [p for p in info["participants"] if p["teamId"] == team["teamId"]]
+            team_kills = sum(p["kills"] for p in members)
+            assert team["objectives"]["champion"]["kills"] == team_kills
+            for member in members:
+                assert member["kills"] + member["assists"] <= team_kills

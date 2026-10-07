@@ -13,7 +13,17 @@ from datetime import datetime
 from sqlmodel import Session, col, select
 
 from app.config import get_settings
-from app.db.models import Challenge, ChallengeStatus, MatchParticipant, Player, RankSnapshot, Team, utcnow
+from app.db.models import (
+    Challenge,
+    ChallengeStatus,
+    MatchParticipant,
+    Player,
+    Queue,
+    RankSnapshot,
+    Team,
+    game_end_of,
+    utcnow,
+)
 from app.db.session import as_utc
 from app.riot import ddragon
 from app.services.stats import (
@@ -69,6 +79,51 @@ def load_history(
     for participant in participants:
         participants_by[participant.player_id].append(participant)
     return snapshots_by, participants_by
+
+
+def together_record(
+    participants_a: list[MatchParticipant],
+    participants_b: list[MatchParticipant],
+    window_start: datetime | None,
+    window_end: datetime | None,
+    *,
+    queue: Queue | None = Queue.SOLO,
+) -> tuple[int, int, int]:
+    """(parties, victoires, défaites) jouées *ensemble* par deux joueurs.
+
+    Une partie compte si les deux y étaient, du même côté (`team_side` égal et connu),
+    hors remake, et si elle se termine dans la fenêtre (`game_end_of`). Comme les stats
+    joueur, seule la file `queue` est prise en compte (None → toutes les files).
+    """
+    start_utc = as_utc(window_start)
+    end_utc = as_utc(window_end)
+
+    def eligible(p: MatchParticipant) -> bool:
+        if p.is_remake or p.team_side is None:
+            return False
+        return queue is None or p.queue == queue
+
+    sides_a = {p.match_id: p for p in participants_a if eligible(p)}
+    games = wins = losses = 0
+    seen: set[str] = set()
+    for part_b in participants_b:
+        if not eligible(part_b) or part_b.match_id in seen:
+            continue
+        part_a = sides_a.get(part_b.match_id)
+        if part_a is None or part_a.team_side != part_b.team_side:
+            continue
+        ended_at = game_end_of(part_b)
+        if start_utc is not None and ended_at < start_utc:
+            continue
+        if end_utc is not None and ended_at > end_utc:
+            continue
+        seen.add(part_b.match_id)
+        games += 1
+        if part_a.win:
+            wins += 1
+        else:
+            losses += 1
+    return games, wins, losses
 
 
 def _player_stats(
@@ -135,7 +190,16 @@ def build_leaderboard(
     team_stats: list[TeamStats] = []
     for team in teams:
         members = [stats_by_player[p.id] for p in players if p.team_id == team.id and p.id in stats_by_player]
-        team_stats.append(compute_team_stats(team, members))
+        together = (0, 0, 0)
+        if len(members) == 2:
+            window_start, window_end = team_window(challenge, team)
+            together = together_record(
+                participants_by.get(members[0].player_id, []),
+                participants_by.get(members[1].player_id, []),
+                window_start,
+                window_end,
+            )
+        team_stats.append(compute_team_stats(team, members, together=together))
     ranked_teams = rank_teams(team_stats)
     ranked_players = sort_players(list(stats_by_player.values()), key=sort)
     return ranked_teams, ranked_players
