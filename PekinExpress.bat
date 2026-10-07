@@ -1,44 +1,120 @@
 @echo off
 rem =====================================================================
 rem  Pekin Express LoL - lancement en un double-clic (Windows)
-rem  Premier lancement : cree l'environnement Python, installe les
-rem  dependances et prepare le fichier .env (cle Riot, mot de passe).
-rem  Ensuite : demarre le site et l'ouvre dans le navigateur.
+rem  1) cree le fichier .env (cle Riot, mot de passe) s'il n'existe pas
+rem  2) installe Python/venv + dependances au premier lancement
+rem  3) demarre le site et l'ouvre dans le navigateur
 rem  Les autres joueurs se connectent sur http://<IP de ce PC>:8000
 rem =====================================================================
 setlocal
 cd /d "%~dp0"
+title Pekin Express LoL
+echo.
+echo  ===== Pekin Express LoL =====
+echo  Dossier : %CD%
+echo.
 
-where python >nul 2>nul
-if errorlevel 1 (
-    echo Python est introuvable. Installe-le depuis https://python.org/downloads
-    echo en cochant "Add Python to PATH", puis relance ce fichier.
-    pause
-    exit /b 1
-)
-
-if not exist ".venv\Scripts\python.exe" (
-    echo Premiere installation : creation de l'environnement Python...
-    python -m venv .venv || (pause & exit /b 1)
-    ".venv\Scripts\python.exe" -m pip install --quiet --upgrade pip
-    echo Installation des dependances...
-    ".venv\Scripts\python.exe" -m pip install --quiet -r requirements.txt || (pause & exit /b 1)
-)
-
+rem --- 1. Fichier .env --------------------------------------------------
+if exist ".env" goto env_ok
+echo  [1/3] Creation du fichier .env ...
+call :create_env
 if not exist ".env" (
-    copy /y ".env.example" ".env" >nul
     echo.
-    echo  Le fichier .env vient d'etre cree. Ouvre-le pour y coller ta cle Riot
-    echo  (RIOT_API_KEY=RGAPI-...) et choisir ADMIN_PASSWORD. Sans cle : mode demo.
-    echo.
-    start notepad ".env"
-    pause
+    echo  ERREUR : impossible de creer le fichier .env dans ce dossier.
+    echo  Cree-le a la main avec le Bloc-notes ^(voir README^).
+    goto fail
 )
+echo.
+echo  Le fichier .env est cree. Le Bloc-notes va s'ouvrir : colle ta cle Riot
+echo  apres RIOT_API_KEY= et choisis ADMIN_PASSWORD, enregistre ^(Ctrl+S^)
+echo  puis FERME le Bloc-notes pour continuer. Sans cle : mode demo.
+echo.
+pause
+start /wait notepad ".env"
+:env_ok
+echo  [1/3] Fichier .env : OK
 
+rem --- 2. Python + dependances -------------------------------------------
+if exist ".venv\Scripts\python.exe" goto venv_ok
+echo  [2/3] Premiere installation ...
+python -c "import sys; print('  Python', sys.version.split()[0])" 2>nul
+if errorlevel 1 (
+    echo.
+    echo  ERREUR : Python est introuvable ou n'est pas le vrai Python.
+    echo  Installe-le depuis https://python.org/downloads en cochant
+    echo  "Add Python to PATH", puis relance ce fichier.
+    echo  ^(Si une fenetre Microsoft Store s'ouvre quand tu tapes "python",
+    echo   desactive l'alias dans Parametres ^> Applications ^> Alias d'execution.^)
+    goto fail
+)
+echo  Creation de l'environnement Python ^(.venv^) ...
+python -m venv .venv
+if errorlevel 1 (
+    echo  ERREUR : la creation de l'environnement a echoue ^(voir ci-dessus^).
+    goto fail
+)
+echo  Installation des dependances ^(1 a 2 minutes^) ...
+".venv\Scripts\python.exe" -m pip install --upgrade pip
+".venv\Scripts\python.exe" -m pip install -r requirements.txt
+if errorlevel 1 (
+    echo.
+    echo  ERREUR : l'installation des dependances a echoue ^(voir ci-dessus^).
+    echo  Verifie la connexion Internet, puis relance ce fichier.
+    goto fail
+)
+:venv_ok
+echo  [2/3] Dependances : OK
+
+rem --- 3. Lancement -------------------------------------------------------
+echo  [3/3] Demarrage du site ...
 echo.
-echo  Site : http://localhost:8000   (autres PC du reseau : http://^<IP de ce PC^>:8000)
-echo  Laisse cette fenetre ouverte pendant le challenge. Ctrl+C pour arreter.
+echo  Site : http://localhost:8000
+echo  Autres PC du reseau : http://^<IP de ce PC^>:8000  ^(ipconfig pour l'IP^)
+echo  LAISSE CETTE FENETRE OUVERTE pendant le challenge. Ctrl+C pour arreter.
 echo.
-start "" "http://localhost:8000"
+rem Le navigateur s'ouvre 3 s plus tard, le temps que le serveur demarre
+start "" cmd /c "timeout /t 3 /nobreak >nul & start "" http://localhost:8000"
 ".venv\Scripts\python.exe" -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+echo.
+echo  Le serveur s'est arrete.
+goto end
+
+:create_env
+rem Ecrit un .env complet (identique a .env.example) sans dependre de la copie
+> ".env" echo # Cle Riot (developer.riotgames.com). Laisser vide pour le mode demo.
+>>".env" echo RIOT_API_KEY=
+>>".env" echo RIOT_PLATFORM=euw1
+>>".env" echo RIOT_REGION=europe
+>>".env" echo.
+>>".env" echo # Mode demo : true = client Riot simule. Vide = automatique (demo si pas de cle).
+>>".env" echo DEMO_MODE=
+>>".env" echo.
+>>".env" echo # Secondes entre deux interrogations de Riot (90 en reel, 10 en demo)
+>>".env" echo POLL_INTERVAL_SECONDS=90
+>>".env" echo TRACK_FLEX=false
+>>".env" echo.
+>>".env" echo # Mot de passe de l'organisateur (page Admin, roue, demarrage)
+>>".env" echo ADMIN_PASSWORD=change-me
+>>".env" echo.
+>>".env" echo # Base SQLite
+>>".env" echo DATABASE_URL=sqlite:///./data/tracker.db
+>>".env" echo.
+>>".env" echo # Regles du challenge
+>>".env" echo GAMES_PER_DAY=10
+>>".env" echo MAX_PLAYERS=8
+>>".env" echo TIMEZONE=Europe/Paris
+>>".env" echo.
+>>".env" echo # Webhook Discord (optionnel). Vide = desactive.
+>>".env" echo DISCORD_WEBHOOK_URL=
+>>".env" echo.
+>>".env" echo # Adresse publique du site (utilisee dans les messages Discord)
+>>".env" echo BASE_URL=http://localhost:8000
+goto :eof
+
+:fail
+echo.
+echo  Le lancement a echoue. Copie le texte de cette fenetre pour te faire aider.
+:end
+echo.
+pause
 endlocal
