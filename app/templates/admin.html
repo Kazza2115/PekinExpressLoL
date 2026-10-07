@@ -83,6 +83,7 @@
     <div class="section-head"><span class="section-label">Système</span><span class="muted" id="sys-mode"></span></div>
     <div class="sys-stats" id="sys-stats"></div>
     <div id="sys-errors" class="errors-list mt-sm" hidden></div>
+    <div class="sys-url mt-sm" id="sys-url"></div>
     <div class="btn-row mt-sm">
       <button type="button" class="btn" id="btn-refresh">Forcer un rafraîchissement</button>
       <button type="button" class="btn" id="btn-reload">Recharger .env</button>
@@ -92,4 +93,4 @@
 </div>
 {% endblock %}
 
-{% block scripts %}<script src="/static/js/admin.js"></script>{% endblock %}
+{% block scripts %}<script src="/static/js/admin.js?v={{ asset_v }}"></script>{% endblock %}

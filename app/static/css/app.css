@@ -898,3 +898,7 @@ a.duo-card:hover .duo-arrow { color: var(--accent); }
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
   .badge-live .dot, .pill-live .dot { animation: none; }
 }
+
+/* Admin : adresse publique du site */
+.sys-url-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0; }
+.sys-url-value { font-size: 0.95rem; padding: 6px 10px; border-radius: 8px; background: rgba(255,255,255,.05); border: 1px solid var(--border, rgba(255,255,255,.08)); word-break: break-all; }

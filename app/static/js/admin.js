@@ -30,6 +30,7 @@
     sysStats: $('#sys-stats'),
     sysErrors: $('#sys-errors'),
     sysMode: $('#sys-mode'),
+    sysUrl: $('#sys-url'),
     btnRefresh: $('#btn-refresh'),
     btnReload: $('#btn-reload'),
     btnDiscord: $('#btn-discord'),
@@ -435,8 +436,29 @@
     return `<div class="tile card card-flat"><div class="tile-label">${esc(label)}</div><div class="tile-value">${value}</div>${sub ? `<div class="tile-sub">${sub}</div>` : ''}</div>`;
   }
 
+  function renderPublicUrl() {
+    if (!els.sysUrl) return;
+    const url = (state && state.base_url) || '';
+    const isLocal = /localhost|127\.0\.0\.1/.test(url);
+    els.sysUrl.innerHTML = `
+      <span class="section-label">Adresse du site (BASE_URL)</span>
+      <div class="sys-url-row">
+        <code class="sys-url-value">${esc(url || '—')}</code>
+        <button type="button" class="btn btn-sm" id="btn-copy-url">Copier</button>
+      </div>
+      <div class="muted small">${isLocal
+        ? 'Adresse locale : seul ce PC y accède. Pour les amis, mets l\'adresse du tunnel (https://….trycloudflare.com) dans BASE_URL du fichier .env, puis « Recharger .env ». Elle sert aux liens des messages Discord ; le site lui-même reste joignable par l\'adresse du tunnel.'
+        : 'C\'est l\'adresse à partager aux joueurs (utilisée dans les messages Discord).'}</div>`;
+    const btn = $('#btn-copy-url');
+    if (btn) btn.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(url); toast('Adresse copiée.', { type: 'success' }); }
+      catch (e) { toast('Copie impossible : sélectionne l\'adresse à la main.', { type: 'error' }); }
+    });
+  }
+
   function renderSystem(report) {
     els.sysMode.textContent = (state && state.demo_mode) || App.demoMode ? 'Mode démo (API simulée)' : 'API Riot';
+    renderPublicUrl();
     if (!report) {
       els.sysStats.innerHTML = stat('Dernier cycle', '—', 'aucun cycle pour l\'instant') + stat('Durée', '—') + stat('Requêtes Riot', '—') + stat('Erreurs', '0');
       els.sysErrors.hidden = true;

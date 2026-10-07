@@ -273,6 +273,7 @@ def get_state(
         "games_per_day": challenge.games_per_day,
         "live_count": len(state.live_games),
         "last_poll": _last_poll_dict(),
+        "base_url": get_settings().base_url,
     }
 
 
