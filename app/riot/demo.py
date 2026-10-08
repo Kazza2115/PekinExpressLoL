@@ -47,6 +47,8 @@ MAX_STORED_MATCHES = 2000
 # Durée fictive d'une partie normale (secondes) et d'un remake
 NORMAL_DURATION_RANGE = (900, 1680)
 REMAKE_DURATION_S = 180
+# Probabilité qu'une partie normale se termine par un abandon (gameEndedInSurrender)
+SURRENDER_CHANCE = 0.15
 
 # Identifiants image Data Dragon (= `championName` Match-V5) et championId, par poste
 CHAMPIONS_BY_POSITION: dict[str, list[tuple[str, int]]] = {
@@ -342,6 +344,16 @@ class DemoRiotClient:
             for member in members:
                 member["assists"] = max(0, min(member["assists"], team_kills - member["kills"]))
 
+        # First blood : un seul joueur par partie (parmi ceux qui ont tué) ; abandon (« /ff ») dans
+        # ~15 % des parties (donc ~15 % des défaites), vrai pour les 10 participants comme dans Match-V5
+        killers = [p for p in participants if p["kills"] > 0] if not remake else []
+        first_blood = self.rng.choice(killers)["participantId"] if killers else None
+        surrendered = (not remake) and self.rng.random() < SURRENDER_CHANCE
+        for participant in participants:
+            participant["firstBloodKill"] = participant["participantId"] == first_blood
+            participant["firstBloodAssist"] = False
+            participant["gameEndedInSurrender"] = surrendered
+
         def objective(team_win: bool, win_range: tuple[int, int], lose_range: tuple[int, int]) -> dict[str, Any]:
             kills = 0 if remake else self.rng.randint(*(win_range if team_win else lose_range))
             return {"first": team_win and not remake, "kills": kills}
@@ -438,6 +450,7 @@ class DemoRiotClient:
                 "goldEarned": gold, "totalDamageDealtToChampions": damage,
                 "visionScore": vision, "champLevel": level,
             }
+        stats.update(self._participant_details(stats, position, win, minutes, remake))
         # Objets : 1 à 2 en remake, sinon de 3 à 6 selon la durée ; bibelot en `item6`
         item_count = rng.randint(1, 2) if remake else max(3, min(6, int(minutes / 4.5) + rng.randint(0, 1)))
         items = rng.sample(ITEM_POOL, item_count) + [0] * (6 - item_count)
@@ -465,6 +478,66 @@ class DemoRiotClient:
             "summoner2Id": spells[1],
             **item_slots,
             **stats,
+        }
+
+    def _participant_details(
+        self, stats: dict[str, Any], position: str, win: bool, minutes: float, remake: bool
+    ) -> dict[str, Any]:
+        """Champs de détail Match-V5 (multikills, objectifs, balises, dégâts subis, soins, CC…).
+
+        Multikills rares (pentakill très rare), dérivés des kills ; objectifs selon le poste ;
+        balises selon le poste (support ≫ autres) ; temps mort ∝ morts. Tout à zéro en remake.
+        """
+        rng = self.rng
+        kills, deaths, assists = stats["kills"], stats["deaths"], stats["assists"]
+        if remake:
+            return {
+                "doubleKills": 0, "tripleKills": 0, "quadraKills": 0, "pentaKills": 0,
+                "largestMultiKill": 0, "largestKillingSpree": 0,
+                "turretKills": 0, "inhibitorKills": 0, "dragonKills": 0, "baronKills": 0, "objectivesStolen": 0,
+                "totalDamageTaken": rng.randint(200, 1500), "damageSelfMitigated": rng.randint(0, 800),
+                "totalHeal": rng.randint(0, 300), "totalHealsOnTeammates": 0,
+                "timeCCingOthers": 0, "totalTimeSpentDead": 0,
+                "wardsPlaced": rng.randint(0, 2), "wardsKilled": 0, "visionWardsBoughtInGame": 0,
+            }
+        # Multikills : chaque série de kills a une petite chance de s'enchaîner (double 2, triple 3…)
+        multikills = {2: 0, 3: 0, 4: 0, 5: 0}
+        remaining = kills
+        while remaining >= 2 and rng.random() < 0.18:
+            size = 2
+            while size < 5 and size < remaining and rng.random() < {2: 0.3, 3: 0.2, 4: 0.12}[size]:
+                size += 1
+            multikills[size] += 1
+            remaining -= size
+        largest_multi = max((size for size, count in multikills.items() if count), default=1 if kills else 0)
+        spree = 0 if kills == 0 else (kills if deaths == 0 else min(kills, max(1, round(rng.gauss(kills / 1.6, 1.0)))))
+        support = position == "UTILITY"
+        jungle = position == "JUNGLE"
+        turrets = max(0, round(rng.gauss(1.6 if win else 0.6, 1.0)))
+        inhibitors = (1 if rng.random() < 0.22 else 0) if win else 0
+        dragons = max(0, round(rng.gauss(2.2 if win else 0.8, 1.0))) if jungle else (1 if rng.random() < 0.06 else 0)
+        barons = (1 if rng.random() < (0.35 if win else 0.05) else 0) if jungle else (1 if rng.random() < 0.02 else 0)
+        stolen = 1 if rng.random() < (0.08 if jungle else 0.015) else 0
+        taken_per_min = {"TOP": 1050, "JUNGLE": 1000, "MIDDLE": 800, "BOTTOM": 700, "UTILITY": 600}[position]
+        damage_taken = round(minutes * taken_per_min * rng.uniform(0.7, 1.3) + deaths * 900)
+        mitigated = round(damage_taken * rng.uniform(0.35 if position in ("TOP", "JUNGLE") else 0.15, 0.8))
+        heal = round(minutes * (420 if support else 260) * rng.uniform(0.5, 1.4))
+        heals_on_teammates = round(minutes * 350 * rng.uniform(0.5, 1.5)) if support else rng.randint(0, 250)
+        cc_time = round(minutes * (2.4 if support else 1.1) * rng.uniform(0.4, 1.6))
+        time_dead = round(sum(min(70, 12 + minutes * 1.4 + rng.uniform(0, 12)) for _ in range(deaths)))
+        wards = round(minutes * (1.6 if support else 0.45) * rng.uniform(0.6, 1.3))
+        wards_killed = round(minutes * (0.45 if support else 0.12) * rng.uniform(0.3, 1.5))
+        control_wards = max(0, round(rng.gauss(2.8 if support else 1.2, 1.2)))
+        return {
+            "doubleKills": multikills[2], "tripleKills": multikills[3],
+            "quadraKills": multikills[4], "pentaKills": multikills[5],
+            "largestMultiKill": largest_multi, "largestKillingSpree": spree,
+            "turretKills": turrets, "inhibitorKills": inhibitors, "dragonKills": dragons,
+            "baronKills": barons, "objectivesStolen": stolen,
+            "totalDamageTaken": damage_taken, "damageSelfMitigated": mitigated,
+            "totalHeal": heal, "totalHealsOnTeammates": heals_on_teammates,
+            "timeCCingOthers": cc_time, "totalTimeSpentDead": time_dead,
+            "wardsPlaced": wards, "wardsKilled": wards_killed, "visionWardsBoughtInGame": control_wards,
         }
 
     # ------------------------------------------------------------------ RiotAPI

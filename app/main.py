@@ -18,10 +18,10 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.config import PROJECT_ROOT, get_settings
-from app.db.session import init_db
+from app.db.session import init_db, session_scope
 from app.events import bus
 from app.riot import get_api
-from app.services.bootstrap import ensure_challenge, load_players_yaml
+from app.services.bootstrap import backfill_match_details, ensure_challenge, load_players_yaml
 from app.services.poller import Poller
 from app.state import state
 
@@ -38,6 +38,11 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     init_db()
     ensure_challenge()
+    # Colonnes de détail de partie ajoutées après coup : ré-extraites du JSON Match-V5 déjà stocké
+    with session_scope() as session:
+        backfilled = backfill_match_details(session)
+    if backfilled:
+        log.info("Détails de partie complétés pour %d participation(s) existante(s)", backfilled)
     await load_players_yaml(PROJECT_ROOT / "players.yaml")
     api = get_api()
     poller = Poller(api=api, bus=bus, state=state)

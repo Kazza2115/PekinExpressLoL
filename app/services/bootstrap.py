@@ -1,20 +1,94 @@
-"""Amorçage au démarrage : ligne `Challenge` unique et joueurs de `players.yaml`."""
+"""Amorçage au démarrage : ligne `Challenge` unique, joueurs de `players.yaml`, rattrapage des
+détails de partie (colonnes ajoutées après coup, ré-extraites du JSON Match-V5 stocké)."""
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 
 import yaml
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.config import get_settings
-from app.db.models import Challenge, Player
+from app.db.models import Challenge, Match, MatchParticipant, Player
 from app.db.session import session_scope
 from app.riot import get_api
+from app.services.poller import participant_details
 from app.services.registration import register_player
 
 log = logging.getLogger("pekin.bootstrap")
+
+
+def _find_participant(row: MatchParticipant, parts: list[dict], puuid: str | None) -> dict | None:
+    """Participant JSON correspondant à une ligne : par puuid, sinon par champion (unique dans une partie)."""
+    if puuid:
+        for part in parts:
+            if part.get("puuid") == puuid:
+                return part
+    # Compte re-lié depuis (autre puuid) : le champion identifie encore le joueur dans la partie
+    for part in parts:
+        if part.get("championName") == row.champion_name or (
+            row.champion_id is not None and part.get("championId") == row.champion_id
+        ):
+            if row.team_side is None or part.get("teamId") == row.team_side:
+                return part
+    return None
+
+
+def backfill_match_details(session: Session) -> int:
+    """Renseigne les colonnes de détail (`double_kills`, `wards_placed`, `damage_share`…) des
+    participations enregistrées avant leur ajout, à partir du `Match.raw_json` conservé.
+
+    Une ligne est à traiter si `largest_multi_kill` est NULL et que le JSON de la partie existe.
+    Même extraction que le poller (`participant_details`). Renvoie le nombre de lignes mises à jour.
+    """
+    pending = session.exec(
+        select(MatchParticipant)
+        .where(col(MatchParticipant.largest_multi_kill).is_(None))
+        .order_by(col(MatchParticipant.match_id), col(MatchParticipant.id))
+    ).all()
+    if not pending:
+        return 0
+    player_ids = {row.player_id for row in pending}
+    puuid_by_player = {
+        player.id: player.puuid
+        for player in session.exec(select(Player).where(col(Player.id).in_(list(player_ids)))).all()
+    }
+    updated = 0
+    parts_cache: dict[str, list[dict] | None] = {}
+    for row in pending:
+        if row.match_id not in parts_cache:
+            parts_cache[row.match_id] = _match_parts(session, row.match_id)
+        parts = parts_cache[row.match_id]
+        if not parts:
+            continue
+        part = _find_participant(row, parts, puuid_by_player.get(row.player_id))
+        if part is None:
+            continue
+        for column, value in participant_details(part, parts).items():
+            setattr(row, column, value)
+        session.add(row)
+        updated += 1
+    if updated:
+        session.commit()
+    return updated
+
+
+def _match_parts(session: Session, match_id: str) -> list[dict] | None:
+    """Participants du JSON Match-V5 stocké ; None si absent ou illisible."""
+    match = session.get(Match, match_id)
+    if match is None or not match.raw_json:
+        return None
+    try:
+        raw = json.loads(match.raw_json)
+    except ValueError:
+        return None
+    info = raw.get("info") if isinstance(raw, dict) else None
+    if not isinstance(info, dict):
+        return None
+    parts = [part for part in info.get("participants") or [] if isinstance(part, dict)]
+    return parts or None
 
 
 def ensure_challenge(session: Session | None = None) -> Challenge:

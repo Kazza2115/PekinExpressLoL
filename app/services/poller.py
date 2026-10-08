@@ -159,6 +159,85 @@ def _kill_participation(kills: int, assists: int, team_kills: int | None) -> flo
     return round(min(100.0, (kills + assists) / team_kills * 100), 1)
 
 
+def _bool_or_none(value: Any) -> bool | None:
+    """Booléen depuis une valeur JSON ; None si absent ou d'un autre type."""
+    return value if isinstance(value, bool) else None
+
+
+def _team_totals(parts: list[dict[str, Any]], key: str) -> dict[int, int]:
+    """Somme d'un champ numérique par côté (`teamId`)."""
+    totals: dict[int, int] = {}
+    for part in parts:
+        side = _team_side_of(part)
+        if side is None:
+            continue
+        totals[side] = totals.get(side, 0) + (_int_or_none(part.get(key)) or 0)
+    return totals
+
+
+def _share(value: int | None, team_total: int | None) -> float | None:
+    """Part d'un joueur dans le total de son équipe (%, 1 décimale) ; None si le total est nul."""
+    if not team_total or team_total <= 0:
+        return None
+    return round((value or 0) / team_total * 100, 1)
+
+
+# Champ Match-V5 → colonne `MatchParticipant` (entiers)
+_DETAIL_INT_FIELDS: dict[str, str] = {
+    "doubleKills": "double_kills",
+    "tripleKills": "triple_kills",
+    "quadraKills": "quadra_kills",
+    "pentaKills": "penta_kills",
+    "largestMultiKill": "largest_multi_kill",
+    "largestKillingSpree": "largest_killing_spree",
+    "turretKills": "turret_kills",
+    "inhibitorKills": "inhibitor_kills",
+    "dragonKills": "dragon_kills",
+    "baronKills": "baron_kills",
+    "objectivesStolen": "objectives_stolen",
+    "totalDamageTaken": "damage_taken",
+    "damageSelfMitigated": "damage_mitigated",
+    "totalHeal": "total_heal",
+    "totalHealsOnTeammates": "heals_on_teammates",
+    "timeCCingOthers": "time_ccing_others",
+    "totalTimeSpentDead": "time_spent_dead",
+    "wardsPlaced": "wards_placed",
+    "wardsKilled": "wards_killed",
+    "visionWardsBoughtInGame": "control_wards_bought",
+}
+# Champ Match-V5 → colonne (booléens)
+_DETAIL_BOOL_FIELDS: dict[str, str] = {
+    "firstBloodKill": "first_blood_kill",
+    "gameEndedInSurrender": "surrendered",
+}
+# Toutes les colonnes de détail (ordre stable)
+DETAIL_COLUMNS: tuple[str, ...] = (
+    *_DETAIL_INT_FIELDS.values(),
+    *_DETAIL_BOOL_FIELDS.values(),
+    "damage_share",
+    "gold_share",
+)
+
+
+def participant_details(part: dict[str, Any], all_parts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Détails d'un participant Match-V5 → colonnes `MatchParticipant` (profil joueur).
+
+    Fonction pure, partagée par `Poller._store_match` et `bootstrap.backfill_match_details`.
+    Chaque clé absente ou invalide du JSON donne None (les stats les traitent comme 0).
+    `damage_share` / `gold_share` = part du joueur dans le total de son côté (`teamId`),
+    None si le côté est inconnu ou si le total de l'équipe est nul.
+    """
+    details: dict[str, Any] = {column: _int_or_none(part.get(key)) for key, column in _DETAIL_INT_FIELDS.items()}
+    for key, column in _DETAIL_BOOL_FIELDS.items():
+        details[column] = _bool_or_none(part.get(key))
+    side = _team_side_of(part)
+    team_damage = _team_totals(all_parts, "totalDamageDealtToChampions").get(side) if side is not None else None
+    team_gold = _team_totals(all_parts, "goldEarned").get(side) if side is not None else None
+    details["damage_share"] = _share(_int_or_none(part.get("totalDamageDealtToChampions")), team_damage)
+    details["gold_share"] = _share(_int_or_none(part.get("goldEarned")), team_gold)
+    return details
+
+
 @dataclass
 class _CycleContext:
     """Données partagées par toutes les étapes d'un cycle."""
@@ -731,6 +810,7 @@ class Poller:
                 spells=_spells_of(part),
                 champ_level=int(champ_level) if isinstance(champ_level, int) and not isinstance(champ_level, bool) else None,
                 kill_participation=_kill_participation(kills, assists, team_kills.get(side) if side is not None else None),
+                **participant_details(part, all_parts),
             )
             session.add(participant)
             rows.append((participant_player, participant))

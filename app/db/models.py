@@ -145,6 +145,32 @@ class MatchParticipant(SQLModel, table=True):
     spells: str | None = None  # "summoner1Id,summoner2Id", ex. "4,14"
     champ_level: int | None = None
     kill_participation: float | None = None  # (K + A) / kills de l'équipe × 100 ; None si 0 kill
+    # --- Détails Match-V5 (profil joueur) : None sur les lignes antérieures à la colonne tant que
+    # `bootstrap.backfill_match_details` ne les a pas ré-extraites du `Match.raw_json` ---
+    double_kills: int | None = None
+    triple_kills: int | None = None
+    quadra_kills: int | None = None
+    penta_kills: int | None = None
+    largest_multi_kill: int | None = None
+    largest_killing_spree: int | None = None
+    turret_kills: int | None = None
+    inhibitor_kills: int | None = None
+    dragon_kills: int | None = None
+    baron_kills: int | None = None
+    objectives_stolen: int | None = None
+    damage_taken: int | None = None  # totalDamageTaken
+    damage_mitigated: int | None = None  # damageSelfMitigated
+    total_heal: int | None = None  # totalHeal
+    heals_on_teammates: int | None = None  # totalHealsOnTeammates
+    time_ccing_others: int | None = None  # timeCCingOthers (secondes)
+    time_spent_dead: int | None = None  # totalTimeSpentDead (secondes)
+    wards_placed: int | None = None
+    wards_killed: int | None = None
+    control_wards_bought: int | None = None  # visionWardsBoughtInGame
+    first_blood_kill: bool | None = None
+    surrendered: bool | None = None  # gameEndedInSurrender (vrai pour les 10 joueurs de la partie)
+    damage_share: float | None = None  # part des dégâts aux champions de son équipe (%, 1 décimale)
+    gold_share: float | None = None  # part de l'or de son équipe (%, 1 décimale)
 
 
 def game_end_of(row: Match | MatchParticipant) -> datetime:
