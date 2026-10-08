@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Rangs · {{ challenge.name }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/rankings.css?v={{ asset_v }}">{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="section-label">Classement des rangs</span>
+    <h1 class="page-title">Les plus hauts rangs <span id="rk-status"></span></h1>
+    <div class="page-sub flex wrap" style="gap:14px">
+      <span class="updated" id="rk-updated">Chargement…</span>
+      <span class="muted" id="rk-count"></span>
+    </div>
+  </div>
+  <div class="btn-row">
+    <a class="btn" href="/duos#comparatif">📊 Comparer les duos</a>
+    <a class="btn btn-ghost" href="/dashboard">🏆 Classement LP</a>
+  </div>
+</div>
+
+<section class="card rk-hero skeleton" id="rk-hero" style="min-height:190px" aria-label="Résumé des rangs"></section>
+
+<section class="section">
+  <div class="section-head"><span class="section-label">Podium</span><span class="muted">Rang Solo/Duo actuel</span></div>
+  <div class="rk-podium" id="rk-podium">
+    <div class="card skeleton" style="min-height:300px"></div>
+    <div class="card skeleton" style="min-height:340px"></div>
+    <div class="card skeleton" style="min-height:300px"></div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-head">
+    <span class="section-label">Classement complet</span>
+    <span class="muted">▲▼ places gagnées ou perdues depuis le départ · clique sur un joueur pour sa fiche</span>
+  </div>
+  <div class="table-wrap">
+    <table class="table rk-table">
+      <thead>
+        <tr>
+          <th style="width:44px">#</th>
+          <th class="center" style="width:56px">Évol.</th>
+          <th>Joueur</th>
+          <th>Rang</th>
+          <th class="num">Progression</th>
+          <th>Pic</th>
+          <th class="num">Saison</th>
+          <th class="num">Paliers</th>
+        </tr>
+      </thead>
+      <tbody id="rk-body"><tr><td colspan="8" class="muted center">Chargement…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<div class="rk-cols section">
+  <section>
+    <div class="section-head"><span class="section-label">Duos par rang moyen</span><span class="muted">★ meilleur rang du duo</span></div>
+    <div class="rk-teams" id="rk-teams">
+      <div class="card skeleton" style="min-height:200px"></div>
+      <div class="card skeleton" style="min-height:200px"></div>
+    </div>
+  </section>
+  <section>
+    <div class="section-head"><span class="section-label">Répartition par palier</span></div>
+    <div class="card rk-tiers" id="rk-tiers"><div class="muted">Chargement…</div></div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}<script src="/static/js/rankings.js?v={{ asset_v }}"></script>{% endblock %}

@@ -14,6 +14,8 @@
     unassignedSection: $('#unassigned-section'),
     unassignedHint: $('#unassigned-hint'),
     unassignedList: $('#unassigned-list'),
+    cmpSection: $('#comparatif'),
+    cmpTable: $('#cmp-table'),
   };
 
   let data = null;          // réponse de /api/duos (normalisée)
@@ -110,6 +112,7 @@
   function render() {
     renderHeader();
     renderTeams();
+    renderComparison();
     renderUnassigned();
     highlightTarget();
   }
@@ -123,7 +126,7 @@
     els.count.textContent = teams.length
       ? `${plural(teams.length, 'duo', 'duos')} · ${plural(nPlayers, 'joueur', 'joueurs')} · objectif ${gamesPerDay} games par jour`
       : `Objectif ${gamesPerDay} games par jour et par joueur`;
-    els.actions.innerHTML = '<a class="btn" href="/dashboard">🏆 Voir le classement</a><a class="btn btn-ghost" href="/admin#duos" title="Réservé à l’organisateur">✏️ Modifier (Admin)</a>';
+    els.actions.innerHTML = `${teams.length > 1 && data.comparison ? '<a class="btn" href="#comparatif">📊 Comparatif</a>' : ''}` + '<a class="btn" href="/dashboard">🏆 Voir le classement</a><a class="btn btn-ghost" href="/admin#duos" title="Réservé à l’organisateur">✏️ Modifier (Admin)</a>';
   }
 
   function tickUpdated() {
@@ -184,6 +187,7 @@
           <div class="lbl">LP nets</div>
         </div>
       </header>
+      ${avgRankHtml(t, players)}
       <div class="duo-tiles">
         ${tile('Victoires / Défaites', `<span class="v-win">${t.wins || 0} V</span><span class="v-sep">–</span><span class="v-loss">${t.losses || 0} D</span>`)}
         ${tile('Winrate', wr, t.games ? '' : 'Pas encore de partie')}
@@ -197,6 +201,66 @@
         <div class="face-rows">${faceRows(a, b)}</div>
       </div>
     </article>`;
+  }
+
+  /* « Rang moyen » du duo : emblème du tier moyen + meilleur joueur. */
+  function avgRankHtml(t, players) {
+    const rk = App.rk;
+    if (!rk) return '';
+    const avg = num(t.avg_absolute_lp);
+    const tier = rk.tierFromAbsolute(avg);
+    const color = t.rank_color || App.rankColor(tier);
+    const top = players.find((p) => p.player_id === t.top_player_id);
+    const label = avg === null ? 'Non classé' : (t.rank_label || App.rankFromAbsolute(avg));
+    return `<div class="duo-avg-rank">${rk.emblem({ tier, size: 'sm', color })}<span class="lbl">Rang moyen</span><span class="rank" style="--rank-color:${esc(color)}">${esc(label)}</span>${top && t.top_player_rank_label ? `<span class="best">· meilleur <strong>${esc(top.display_name)}</strong> (${esc(t.top_player_rank_label)})</span>` : ''}</div>`;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Comparatif des duos : lignes = statistiques, colonnes = duos          */
+  /* ------------------------------------------------------------------ */
+  const CMP_GROUPS = [
+    { label: 'Performance', keys: ['lp_net', 'lp_per_game', 'winrate', 'games', 'together_games', 'together_winrate', 'best_win_streak', 'avg_game_duration', 'surrenders'] },
+    { label: 'Combat', keys: ['avg_kda', 'avg_kill_participation', 'avg_damage', 'avg_damage_share', 'multikills', 'penta_kills', 'first_bloods'] },
+    { label: 'Farm & économie', keys: ['avg_cs_per_min', 'avg_gold_per_min'] },
+    { label: 'Vision & objectifs', keys: ['avg_vision', 'avg_wards_placed', 'dragon_kills', 'baron_kills', 'turret_kills', 'objectives_stolen'] },
+    { label: 'Rangs', keys: ['avg_absolute_lp', 'season_winrate'] },
+  ];
+
+  function renderComparison() {
+    const metrics = (data.comparison && Array.isArray(data.comparison.metrics)) ? data.comparison.metrics : [];
+    const teams = data.teams || [];
+    els.cmpSection.hidden = !metrics.length || teams.length < 2;
+    if (els.cmpSection.hidden) { els.cmpTable.innerHTML = ''; return; }
+    const head = `<thead><tr><th scope="col">Statistique</th>${teams.map((t) => {
+      const tier = App.rk ? App.rk.tierFromAbsolute(t.avg_absolute_lp) : null;
+      const names = (t.players || []).map((p) => p.display_name).filter(Boolean).join(' & ');
+      return `<th scope="col"><div class="cmp-duo" style="--team-color:${esc(t.color || '#e5b64d')}"><a href="#duo-${t.team_id}"><span class="swatch"></span>${esc(t.name || 'Duo')}</a><span class="cmp-duo-sub">${esc(names || '—')}</span>${App.rk && num(t.avg_absolute_lp) !== null ? `<span class="cmp-duo-rank rank" style="--rank-color:${esc(t.rank_color || App.rankColor(tier))}">${App.rk.emblem({ tier, size: 'xs' })}${esc(App.rk.TIER_FR[tier] || '')}</span>` : ''}</div></th>`;
+    }).join('')}</tr></thead>`;
+    const byKey = new Map(metrics.map((m) => [m.key, m]));
+    const groups = CMP_GROUPS.map((g) => ({ label: g.label, metrics: g.keys.map((k) => byKey.get(k)).filter(Boolean) }));
+    const known = new Set(CMP_GROUPS.flatMap((g) => g.keys));
+    const others = metrics.filter((m) => !known.has(m.key));
+    if (others.length) groups.push({ label: 'Autres', metrics: others });
+    const cols = teams.length;
+    const rows = groups.filter((g) => g.metrics.length).map((g) => `<tr class="cmp-group"><td>${esc(g.label)}</td><td colspan="${cols}"></td></tr>${g.metrics.map((m) => metricRow(m, teams)).join('')}`).join('');
+    els.cmpTable.innerHTML = `${head}<tbody>${rows}</tbody>`;
+  }
+
+  function metricRow(m, teams) {
+    const values = new Map((m.values || []).map((v) => [v.team_id, v]));
+    const nums = (m.values || []).map((v) => num(v.value)).filter((v) => v !== null);
+    const maxAbs = nums.length ? Math.max(...nums.map(Math.abs)) : 0;
+    const hint = m.higher_is_better === false ? '<span class="cmp-hint">le plus bas gagne</span>' : '';
+    const cells = teams.map((t) => {
+      const v = values.get(t.team_id) || {};
+      const value = num(v.value);
+      const display = value === null ? '—' : (v.display !== undefined && v.display !== null && v.display !== '' ? String(v.display) : String(value));
+      const best = value !== null && m.best_team_id !== null && m.best_team_id !== undefined && m.best_team_id === t.team_id;
+      const worst = value !== null && !best && m.worst_team_id !== null && m.worst_team_id !== undefined && m.worst_team_id === t.team_id;
+      const pct = value === null || !maxAbs ? 0 : Math.max(value === 0 ? 0 : 4, Math.round((Math.abs(value) / maxAbs) * 100));
+      return `<td class="cmp-cell${best ? ' is-best' : ''}${worst ? ' is-worst' : ''}"${best ? ' title="Meilleur duo"' : worst ? ' title="Plus faible"' : ''}><div class="cmp-val">${best ? '<span class="cmp-crown" aria-label="Meilleur">👑</span>' : ''}<span class="${value === null ? 'muted' : ''}">${esc(display)}</span></div>${value === null ? '' : `<div class="cmp-bar${value < 0 ? ' is-neg' : ''}"><span style="width:${pct}%"></span></div>`}</td>`;
+    }).join('');
+    return `<tr><td class="cmp-label">${esc(m.label || m.key || '—')}${hint}</td>${cells}</tr>`;
   }
 
   function facePlayer(p, t) {
@@ -288,6 +352,10 @@
   /* #duo-<id> dans l'URL : on fait défiler jusqu'à la carte et on la met en avant quelques secondes. */
   function highlightTarget() {
     if (targetDone) return;
+    if (location.hash === '#comparatif') { // section masquée au chargement : on défile une fois rendue
+      if (!els.cmpSection.hidden) { targetDone = true; els.cmpSection.scrollIntoView({ behavior: 'auto', block: 'start' }); }
+      return;
+    }
     const m = /^#duo-(\d+)$/.exec(location.hash || '');
     if (!m) { targetDone = true; return; }
     const el = document.getElementById(`duo-${m[1]}`);

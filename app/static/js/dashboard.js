@@ -19,12 +19,14 @@
     chartEmpty: $('#chart-empty'),
     chartHint: $('#chart-hint'),
     chartCanvas: $('#lp-chart'),
+    topRanks: $('#top-ranks-list'),
   };
 
   let leaderboard = null;
   let history = null;
   let feed = null;
   let live = null;
+  let rankings = null;
   let sortKey = 'lp_net';
   let lastUpdated = null;
   let chart = null;
@@ -54,8 +56,14 @@
     App.setLiveCount((live && live.live && live.live.length) || 0);
   }
 
+  async function loadRanks() {
+    if (!els.topRanks) return;
+    rankings = await api('/api/rankings');
+    renderTopRanks();
+  }
+
   async function loadAll() {
-    const results = await Promise.allSettled([loadLeaderboard(), loadHistory(), loadFeed(), loadLive()]);
+    const results = await Promise.allSettled([loadLeaderboard(), loadHistory(), loadFeed(), loadLive(), loadRanks()]);
     const failed = results.filter((r) => r.status === 'rejected');
     if (failed.length) {
       els.updated.classList.add('is-offline');
@@ -385,6 +393,27 @@
     }).join('');
   }
 
+  /* Top 5 des rangs actuels (détail sur /rankings). */
+  function renderTopRanks() {
+    const list = ((rankings && rankings.players) || []).filter((p) => p.position !== null && p.position !== undefined).slice(0, 5);
+    if (!list.length) {
+      els.topRanks.innerHTML = '<div class="empty" style="border:0;padding:16px 0"><div class="empty-icon">🎖️</div><div class="empty-title">Aucun joueur classé</div>Les rangs Solo/Duo apparaissent ici.</div>';
+      return;
+    }
+    const rk = App.rk;
+    els.topRanks.innerHTML = list.map((p) => {
+      const tier = rk ? rk.normTier(p.tier) : null;
+      const color = p.rank_color || App.rankColor(tier);
+      const emblem = rk ? rk.emblem({ tier, src: p.rank_emblem_url, size: 'md', color }) : App.rankEmblem(p.rank_emblem_url, 'md', App.tierName(p.tier));
+      return `<a class="rk-top-item${p.position === 1 ? ' is-first' : ''}" href="/player/${encodeURIComponent(p.player_id)}">
+        <span class="rk-top-pos">${p.position === 1 ? '👑' : esc(String(p.position))}</span>
+        ${emblem}
+        <span class="rk-top-main"><span class="rk-top-name">${esc(p.display_name)}</span><span class="rank" style="--rank-color:${esc(color)}">${esc(p.rank_label || '—')}</span></span>
+        ${rk ? rk.moveHtml(p) : ''}
+      </a>`;
+    }).join('');
+  }
+
   function tickElapsed() {
     const now = Date.now();
     $$('[data-elapsed-start]').forEach((el) => {
@@ -397,7 +426,7 @@
   /* Rafraîchissements                                                    */
   /* ------------------------------------------------------------------ */
   const safe = (fn) => () => fn().then(() => { lastUpdated = Date.now(); tickUpdated(); }).catch((e) => { els.updated.classList.add('is-offline'); els.updated.textContent = 'Hors ligne'; console.warn(e); });
-  const refreshScores = App.debounce(safe(() => Promise.all([loadLeaderboard(), loadHistory(), loadFeed()])), 1000);
+  const refreshScores = App.debounce(safe(() => Promise.all([loadLeaderboard(), loadHistory(), loadFeed(), loadRanks()])), 1000);
   const refreshLive = App.debounce(safe(() => Promise.all([loadLive(), loadLeaderboard()])), 1000);
   const refreshAll = App.debounce(safe(loadAll), 1000);
 

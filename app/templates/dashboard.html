@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Classement · {{ challenge.name }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/rankings.css?v={{ asset_v }}">{% endblock %}
 
 {% block content %}
 <div class="page-head">
@@ -68,11 +69,19 @@
       <div class="section-head"><span class="section-label">En game</span><span class="badge-live" id="live-badge" hidden><span class="dot"></span>Live</span></div>
       <div class="card"><div class="live-list" id="live-list"><div class="muted">Chargement…</div></div></div>
     </section>
+    <section id="top-ranks">
+      <div class="section-head"><span class="section-label">Top rangs</span><span class="muted">rang Solo/Duo actuel</span></div>
+      <div class="card">
+        <div class="rk-top" id="top-ranks-list"><div class="muted">Chargement…</div></div>
+        <a class="rk-top-more" href="/rankings">Voir le classement des rangs →</a>
+      </div>
+    </section>
   </aside>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script src="/static/vendor/chart.umd.js?v={{ asset_v }}"></script>
+<script src="/static/js/rankings.js?v={{ asset_v }}"></script>
 <script src="/static/js/dashboard.js?v={{ asset_v }}"></script>
 {% endblock %}

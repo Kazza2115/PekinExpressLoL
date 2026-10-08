@@ -124,6 +124,12 @@ def dashboard(request: Request, session: Session = Depends(get_session)) -> Resp
     return _render(request, "dashboard.html", _context(request, "dashboard", session))
 
 
+@router.get("/rankings", response_class=HTMLResponse, include_in_schema=False)
+def rankings(request: Request, session: Session = Depends(get_session)) -> Response:
+    """Classement net des plus hauts rangs (joueurs, duos par rang moyen, répartition par palier)."""
+    return _render(request, "rankings.html", _context(request, "rankings", session))
+
+
 @router.get("/player/{player_id}", response_class=HTMLResponse, include_in_schema=False)
 def player_page(
     player_id: Annotated[int, PathParam(ge=1, le=2**31 - 1)], request: Request, session: Session = Depends(get_session)

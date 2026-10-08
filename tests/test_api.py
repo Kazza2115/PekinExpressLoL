@@ -1014,7 +1014,7 @@ def test_demo_removal_while_running_keeps_duos_and_hints_reset(
 def test_html_pages_render(client: TestClient) -> None:
     """Chaque page HTML répond 200 avec la version du site et des fichiers statiques versionnés."""
     player = _register(client, *MIKE)["player"]
-    for path in ("/", "/duos", "/dashboard", "/admin", f"/player/{player['id']}"):
+    for path in ("/", "/duos", "/dashboard", "/rankings", "/admin", f"/player/{player['id']}"):
         response = client.get(path)
         assert response.status_code == 200, (path, response.text[:200])
         assert 'class="footer-version"' in response.text, path

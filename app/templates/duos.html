@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Duos · {{ challenge.name }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/rankings.css?v={{ asset_v }}">{% endblock %}
 
 {% block content %}
 <div class="page-head">
@@ -23,10 +24,21 @@
   </div>
 </section>
 
+<section class="section" id="comparatif" hidden>
+  <div class="section-head">
+    <span class="section-label">Comparatif des duos</span>
+    <span class="cmp-legend"><span class="k k-best"><i></i>👑 meilleur</span><span class="k k-worst"><i></i>plus faible</span><span>Durée et abandons : le plus bas gagne</span></span>
+  </div>
+  <div class="cmp-wrap"><table class="cmp-table" id="cmp-table" aria-label="Comparatif des duos, statistique par statistique"></table></div>
+</section>
+
 <section class="section" id="unassigned-section" hidden>
   <div class="section-head"><span class="section-label">Sans duo</span><span class="muted" id="unassigned-hint"></span></div>
   <div class="card card-flat unassigned" id="unassigned-list"></div>
 </section>
 {% endblock %}
 
-{% block scripts %}<script src="/static/js/duos.js?v={{ asset_v }}"></script>{% endblock %}
+{% block scripts %}
+<script src="/static/js/rankings.js?v={{ asset_v }}"></script>
+<script src="/static/js/duos.js?v={{ asset_v }}"></script>
+{% endblock %}

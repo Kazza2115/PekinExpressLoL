@@ -1,0 +1,269 @@
+/* ==========================================================================
+   Rangs (/rankings) + comparatif des duos (/duos) + « Top rangs » (/dashboard)
+   S'appuie sur les jetons de app.css (--surface, --accent, --rank-*…).
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Emblème de rang : gemme CSS couleur du tier (repli), image par-dessus
+   -------------------------------------------------------------------------- */
+.rk-emblem {
+  --tier-color: var(--rank-unranked);
+  --rk-size: 28px;
+  position: relative; display: inline-flex; align-items: center; justify-content: center;
+  width: var(--rk-size); height: var(--rk-size); flex: 0 0 auto; vertical-align: middle;
+}
+.rk-emblem img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.45)); }
+.rk-emblem-fb {
+  width: 80%; height: 88%;
+  display: inline-flex; align-items: center; justify-content: center;
+  clip-path: polygon(50% 0, 100% 24%, 100% 76%, 50% 100%, 0 76%, 0 24%);
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--tier-color) 70%, #fff 30%) 0%, var(--tier-color) 45%, color-mix(in srgb, var(--tier-color) 45%, #000) 100%);
+  color: rgba(8, 10, 16, 0.82); font-weight: 800; letter-spacing: -0.02em; line-height: 1;
+  font-size: calc(var(--rk-size) * 0.34);
+}
+.rk-emblem.is-unranked .rk-emblem-fb { background: var(--surface-3); color: var(--muted); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.rk-emblem.is-loaded .rk-emblem-fb { visibility: hidden; }
+.rk-emblem-xs { --rk-size: 18px; }
+.rk-emblem-sm { --rk-size: 26px; }
+.rk-emblem-md { --rk-size: 38px; }
+.rk-emblem-lg { --rk-size: 64px; }
+.rk-emblem-xl { --rk-size: 108px; }
+.rk-emblem-xs .rk-emblem-fb { font-size: 8px; }
+
+.rk-sub { display: block; font-size: 12px; color: var(--muted); font-weight: 500; line-height: 1.35; }
+.rk-team-chip { max-width: 150px; font-size: 11px; padding: 1px 8px; }
+.rk-live { font-size: 10px; padding: 2px 8px; gap: 5px; }
+.rk-live .detail { font-size: 11px; }
+
+.rk-move { display: inline-flex; align-items: center; justify-content: center; min-width: 34px; padding: 2px 6px; border-radius: 7px; font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums; background: var(--surface-2); color: var(--muted); }
+.rk-move.is-up { background: var(--green-soft); color: var(--green); }
+.rk-move.is-down { background: var(--red-soft); color: var(--red); }
+.rk-move.is-new { background: var(--blue-soft); color: var(--blue); font-size: 11px; font-weight: 600; }
+.rk-move.is-none { background: transparent; color: var(--muted-2); }
+
+/* --------------------------------------------------------------------------
+   Résumé (hero)
+   -------------------------------------------------------------------------- */
+.rk-hero {
+  --tier-color: var(--accent);
+  display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 20px; align-items: center;
+  padding: 22px 24px; overflow: hidden; position: relative;
+  background:
+    radial-gradient(520px 260px at 8% 30%, color-mix(in srgb, var(--tier-color) 22%, transparent), transparent 70%),
+    var(--surface);
+  border-color: color-mix(in srgb, var(--tier-color) 22%, var(--border));
+}
+.rk-hero .empty { grid-column: 1 / -1; border: 0; }
+.rk-hero-main { display: flex; align-items: center; gap: 20px; min-width: 0; }
+.rk-hero-emblem { flex: 0 0 auto; display: flex; filter: drop-shadow(0 6px 22px color-mix(in srgb, var(--tier-color) 45%, transparent)); }
+.rk-hero-text { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.rk-kicker { font-size: 11.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); }
+.rk-hero-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.rk-hero-name a { font-size: 26px; font-weight: 700; color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rk-hero-rank { font-size: 19px; font-weight: 700; }
+.rk-hero-sub { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.rk-hero-sub .rk-season { margin-left: 4px; }
+.rk-hero-sub .rk-sub { display: inline; margin-left: 4px; }
+.rk-hero-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.rk-stat { background: color-mix(in srgb, var(--surface-2) 85%, transparent); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 11px 13px; min-width: 0; }
+.rk-stat-label { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; margin-bottom: 6px; }
+.rk-stat-value { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; font-weight: 600; color: var(--text-strong); }
+.rk-stat-value.big { font-size: 24px; font-weight: 800; line-height: 1.1; }
+.rk-stat-value .rank { min-width: 0; line-height: 1.3; }
+.rk-stat-text { display: flex; flex-direction: column; min-width: 0; }
+.rk-stat-text a { color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 860px) {
+  .rk-hero { grid-template-columns: minmax(0, 1fr); padding: 18px; }
+}
+@media (max-width: 480px) {
+  .rk-hero-main { gap: 14px; }
+  .rk-hero-emblem .rk-emblem-xl { --rk-size: 76px; }
+  .rk-hero-name a { font-size: 21px; }
+  .rk-hero-rank { font-size: 16px; }
+  .rk-stat-value.big { font-size: 20px; }
+}
+
+/* --------------------------------------------------------------------------
+   Podium
+   -------------------------------------------------------------------------- */
+.rk-podium { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.12fr) minmax(0, 1fr); gap: 16px; align-items: end; }
+.rk-podium-empty { grid-column: 1 / -1; }
+.rk-pod {
+  --tier-color: var(--accent);
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; min-width: 0;
+  padding: 16px 16px 18px; overflow: hidden;
+  border-top: 3px solid var(--team-color, var(--accent));
+  background:
+    radial-gradient(260px 160px at 50% 22%, color-mix(in srgb, var(--tier-color) 20%, transparent), transparent 75%),
+    var(--surface);
+}
+.rk-pod-1 { order: 2; padding-top: 22px; padding-bottom: 24px; box-shadow: 0 0 0 1px rgba(229, 182, 77, 0.35), var(--shadow); }
+.rk-pod-2 { order: 1; }
+.rk-pod-3 { order: 3; }
+.rk-pod-top { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: center; }
+.rk-pod-medal { font-size: 24px; line-height: 1; }
+.rk-pod-1 .rk-pod-medal { font-size: 30px; }
+.rk-pod-emblem { display: flex; margin-top: 8px; filter: drop-shadow(0 6px 20px color-mix(in srgb, var(--tier-color) 40%, transparent)); }
+.rk-pod-who { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; }
+.rk-pod-name { font-size: 18px; font-weight: 700; color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rk-pod-1 .rk-pod-name { font-size: 22px; }
+.rk-pod-rank { font-size: 15px; }
+.rk-pod-1 .rk-pod-rank { font-size: 17px; }
+.rk-pod-meta { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; min-height: 22px; }
+.rk-pod-foot { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; border-top: 1px solid var(--border); padding-top: 10px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.rk-pod-foot > div { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; }
+.rk-pod-foot .rk-sub { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; }
+.rk-pod-foot .rk-season + .rk-sub { text-transform: none; letter-spacing: 0; font-size: 12px; }
+@media (max-width: 760px) {
+  .rk-podium { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .rk-pod-1, .rk-pod-2, .rk-pod-3 { order: 0; }
+  .rk-pod { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "emblem who" "emblem rank" "emblem meta" "foot foot"; text-align: left; align-items: center; column-gap: 14px; row-gap: 4px; padding: 38px 14px 14px; }
+  .rk-pod-1 { padding-top: 42px; }
+  .rk-pod-emblem { grid-area: emblem; margin: 0; }
+  .rk-pod-emblem .rk-emblem-xl { --rk-size: 84px; }
+  .rk-pod-emblem .rk-emblem-lg { --rk-size: 60px; }
+  .rk-pod-who { grid-area: who; }
+  .rk-pod-who .avatar-lg { --avatar-size: 40px; }
+  .rk-pod-rank { grid-area: rank; }
+  .rk-pod-meta { grid-area: meta; justify-content: flex-start; min-height: 0; }
+  .rk-pod-foot { grid-area: foot; margin-top: 8px; }
+  .rk-pod-name, .rk-pod-1 .rk-pod-name { font-size: 18px; }
+}
+
+/* --------------------------------------------------------------------------
+   Lignes / cartes cliquables
+   -------------------------------------------------------------------------- */
+.rk-pod.is-link, .rk-team.is-link, .rk-row.is-link { cursor: pointer; }
+.rk-pod.is-link, .rk-team.is-link { transition: border-color 0.15s, transform 0.15s, background-color 0.15s; }
+.rk-pod.is-link:hover, .rk-team.is-link:hover { transform: translateY(-2px); border-color: var(--border-strong); }
+
+/* --------------------------------------------------------------------------
+   Classement complet
+   -------------------------------------------------------------------------- */
+.rk-table td { padding-top: 10px; padding-bottom: 10px; }
+.rk-table .rk-pos .pos-badge { width: 30px; height: 30px; font-size: 14px; }
+.rk-table .rk-pos-none { background: transparent; color: var(--muted-2); border-style: dashed; }
+.rk-table tr.is-first { background: linear-gradient(90deg, rgba(229, 182, 77, 0.07), transparent 60%); }
+.rk-row.is-unranked td { opacity: 0.55; }
+.rk-row.is-unranked:hover td { opacity: 0.8; }
+.rk-player { align-items: center; }
+.rk-player-main { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; row-gap: 3px; min-width: 0; }
+.rk-player-main > a { font-weight: 600; color: var(--text-strong); }
+.rk-player-sub { flex: 1 0 100%; display: flex; align-items: center; gap: 6px; }
+.rk-rank-cell { display: flex; align-items: center; gap: 10px; }
+.rk-rank-main { display: flex; flex-direction: column; gap: 5px; min-width: 150px; }
+.rk-abs-bar { display: block; height: 4px; border-radius: 999px; background: var(--surface-3); overflow: hidden; max-width: 170px; }
+.rk-abs-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--bar-color, var(--accent)); }
+.rk-prog { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.rk-peak { font-size: 13px; color: var(--text); }
+.rk-steps { display: inline-flex; gap: 8px; font-weight: 700; }
+
+/* --------------------------------------------------------------------------
+   Duos par rang moyen + répartition par palier
+   -------------------------------------------------------------------------- */
+.rk-cols { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 980px) { .rk-cols { grid-template-columns: minmax(0, 1fr); } }
+.rk-teams { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 620px) { .rk-teams { grid-template-columns: minmax(0, 1fr); } }
+.rk-team {
+  --tier-color: var(--accent);
+  display: flex; flex-direction: column; gap: 14px; padding: 16px; min-width: 0;
+  border-top: 3px solid var(--team-color, var(--accent));
+  background: radial-gradient(300px 140px at 15% 45%, color-mix(in srgb, var(--tier-color) 14%, transparent), transparent 75%), var(--surface);
+}
+.rk-team-head { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.rk-team-head .pos-badge { width: 28px; height: 28px; font-size: 13px; border-radius: 8px; }
+.rk-team-name { flex: 1; font-weight: 700; color: var(--text-strong); font-size: 15px; min-width: 0; }
+.rk-team-avg { display: flex; align-items: center; gap: 14px; }
+.rk-team-avg .rank { font-size: 16px; }
+.rk-team-players { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 12px; }
+.rk-team-players li { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; }
+.rk-team-players li > a { color: var(--text); font-weight: 600; min-width: 0; }
+.rk-team-rank { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; flex: 0 0 auto; }
+.rk-best { padding: 0 6px; font-size: 11px; }
+
+.rk-tiers { display: flex; flex-direction: column; gap: 14px; }
+.rk-tier { display: grid; grid-template-columns: 128px minmax(0, 1fr) 28px; grid-template-areas: "label bar count" "label names names"; column-gap: 12px; row-gap: 3px; align-items: center; }
+.rk-tier-label { grid-area: label; display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text-strong); font-size: 13.5px; min-width: 0; }
+.rk-tier-bar { grid-area: bar; height: 12px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.rk-tier-bar > span { display: block; height: 100%; min-width: 6px; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--tier-color) 60%, transparent), var(--tier-color)); }
+.rk-tier-count { grid-area: count; text-align: right; font-weight: 700; color: var(--tier-color); }
+.rk-tier-names { grid-area: names; font-size: 12px; color: var(--muted); line-height: 1.4; }
+.rk-tier.is-unranked .rk-tier-label { color: var(--muted); }
+.rk-tier.is-unranked .rk-tier-count { color: var(--muted); }
+@media (max-width: 420px) {
+  .rk-tier { grid-template-columns: minmax(0, 1fr) 28px; grid-template-areas: "label count" "bar bar" "names names"; }
+}
+
+/* --------------------------------------------------------------------------
+   Duos : ligne « Rang moyen » sur chaque carte
+   -------------------------------------------------------------------------- */
+.duo-avg-rank { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: -4px 20px 14px; padding: 8px 12px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--surface-2) 80%, transparent); border: 1px solid var(--border); font-size: 13px; min-width: 0; }
+.duo-avg-rank .lbl { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.duo-avg-rank .rank { white-space: nowrap; }
+.duo-avg-rank .best { color: var(--muted); font-size: 12.5px; min-width: 0; }
+.duo-avg-rank .best strong { color: var(--text); font-weight: 600; }
+@media (max-width: 480px) { .duo-avg-rank { margin-left: 14px; margin-right: 14px; } }
+
+/* --------------------------------------------------------------------------
+   Duos : comparatif (matrice)
+   -------------------------------------------------------------------------- */
+.cmp-legend { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font-size: 12.5px; color: var(--muted); }
+.cmp-legend .k { display: inline-flex; align-items: center; gap: 6px; }
+.cmp-legend .k i { width: 12px; height: 12px; border-radius: 4px; display: inline-block; }
+.cmp-legend .k-best i { background: var(--accent-soft); box-shadow: inset 0 0 0 1px rgba(229, 182, 77, 0.55); }
+.cmp-legend .k-worst i { background: var(--red-soft); box-shadow: inset 0 0 0 1px rgba(240, 90, 90, 0.35); }
+.cmp-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.cmp-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; }
+.cmp-table th, .cmp-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); white-space: nowrap; vertical-align: middle; }
+.cmp-table thead th { background: var(--surface-2); position: relative; text-align: left; min-width: 150px; }
+.cmp-table thead th:first-child { min-width: 0; font-size: 11.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.cmp-table .cmp-duo { display: flex; flex-direction: column; gap: 3px; border-top: 3px solid var(--team-color); margin: -10px -14px 0; padding: 8px 14px 0; }
+.cmp-table .cmp-duo a { display: inline-flex; align-items: center; gap: 7px; color: var(--text-strong); font-weight: 700; font-size: 14px; letter-spacing: 0; text-transform: none; }
+.cmp-table .cmp-duo .swatch { width: 10px; height: 10px; }
+.cmp-table .cmp-duo .cmp-duo-sub { font-size: 11.5px; color: var(--muted); font-weight: 500; letter-spacing: 0; text-transform: none; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
+.cmp-table .cmp-duo .cmp-duo-rank { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.cmp-table th:first-child, .cmp-table td:first-child { position: sticky; left: 0; z-index: 2; background: var(--surface); box-shadow: 1px 0 0 var(--border); }
+.cmp-table thead th:first-child { background: var(--surface-2); z-index: 3; }
+.cmp-table .cmp-label { color: var(--text); font-weight: 500; min-width: 170px; }
+.cmp-table .cmp-label .cmp-hint { display: block; font-size: 11px; color: var(--muted-2); font-weight: 500; }
+.cmp-table tr.cmp-group td { background: var(--surface-2); color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; padding-top: 8px; padding-bottom: 8px; }
+.cmp-table tr.cmp-group td:first-child { background: var(--surface-2); }
+.cmp-table tbody tr:not(.cmp-group):hover td { background-color: rgba(255, 255, 255, 0.02); }
+.cmp-table tbody tr:not(.cmp-group):hover td:first-child { background-color: var(--surface-2); }
+.cmp-table tbody tr:last-child td { border-bottom: 0; }
+.cmp-cell { min-width: 140px; }
+.cmp-val { display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text-strong); }
+.cmp-val .muted { font-weight: 500; }
+.cmp-crown { font-size: 13px; line-height: 1; }
+.cmp-bar { margin-top: 6px; height: 4px; border-radius: 999px; background: var(--surface-3); overflow: hidden; max-width: 160px; }
+.cmp-bar > span { display: block; height: 100%; border-radius: inherit; background: color-mix(in srgb, var(--text) 38%, transparent); }
+.cmp-cell.is-best .cmp-bar > span { background: var(--accent); }
+.cmp-cell.is-worst .cmp-bar > span, .cmp-bar.is-neg > span { background: color-mix(in srgb, var(--red) 75%, transparent); }
+.cmp-cell.is-best { background: linear-gradient(180deg, rgba(229, 182, 77, 0.16), rgba(229, 182, 77, 0.08)); box-shadow: inset 0 0 0 1px rgba(229, 182, 77, 0.35); }
+.cmp-cell.is-best .cmp-val { color: var(--accent); }
+.cmp-cell.is-worst { background: rgba(240, 90, 90, 0.07); }
+.cmp-cell.is-worst .cmp-val { color: #f3a0a0; }
+@media (max-width: 720px) {
+  .cmp-table th, .cmp-table td { padding: 9px 10px; }
+  .cmp-table .cmp-duo { margin: -9px -10px 0; padding: 7px 10px 0; }
+  .cmp-table .cmp-label { min-width: 118px; max-width: 132px; white-space: normal; font-size: 13px; line-height: 1.3; }
+  .cmp-table thead th { min-width: 128px; }
+  .cmp-cell { min-width: 118px; }
+}
+
+/* --------------------------------------------------------------------------
+   Classement (dashboard) : carte « Top rangs »
+   -------------------------------------------------------------------------- */
+.rk-top { display: flex; flex-direction: column; }
+.rk-top-item { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); min-width: 0; color: inherit; }
+.rk-top-item:hover { text-decoration: none; }
+.rk-top-item:hover .rk-top-name { color: var(--accent); }
+.rk-top-item:last-child { border-bottom: 0; }
+.rk-top-pos { width: 22px; text-align: center; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.rk-top-item.is-first .rk-top-pos { color: var(--accent); }
+.rk-top-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.rk-top-name { font-weight: 600; color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rk-top-main .rank { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rk-top-more { display: inline-block; margin-top: 10px; font-size: 13px; font-weight: 600; }
