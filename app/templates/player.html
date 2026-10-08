@@ -1,36 +1,77 @@
 {% extends "base.html" %}
 {% block title %}{{ player.display_name }} · {{ challenge.name }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/profile.css?v={{ asset_v }}">{% endblock %}
 {% block body_attrs %}data-player-id="{{ player.id }}"{% endblock %}
 
 {% block content %}
 <p class="mb-sm"><a href="/dashboard" class="muted">← Classement</a></p>
 
-<section class="card card-pad-lg profile" id="profile">
-  <div class="avatar avatar-xl" id="profile-avatar" style="--avatar-color:#6b7280"><span class="avatar-initials">{{ player.display_name[:2]|upper }}</span></div>
+<!-- En-tête : splash du champion favori, avatar + niveau, Riot ID, rang, saison, pic, duo -->
+<section class="card card-pad-lg profile pf-hero" id="profile">
+  <div class="pf-avatar-wrap">
+    <div class="avatar avatar-xl" id="profile-avatar" style="--avatar-color:#6b7280"><span class="avatar-initials">{{ player.display_name[:2]|upper }}</span></div>
+    <span class="pf-level" id="profile-level" title="Niveau d'invocateur" hidden></span>
+  </div>
   <div class="profile-main">
-    <div class="profile-name"><span id="profile-name">{{ player.display_name }}</span><span id="profile-badges"></span></div>
+    <div class="profile-name"><span id="profile-name">{{ player.display_name }}</span><span class="pf-badges" id="profile-badges"></span></div>
     <div class="profile-sub">
       <span id="profile-riot">{% if player.riot_id %}{{ player.riot_id }}{% else %}Compte non lié{% endif %}</span>
-      <span class="profile-rank-wrap"><span id="profile-emblem"></span><span id="profile-rank" class="rank"></span></span>
+    </div>
+    <div class="pf-hero-chips" id="profile-chips"></div>
+  </div>
+  <div class="pf-rankbox">
+    <span class="pf-emblem" id="profile-emblem"></span>
+    <div class="pf-rank-text">
+      <div id="profile-rank" class="rank pf-rank-label">—</div>
+      <div class="pf-rank-sub" id="profile-season"></div>
+      <div class="pf-rank-sub" id="profile-peak"></div>
     </div>
   </div>
   <div class="profile-lp">
     <div class="big lp-zero" id="profile-lp">—</div>
     <div class="lbl">LP nets</div>
+    <div class="pf-lp-sub" id="profile-lp-sub"></div>
   </div>
 </section>
 
+<section class="section" id="ranks-section">
+  <div class="section-head"><span class="section-label">Classement parmi les joueurs</span><span class="muted" id="ranks-hint">Position sur chaque statistique, joueurs actifs liés</span></div>
+  <div class="pf-ranks" id="pf-ranks"><div class="muted">Chargement…</div></div>
+</section>
+
 <section class="section">
-  <div class="section-head"><span class="section-label">Statistiques</span><span class="muted" id="stats-hint">Fenêtre du challenge, remakes exclus</span></div>
+  <div class="section-head"><span class="section-label">Vue d'ensemble</span><span class="muted" id="stats-hint">Fenêtre du challenge, remakes exclus</span></div>
   <div class="tiles" id="tiles">
     {% for i in range(10) %}<div class="card tile skeleton" style="min-height:76px"></div>{% endfor %}
   </div>
 </section>
 
+<section class="section">
+  <div class="section-head"><span class="section-label">Statistiques détaillées</span><span class="muted">Totaux et moyennes par partie</span></div>
+  <div class="pf-groups" id="pf-groups">
+    {% for i in range(4) %}<div class="card skeleton" style="min-height:180px"></div>{% endfor %}
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-head"><span class="section-label">Répartitions</span><span class="muted">Winrate par poste, côté, durée, moment et jour</span></div>
+  <div class="pf-splits" id="pf-splits"></div>
+</section>
+
+<section class="section">
+  <div class="section-head"><span class="section-label">Records personnels</span><span class="muted">Meilleures performances sur une partie</span></div>
+  <div class="pf-records" id="pf-records"></div>
+</section>
+
+<section class="section" id="duo-section" hidden>
+  <div class="section-head"><span class="section-label">Duo &amp; partenaire</span></div>
+  <div class="pf-duo" id="pf-duo"></div>
+</section>
+
 <section class="section" id="champions-section">
   <div class="section-head"><span class="section-label">Champions joués</span><span class="muted" id="champions-count"></span></div>
-  <div class="champ-grid" id="champions">
-    {% for i in range(4) %}<div class="card champ-card skeleton" style="min-height:170px"></div>{% endfor %}
+  <div class="pf-champ-grid" id="champions">
+    {% for i in range(4) %}<div class="card skeleton" style="min-height:150px"></div>{% endfor %}
   </div>
 </section>
 

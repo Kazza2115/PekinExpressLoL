@@ -200,8 +200,16 @@ Pendant le challenge, la page classement affiche :
 - le panneau **« En game »** : qui joue en ce moment, avec quel champion, depuis combien
   de temps.
 
-Chaque joueur a aussi sa fiche (`/player/<id>`) avec ses stats détaillées, son graphe et la
-liste de ses parties (lien op.gg).
+Chaque joueur a aussi sa fiche (`/player/<id>`) : rang, saison et pic, sa place parmi tous
+les joueurs sur 22 statistiques, une cinquantaine de stats (combat, multikills, farm, or,
+dégâts, vision, objectifs, temps, LP, séries), les répartitions par poste, côté, durée, heure
+et jour, ses records, ses résultats avec et sans son partenaire, ses champions, son graphe et
+la liste de ses parties (lien op.gg).
+
+La page **Rangs** (`/rankings`) classe les joueurs par rang actuel : podium, places gagnées
+ou perdues depuis le départ, pic de rang, saison, duos par rang moyen et répartition par
+palier. La page **Duos** se termine par un **comparatif des duos** sur 26 statistiques
+(meilleur duo en doré, pire en rouge).
 
 La page se met à jour toute seule (flux d'événements), avec un rechargement de secours
 toutes les 60 s.
