@@ -104,6 +104,8 @@ rem Ecrit un .env complet (identique a .env.example) sans dependre de la copie
 >>".env" echo.
 >>".env" echo # Secondes entre deux interrogations de Riot (90 en reel, 10 en demo)
 >>".env" echo POLL_INTERVAL_SECONDS=90
+>>".env" echo # Secondes entre deux verifications des parties en cours (notifications). Minimum 10.
+>>".env" echo LIVE_POLL_SECONDS=30
 >>".env" echo TRACK_FLEX=false
 >>".env" echo.
 >>".env" echo # Mot de passe de l'organisateur (page Admin, duos, demarrage)

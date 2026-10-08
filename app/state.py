@@ -51,6 +51,7 @@ class AppState:
     last_poll: PollReport | None = None
     poll_count: int = 0
     polling: bool = False  # un cycle est en cours
+    last_live_check: datetime | None = None  # dernière détection des parties en cours
 
 
 state = AppState()

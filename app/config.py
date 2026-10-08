@@ -54,6 +54,8 @@ class Settings:
     timezone: str
     discord_webhook_url: str
     base_url: str
+    # Détection des parties en cours (Spectator seul) entre deux cycles complets ; >= poll = désactivée
+    live_poll_seconds: int = 30
     # Fuseau résolu une seule fois (`tz` est lu pour chaque joueur à chaque requête de stats)
     _tz: tzinfo | None = field(default=None, init=False, repr=False, compare=False)
     _tz_fallback: bool = field(default=False, init=False, repr=False, compare=False)
@@ -124,6 +126,8 @@ def _build_settings() -> Settings:
         timezone=os.getenv("TIMEZONE", "Europe/Paris").strip() or "Europe/Paris",
         discord_webhook_url=os.getenv("DISCORD_WEBHOOK_URL", "").strip(),
         base_url=(os.getenv("BASE_URL", "http://localhost:8000").strip() or "http://localhost:8000").rstrip("/"),
+        # Minimum 10 s : 8 joueurs × 1 requête toutes les 10 s reste sous la limite d'une clé de dev
+        live_poll_seconds=max(10, _env_int("LIVE_POLL_SECONDS", 30)),
     )
 
 

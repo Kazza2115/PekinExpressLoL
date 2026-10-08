@@ -504,51 +504,138 @@
   /* ------------------------------------------------------------------ */
   const notifBtn = $('#btn-notifications');
   const notifSupported = 'Notification' in window;
+  // Android refuse `new Notification()` : il faut passer par un service worker (`/sw.js`, sans cache)
+  let swRegistration = null;
+  if ('serviceWorker' in navigator && window.isSecureContext) {
+    navigator.serviceWorker.register('/sw.js').then((reg) => { swRegistration = reg; }).catch(() => {});
+  }
 
   function renderNotifButton() {
     if (!notifBtn) return;
-    if (!notifSupported) { notifBtn.hidden = true; return; }
     notifBtn.hidden = false;
+    notifBtn.disabled = false;
+    if (!notifSupported) {
+      notifBtn.textContent = '🔕 Notifications indisponibles';
+      notifBtn.title = window.isSecureContext ? 'Ce navigateur ne gère pas les notifications' : 'Les notifications exigent une adresse https:// ou 127.0.0.1';
+      return;
+    }
     const p = Notification.permission;
     if (p === 'granted') {
       notifBtn.textContent = '🔔 Notifications actives';
-      notifBtn.title = 'Tu seras prévenu quand un joueur lance une partie';
-      notifBtn.disabled = true;
+      notifBtn.title = 'Clique pour recevoir une notification de test';
     } else if (p === 'denied') {
       notifBtn.textContent = '🔕 Notifications bloquées';
       notifBtn.title = 'Autorise les notifications dans les réglages du navigateur';
-      notifBtn.disabled = true;
     } else {
       notifBtn.textContent = '🔔 Activer les notifications';
       notifBtn.title = 'Être prévenu quand un joueur lance une partie';
-      notifBtn.disabled = false;
     }
   }
 
-  if (notifBtn && notifSupported) {
+  /* Son d'alerte (deux bips) : les navigateurs ne jouent du son qu'après un premier clic sur la page. */
+  let audioCtx = null;
+  function unlockAudio() {
+    try {
+      if (!audioCtx) {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (Ctx) audioCtx = new Ctx();
+      }
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) { /* pas de son */ }
+  }
+  document.addEventListener('pointerdown', unlockAudio, { once: true });
+  document.addEventListener('keydown', unlockAudio, { once: true });
+  App.playAlert = function () {
+    try {
+      unlockAudio();
+      if (!audioCtx || audioCtx.state !== 'running') return;
+      const t0 = audioCtx.currentTime;
+      [[880, 0], [1320, 0.18]].forEach(([freq, delay]) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0001, t0 + delay);
+        gain.gain.exponentialRampToValueAtTime(0.25, t0 + delay + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + delay + 0.28);
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start(t0 + delay);
+        osc.stop(t0 + delay + 0.3);
+      });
+    } catch (e) { /* pas de son */ }
+  };
+
+  /* Onglet en arrière-plan : le titre clignote jusqu'à ce qu'on revienne sur la page. */
+  const baseTitle = document.title;
+  let titleTimer = null;
+  App.flashTitle = function (text) {
+    if (!document.hidden) return;
+    clearInterval(titleTimer);
+    let on = false;
+    titleTimer = setInterval(() => { on = !on; document.title = on ? text : baseTitle; }, 1000);
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && titleTimer) { clearInterval(titleTimer); titleTimer = null; document.title = baseTitle; }
+  });
+
+  function legacyNotify(title, options) {
+    try {
+      const n = new Notification(title, options);
+      n.onclick = () => { window.focus(); n.close(); };
+      return true;
+    } catch (e) { return false; } // ex. Android sans service worker
+  }
+
+  /* `opts.requireInteraction` : la notification reste affichée jusqu'au clic (parties lancées).
+     Jamais de fermeture automatique : sous Windows, une notification retenue pendant une partie
+     en plein écran doit rester dans le centre de notifications. */
+  App.notify = function (title, bodyText, tag, opts) {
+    if (!notifSupported || Notification.permission !== 'granted') return false;
+    const options = {
+      body: bodyText || '',
+      icon: '/static/img/favicon.svg',
+      badge: '/static/img/favicon.svg',
+      requireInteraction: !!(opts && opts.requireInteraction),
+      silent: false,
+      data: { url: location.href },
+    };
+    if (tag) { options.tag = tag; options.renotify = true; }
+    if (swRegistration && swRegistration.showNotification) {
+      swRegistration.showNotification(title, options).catch(() => legacyNotify(title, options));
+      return true;
+    }
+    return legacyNotify(title, options);
+  };
+
+  function sendTestNotification() {
+    App.notify('🔔 Test Pékin Express', 'Les notifications fonctionnent sur cet appareil.', 'pekin-test');
+    App.playAlert();
+    App.toast('Notification de test envoyée. Rien ne s’affiche ? Sous Windows, coupe « Ne pas déranger » (il bloque tout pendant une partie en plein écran) et autorise ton navigateur dans Paramètres › Système › Notifications.', { type: 'info', timeout: 14000 });
+  }
+
+  if (notifBtn) {
     notifBtn.addEventListener('click', async () => {
+      unlockAudio();
+      if (!notifSupported) {
+        App.toast(window.isSecureContext
+          ? 'Ce navigateur ne gère pas les notifications : utilise Chrome, Edge ou Firefox, ou le salon Discord.'
+          : 'Notifications impossibles sur cette adresse : ouvre le site via http://127.0.0.1:8000 sur le PC qui l’héberge, ou via le lien https:// Cloudflare.', { type: 'warning', timeout: 10000 });
+        return;
+      }
+      if (Notification.permission === 'granted') { sendTestNotification(); return; }
+      if (Notification.permission === 'denied') {
+        App.toast('Notifications bloquées : clique sur le cadenas à gauche de l’adresse, autorise les notifications, puis recharge la page.', { type: 'warning', timeout: 10000 });
+        return;
+      }
       try {
         const result = await Notification.requestPermission();
         renderNotifButton();
-        if (result === 'granted') {
-          App.toast('Notifications activées : tu seras prévenu dès qu’un joueur lance une partie.', { type: 'success' });
-          App.notify('Notifications activées', 'Tu seras prévenu quand un joueur lance une partie.');
-        } else if (result === 'denied') {
-          App.toast('Notifications refusées par le navigateur.', { type: 'warning' });
-        }
+        if (result === 'granted') sendTestNotification();
+        else if (result === 'denied') App.toast('Notifications refusées par le navigateur.', { type: 'warning' });
       } catch (e) { /* navigateur sans promesse */ renderNotifButton(); }
     });
   }
   renderNotifButton();
-
-  App.notify = function (title, bodyText, tag) {
-    if (!notifSupported || Notification.permission !== 'granted') return;
-    try {
-      const n = new Notification(title, { body: bodyText || '', icon: '/static/img/favicon.svg', tag: tag || undefined, silent: false });
-      n.onclick = () => { window.focus(); n.close(); };
-      setTimeout(() => n.close(), 12000);
-    } catch (e) { /* ex. mobile sans service worker */ }
-  };
 
   /* ------------------------------------------------------------------ */
   /* Compteur « en game » dans la nav                                     */
@@ -655,8 +742,10 @@
     const team = teamOf(d);
     const champ = champOf(d);
     const msg = `🔴 ${who(d)}${team ? ` (${team})` : ''} lance une partie${champ ? ` — ${champ}` : ''}`;
-    App.toast(msg, { type: 'live', timeout: 7000 });
-    App.notify(msg, 'Va l’encourager (ou le troll) !', `live-${d.player_id || who(d)}`);
+    App.toast(msg, { type: 'live', timeout: 15000 });
+    App.notify(msg, 'Va l’encourager (ou le troll) !', `live-${d.player_id || who(d)}`, { requireInteraction: true });
+    App.playAlert();
+    App.flashTitle(`🔴 ${who(d)} en game`);
     App.refreshLiveCount();
   });
   App.onEvent('live_end', (d) => {

@@ -109,6 +109,7 @@ Copie `.env.example` en `.env` à la racine du projet et complète-le. Chaque va
 | `RIOT_REGION` | Région de routage correspondante : `europe` (défaut), `americas`, `asia`, `sea`. |
 | `DEMO_MODE` | `true` pour forcer la simulation même avec une clé, `false` pour forcer le réel. Vide = automatique (démo si pas de clé). |
 | `POLL_INTERVAL_SECONDS` | Secondes entre deux interrogations de l'API Riot (défaut : 90 en réel, 10 en démo ; minimum 3). |
+| `LIVE_POLL_SECONDS` | Secondes entre deux vérifications « qui est en game ? » entre deux interrogations complètes (défaut : 30, minimum 10). C'est ce qui déclenche les notifications de partie. |
 | `TRACK_FLEX` | `true` pour suivre aussi la file Flex (défaut `false`). Modifiable ensuite dans l'admin. |
 | `ADMIN_PASSWORD` | Mot de passe de l'organisateur (page admin, duos, démarrage). **À changer** (défaut `change-me`). |
 | `DATABASE_URL` | Base SQLite. Défaut : `sqlite:///./data/tracker.db` (fichier dans `data/`). |
@@ -246,6 +247,18 @@ l'encourager (ou le troller).
 - Les navigateurs n'autorisent ces notifications que sur **`localhost` ou en HTTPS**. Sur une
   adresse `http://192.168.x.x` du LAN, le bouton n'aura pas d'effet (les toasts, eux,
   marchent toujours).
+- Une fois activé, **re-cliquer sur « 🔔 Notifications actives » envoie une notification de
+  test**. L'annonce d'une partie lancée reste affichée jusqu'au clic, joue deux bips et fait
+  clignoter le titre de l'onglet.
+- **Quand une partie est-elle vue ?** Riot ne la montre qu'à partir de l'**écran de
+  chargement** (pas pendant la file ni la sélection des champions). Le site vérifie toutes les
+  `LIVE_POLL_SECONDS` (30 s par défaut) : compte jusqu'à ~30 s après le début du chargement.
+  **Admin → Système → « 🎮 Qui est en game ? »** vérifie tout de suite et déclenche la
+  notification si une partie est trouvée.
+- **Sous Windows**, « Ne pas déranger » (ex-assistant de concentration) s'active tout seul
+  pendant une partie en plein écran et retient les notifications : elles attendent dans le
+  centre de notifications. Pour être prévenu sur ton téléphone, le plus fiable est Discord
+  (ci-dessous) : sur mobile, le navigateur ne notifie que tant que la page est ouverte.
 
 ### Sur Discord
 

@@ -649,6 +649,24 @@ async def refresh(request: Request) -> dict[str, Any]:
     return report.to_dict()
 
 
+@router.post("/live-check")
+async def live_check(request: Request) -> dict[str, Any]:
+    """Diagnostic : interroge tout de suite Riot (Spectator) pour chaque joueur lié.
+
+    Une partie trouvée et pas encore connue publie `live_start` (toast, notification, Discord) :
+    c'est aussi un moyen de tester la chaîne de notification avec une vraie partie.
+    """
+    poller = getattr(request.app.state, "poller", None)
+    if poller is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Poller indisponible.")
+    result = await poller.poll_live_once(wait=True)
+    settings = get_settings()
+    result["live_poll_seconds"] = settings.live_poll_seconds
+    result["poll_interval_seconds"] = settings.poll_interval_seconds
+    result["demo_mode"] = settings.demo_mode
+    return result
+
+
 @router.post("/reload-settings")
 async def reload_app_settings(request: Request) -> dict[str, Any]:
     """Relit `.env` (nouvelle clé Riot, mode démo…) et remplace le client Riot."""

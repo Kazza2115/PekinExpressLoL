@@ -12,7 +12,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi import Path as PathParam
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
@@ -25,6 +25,18 @@ TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 router = APIRouter()
+
+SERVICE_WORKER = Path(__file__).resolve().parent.parent / "static" / "sw.js"
+
+
+@router.get("/sw.js", include_in_schema=False)
+def service_worker() -> FileResponse:
+    """Service worker des notifications, servi à la racine (portée « / »), jamais mis en cache."""
+    return FileResponse(
+        SERVICE_WORKER,
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"},
+    )
 
 
 # --------------------------------------------------------------------------- #

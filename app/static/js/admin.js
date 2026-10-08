@@ -32,6 +32,8 @@
     sysMode: $('#sys-mode'),
     sysUrl: $('#sys-url'),
     btnRefresh: $('#btn-refresh'),
+    btnLiveCheck: $('#btn-live-check'),
+    liveCheck: $('#live-check'),
     btnReload: $('#btn-reload'),
     btnDiscord: $('#btn-discord'),
   };
@@ -536,6 +538,42 @@
     els.sysErrors.hidden = !errors.length;
     els.sysErrors.innerHTML = errors.map((e) => esc(e)).join('<br>');
   }
+
+  function renderLiveCheck(r) {
+    const players = (r && r.players) || [];
+    const when = r && r.checked_at ? App.formatTime(r.checked_at) : '';
+    const rows = players.map((p) => {
+      let status;
+      if (p.error) status = `<span class="lp-neg">✗ ${esc(p.error)}</span>`;
+      else if (p.in_game) {
+        const kind = p.ranked ? 'classée' : (p.game_mode ? esc(p.game_mode.toLowerCase()) : 'non classée');
+        status = `<span class="badge-live"><span class="dot"></span>En game${p.champion_name ? ` · ${esc(p.champion_name)}` : ''} (${kind})${p.elapsed_s ? ` · ${App.formatDuration(p.elapsed_s)}` : ''}</span>`;
+      } else status = '<span class="muted">Pas en partie</span>';
+      return `<li class="flex between wrap" style="gap:8px;padding:6px 0;border-bottom:1px solid var(--border, rgba(255,255,255,.08))"><span><strong>${esc(p.display_name)}</strong> <span class="muted">${esc(p.riot_id || '')}</span></span>${status}</li>`;
+    }).join('');
+    const empty = players.length ? '' : '<p class="muted">Aucun joueur lié à vérifier (actif, compte Riot lié).</p>';
+    const every = r && r.live_poll_seconds && r.poll_interval_seconds && r.live_poll_seconds < r.poll_interval_seconds
+      ? `vérification automatique toutes les ${r.live_poll_seconds} s`
+      : `vérification automatique toutes les ${(r && r.poll_interval_seconds) || 90} s`;
+    els.liveCheck.innerHTML = `<div class="muted" style="font-size:.85em">Vérifié à ${esc(when)} · ${esc(every)}${r && r.demo_mode ? ' · mode démo (parties simulées)' : ''}</div><ul style="list-style:none;margin:6px 0 0;padding:0">${rows}</ul>${empty}`;
+    els.liveCheck.hidden = false;
+  }
+
+  els.btnLiveCheck.addEventListener('click', async () => {
+    App.setLoading(els.btnLiveCheck, true);
+    try {
+      const r = await admin(() => api('/api/admin/live-check', { method: 'POST', admin: true, body: {} }));
+      if (r !== undefined) {
+        renderLiveCheck(r);
+        const n = (r.players || []).filter((p) => p.in_game).length;
+        toast(n ? `${n} joueur${n > 1 ? 's' : ''} en game.` : 'Personne en game pour Riot en ce moment.', { type: n ? 'success' : 'info' });
+      }
+    } catch (err) {
+      toast(err.message, { type: 'error' });
+    } finally {
+      App.setLoading(els.btnLiveCheck, false);
+    }
+  });
 
   els.btnRefresh.addEventListener('click', async () => {
     App.setLoading(els.btnRefresh, true);

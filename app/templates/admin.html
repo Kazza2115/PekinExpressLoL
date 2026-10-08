@@ -86,10 +86,13 @@
     <div id="sys-errors" class="errors-list mt-sm" hidden></div>
     <div class="sys-url mt-sm" id="sys-url"></div>
     <div class="btn-row mt-sm">
+      <button type="button" class="btn btn-primary" id="btn-live-check">🎮 Qui est en game ?</button>
       <button type="button" class="btn" id="btn-refresh">Forcer un rafraîchissement</button>
       <button type="button" class="btn" id="btn-reload">Recharger .env</button>
       <button type="button" class="btn" id="btn-discord">Tester Discord</button>
     </div>
+    <p class="help mt-sm">Une partie est vue par Riot à partir de l'<strong>écran de chargement</strong> (pas pendant la file ni la sélection des champions). Le site vérifie toutes les 30 s environ ; « Qui est en game ? » vérifie tout de suite et déclenche la notification si une partie est trouvée.</p>
+    <div id="live-check" class="mt-sm" hidden></div>
   </section>
 </div>
 {% endblock %}

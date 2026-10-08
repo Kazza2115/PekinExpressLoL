@@ -372,7 +372,83 @@ class Poller:
             except Exception:  # noqa: BLE001 — la boucle doit survivre à tout
                 log.exception("Cycle de polling en échec")
             # Relu à chaque tour : un rechargement du .env change l'intervalle
-            await asyncio.sleep(self.settings.poll_interval_seconds)
+            await self._wait_for_next_cycle()
+
+    async def _wait_for_next_cycle(self) -> None:
+        """Attend `poll_interval_seconds` en détectant les parties en cours toutes les
+        `live_poll_seconds` : une partie lancée est annoncée en ~30 s au lieu de 90 s.
+
+        Pas de détection juste avant le cycle complet (il la fait lui-même).
+        """
+        interval = self.settings.poll_interval_seconds
+        live = self.settings.live_poll_seconds
+        if live <= 0 or live >= interval:
+            await asyncio.sleep(interval)
+            return
+        end = time.monotonic() + interval
+        while True:
+            remaining = end - time.monotonic()
+            if remaining <= live:
+                await asyncio.sleep(max(0.0, remaining))
+                return
+            await asyncio.sleep(live)
+            try:
+                await self.poll_live_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 — la boucle doit survivre à tout
+                log.exception("Détection des parties en cours en échec")
+
+    async def poll_live_once(self, *, wait: bool = False) -> dict[str, Any]:
+        """Détection rapide des parties en cours (Spectator-V5 seul, 1 requête par joueur).
+
+        Publie `live_start` / `live_end` comme le cycle complet, sans `poll_done`. Si un cycle
+        est déjà en cours, ne fait rien (`skipped`), sauf `wait=True` (diagnostic Admin) qui
+        attend la fin du cycle. Renvoie l'état « en partie » de chaque joueur.
+        """
+        if self._lock.locked() and not wait:
+            return {"skipped": True, "checked_at": None, "players": [], "errors": []}
+        async with self._lock:
+            report = PollReport(started_at=_utcnow())
+            results: list[dict[str, Any]] = []
+            with session_scope() as session:
+                challenge = session.exec(select(Challenge).order_by(col(Challenge.id))).first()
+                players = self._load_players(session)
+                ctx = _CycleContext(
+                    now=_utcnow(),
+                    players_by_puuid={p.puuid: p for p in players if p.puuid},
+                    teams_by_id={t.id: t for t in session.exec(select(Team)).all() if t.id is not None},
+                )
+                self._forget_unpolled_live_games(session, players, ctx)
+                for player in players:
+                    errors_before = len(report.errors)
+                    if not ctx.aborted:
+                        await self._run_phase("spectator", self._poll_spectator, session, player, challenge, report, ctx)
+                    error = report.errors[errors_before] if len(report.errors) > errors_before else None
+                    live = self.state.live_games.get(player.id) if player.id is not None else None
+                    results.append(
+                        {
+                            "player_id": player.id,
+                            "display_name": player.display_name,
+                            "riot_id": player.riot_id,
+                            "in_game": live is not None,
+                            "champion_name": live.champion_name if live is not None else None,
+                            "queue_id": live.queue_id if live is not None else None,
+                            "ranked": live is not None and live.queue_id in RANKED_QUEUE_IDS,
+                            "game_mode": live.game_mode if live is not None else None,
+                            "elapsed_s": live.elapsed_seconds(ctx.now) if live is not None else None,
+                            "error": error.split(" : ", 1)[-1] if error else (
+                                "cycle interrompu (voir l'erreur précédente)" if ctx.aborted and live is None else None
+                            ),
+                        }
+                    )
+            self.state.last_live_check = _utcnow()
+            return {
+                "skipped": False,
+                "checked_at": self.state.last_live_check.isoformat(),
+                "players": results,
+                "errors": list(report.errors),
+            }
 
     async def poll_once(self) -> PollReport:
         """Exécute un cycle complet. Si un cycle est déjà en cours, attend son rapport."""
