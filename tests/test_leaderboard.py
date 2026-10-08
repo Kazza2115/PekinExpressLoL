@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlmodel import Session
 
-from app.api.leaderboard import build_leaderboard, together_record
+from app.api.leaderboard import build_leaderboard, compute_single_player_stats, together_record
 from app.db.models import Challenge, ChallengeStatus, Match, MatchParticipant, Player, Queue, Team
 
 
@@ -154,3 +154,42 @@ def test_build_leaderboard_incomplete_team_has_no_together(session: Session):
     assert teams[0].together_games == 0
     assert [p.player_id for p in teams[0].players] == [mike.id]
     assert teams[0].mvp_player_id == mike.id
+
+
+def test_build_leaderboard_fills_partner(session: Session):
+    challenge, team, mike, lea, sam = _seed(session)
+    now = datetime.now(timezone.utc)
+    _match(session, "M1", now - timedelta(hours=1), [(mike.id, 100, True), (lea.id, 100, True)])
+    _match(session, "M2", now - timedelta(minutes=50), [(mike.id, 100, False), (lea.id, 200, True)])
+    _match(session, "M4", now - timedelta(minutes=30), [(mike.id, 100, True), (sam.id, 100, True)])
+
+    teams, players = build_leaderboard(session, challenge, now=now)
+    by_id = {p.player_id: p for p in players}
+    mike_partner = by_id[mike.id].partner
+    assert mike_partner is not None
+    assert (mike_partner["player_id"], mike_partner["display_name"]) == (lea.id, "Léa")
+    assert "icon_url" in mike_partner
+    # Mike : 3 parties (M1 avec Léa, M2 contre elle, M4 avec Sam) → 1 ensemble, 2 sans elle
+    assert (mike_partner["together_games"], mike_partner["together_wins"], mike_partner["together_losses"]) == (1, 1, 0)
+    assert (mike_partner["solo_games"], mike_partner["solo_wins"], mike_partner["solo_losses"]) == (2, 1, 1)
+    assert mike_partner["solo_winrate"] == 50.0 and mike_partner["together_winrate"] == 100.0
+    lea_partner = by_id[lea.id].partner
+    assert lea_partner["player_id"] == mike.id and (lea_partner["solo_games"], lea_partner["solo_wins"]) == (1, 1)
+    assert by_id[sam.id].partner is None  # sans duo
+    # Le même objet est imbriqué dans le duo
+    assert {p.partner["player_id"] for p in teams[0].players} == {mike.id, lea.id}
+
+
+def test_single_player_stats_fill_partner(session: Session):
+    challenge, team, mike, lea, sam = _seed(session)
+    now = datetime.now(timezone.utc)
+    _match(session, "M1", now - timedelta(hours=1), [(mike.id, 100, True), (lea.id, 100, True)])
+    stats = compute_single_player_stats(session, challenge, mike, team, now=now)
+    assert stats.partner["player_id"] == lea.id and stats.partner["together_games"] == 1
+    assert stats.partner["solo_games"] == 0
+    assert compute_single_player_stats(session, challenge, sam, None, now=now).partner is None
+    # Coéquipier inactif : plus de partenaire
+    lea.active = False
+    session.add(lea)
+    session.commit()
+    assert compute_single_player_stats(session, challenge, mike, team, now=now).partner is None

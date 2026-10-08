@@ -435,7 +435,9 @@ def test_duos_endpoint(client: TestClient, admin_headers: dict) -> None:
     team = _create_team(client, admin_headers, {"player_ids": [p1["id"], p2["id"]]})["team"]
 
     data = client.get("/api/duos").json()
-    assert set(data) == {"challenge", "teams", "unassigned_players", "games_per_day", "generated_at"}
+    assert set(data) == {
+        "challenge", "teams", "unassigned_players", "games_per_day", "comparison", "ladder", "generated_at",
+    }
     assert data["challenge"]["status"] == "registration"
     assert data["games_per_day"] == 10 and data["generated_at"]
     assert len(data["teams"]) == 1

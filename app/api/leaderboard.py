@@ -31,6 +31,7 @@ from app.services.stats import (
     TeamStats,
     compute_player_stats,
     compute_team_stats,
+    partner_record,
     rank_teams,
     sort_players,
 )
@@ -157,12 +158,35 @@ def compute_single_player_stats(
     *,
     now: datetime | None = None,
 ) -> PlayerStats:
-    """Stats d'un seul joueur (fiche)."""
+    """Stats d'un seul joueur (fiche), avec son coéquipier (`partner`) s'il a un duo complet."""
     now = now or utcnow()
-    snapshots_by, participants_by = load_history(session, [player.id])
-    return _player_stats(
+    mates: list[Player] = []
+    if team is not None and team.id is not None:
+        mates = list(
+            session.exec(
+                select(Player)
+                .where(col(Player.team_id) == team.id, col(Player.id) != player.id, col(Player.active).is_(True))
+                .order_by(col(Player.id))
+            ).all()
+        )
+    partner = mates[0] if len(mates) == 1 and player.active else None
+    ids = [player.id] + ([partner.id] if partner is not None else [])
+    snapshots_by, participants_by = load_history(session, [pid for pid in ids if pid is not None])
+    stats = _player_stats(
         player, challenge, team, snapshots_by.get(player.id, []), participants_by.get(player.id, []), now
     )
+    if partner is not None and partner.id is not None:
+        window_start, window_end = team_window(challenge, team)
+        stats.partner = partner_record(
+            stats,
+            partner_id=partner.id,
+            display_name=partner.display_name,
+            icon_url=ddragon.profile_icon_url(ddragon.CURRENT_VERSION, partner.profile_icon_id),
+            together=together_record(
+                participants_by.get(player.id, []), participants_by.get(partner.id, []), window_start, window_end
+            ),
+        )
+    return stats
 
 
 def build_leaderboard(
@@ -199,6 +223,14 @@ def build_leaderboard(
                 window_start,
                 window_end,
             )
+            for me, mate in ((members[0], members[1]), (members[1], members[0])):
+                me.partner = partner_record(
+                    me,
+                    partner_id=mate.player_id,
+                    display_name=mate.display_name,
+                    icon_url=mate.icon_url,
+                    together=together,
+                )
         team_stats.append(compute_team_stats(team, members, together=together))
     ranked_teams = rank_teams(team_stats)
     ranked_players = sort_players(list(stats_by_player.values()), key=sort)

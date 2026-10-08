@@ -20,6 +20,28 @@ from app.services.stats import format_rank, kda, rank_color
 OPGG_BASE = "https://www.op.gg/summoners/euw"
 # Emplacements d'objets Match-V5 : 6 objets + bibelot
 ITEM_SLOT_COUNT = 7
+# Colonnes de détail `MatchParticipant` exposées telles quelles par `match_row`
+MATCH_DETAIL_KEYS: tuple[str, ...] = (
+    "double_kills",
+    "triple_kills",
+    "quadra_kills",
+    "penta_kills",
+    "largest_multi_kill",
+    "first_blood_kill",
+    "damage_taken",
+    "damage_share",
+    "gold_share",
+    "wards_placed",
+    "wards_killed",
+    "control_wards_bought",
+    "time_ccing_others",
+    "time_spent_dead",
+    "turret_kills",
+    "dragon_kills",
+    "baron_kills",
+    "objectives_stolen",
+    "surrendered",
+)
 
 
 def parse_items(raw: str | None) -> list[int]:
@@ -136,7 +158,8 @@ def match_row(
 ) -> dict[str, Any]:
     """`MatchRow` : la ligne d'un joueur dans une partie (feed, fiche joueur)."""
     duration = participant.game_duration or (match.game_duration if match is not None else 0) or 0
-    cs_per_min = round(participant.cs / (duration / 60), 1) if duration > 0 else 0.0
+    minutes = duration / 60
+    cs_per_min = round(participant.cs / minutes, 1) if duration > 0 else 0.0
     version = ddragon.CURRENT_VERSION
     items = parse_items(participant.items)
     spells = parse_spells(participant.spells)
@@ -173,6 +196,10 @@ def match_row(
         "lp_change": participant.lp_change,
         "is_remake": participant.is_remake,
         "opgg_url": opgg_url(player),
+        # Détails Match-V5 (None sur les parties antérieures à ces colonnes, sans JSON à rattraper)
+        **{column: getattr(participant, column) for column in MATCH_DETAIL_KEYS},
+        "gold_per_min": round(participant.gold / minutes, 1) if minutes > 0 else 0.0,
+        "damage_per_min": round(participant.damage_to_champions / minutes) if minutes > 0 else 0,
     }
 
 

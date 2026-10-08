@@ -738,3 +738,80 @@ async def test_demo_players_are_skipped_in_real_mode(session: Session, demo_api:
     report = await poller.poll_once()
     assert report.players_polled == 0
     assert report.errors == []
+
+
+# --------------------------------------------------------------------------- #
+# Détails de partie (profil joueur)
+# --------------------------------------------------------------------------- #
+
+
+def test_participant_details_extracts_columns_and_team_shares():
+    from app.services.poller import DETAIL_COLUMNS, participant_details
+
+    raw = match_json("EUW1_1", [("p-mike", "Ahri", True), ("p-jean", "Lux", True)], utcnow(), 1800)
+    parts = raw["info"]["participants"]
+    for index, part in enumerate(parts):
+        part["teamId"] = 100 if index < 5 else 200
+        part["totalDamageDealtToChampions"] = 10000
+        part["goldEarned"] = 10000
+    mike = parts[0]
+    mike.update(
+        doubleKills=2, tripleKills=1, quadraKills=0, pentaKills=1, largestMultiKill=5, largestKillingSpree=8,
+        turretKills=3, inhibitorKills=1, dragonKills=2, baronKills=1, objectivesStolen=1,
+        totalDamageTaken=30000, damageSelfMitigated=12000, totalHeal=5000, totalHealsOnTeammates=800,
+        timeCCingOthers=40, totalTimeSpentDead=95, wardsPlaced=12, wardsKilled=4, visionWardsBoughtInGame=3,
+        firstBloodKill=True, gameEndedInSurrender=False,
+        totalDamageDealtToChampions=30000, goldEarned=14000,
+    )
+    details = participant_details(mike, parts)
+    assert set(details) == set(DETAIL_COLUMNS)
+    assert (details["double_kills"], details["triple_kills"], details["quadra_kills"], details["penta_kills"]) == (2, 1, 0, 1)
+    assert details["largest_multi_kill"] == 5 and details["largest_killing_spree"] == 8
+    assert (details["turret_kills"], details["dragon_kills"], details["baron_kills"], details["objectives_stolen"]) == (3, 2, 1, 1)
+    assert details["damage_taken"] == 30000 and details["damage_mitigated"] == 12000
+    assert details["total_heal"] == 5000 and details["heals_on_teammates"] == 800
+    assert details["time_ccing_others"] == 40 and details["time_spent_dead"] == 95
+    assert (details["wards_placed"], details["wards_killed"], details["control_wards_bought"]) == (12, 4, 3)
+    assert details["first_blood_kill"] is True and details["surrendered"] is False
+    # Côté bleu : 30000 + 4 × 10000 = 70000 dégâts → 42.9 % ; or 14000 / 54000 → 25.9 %
+    assert details["damage_share"] == 42.9
+    assert details["gold_share"] == 25.9
+
+
+def test_participant_details_missing_keys_give_none():
+    from app.services.poller import participant_details
+
+    raw = match_json("EUW1_2", [("p-mike", "Ahri", True)], utcnow(), 1800)
+    parts = raw["info"]["participants"]
+    mike = parts[0]
+    # Pas de `teamId` : parts inconnues ; valeurs invalides → None
+    mike.update(doubleKills="beaucoup", firstBloodKill=1, wardsPlaced=True)
+    details = participant_details(mike, parts)
+    assert details["double_kills"] is None and details["wards_placed"] is None
+    assert details["first_blood_kill"] is None and details["surrendered"] is None
+    assert details["penta_kills"] is None and details["damage_taken"] is None
+    assert details["damage_share"] is None and details["gold_share"] is None
+    # Équipe sans dégâts : part indéterminée
+    for part in parts:
+        part["teamId"] = 100
+        part["totalDamageDealtToChampions"] = 0
+    assert participant_details(mike, parts)["damage_share"] is None
+    assert participant_details(mike, parts)["gold_share"] is not None  # or connu (12000 pour Mike)
+
+
+async def test_store_match_stores_detail_columns(session: Session):
+    make_challenge(session, ChallengeStatus.RUNNING, start_at=utcnow() - timedelta(hours=1))
+    make_player(session, "Mike", "p-mike")
+    api = ScriptedAPI()
+    api.entries["p-mike"] = gold_iv(50)
+    api.match_ids["p-mike"] = ["EUW1_8"]
+    raw = match_json("EUW1_8", [("p-mike", "Ahri", True)], utcnow() - timedelta(seconds=1500), 1500)
+    raw["info"]["participants"][0].update(teamId=100, pentaKills=1, largestMultiKill=5, wardsPlaced=9, gameEndedInSurrender=True)
+    api.matches["EUW1_8"] = raw
+    report = await Poller(api, bus, state).poll_once()
+    assert report.errors == [] and report.new_matches == 1
+    session.expire_all()
+    row = session.exec(select(MatchParticipant)).one()
+    assert row.penta_kills == 1 and row.largest_multi_kill == 5 and row.wards_placed == 9
+    assert row.surrendered is True and row.double_kills is None  # clé absente du JSON
+    assert row.damage_share == 100.0  # seul joueur du côté bleu avec des dégâts

@@ -8,8 +8,10 @@ Les datetimes lus depuis SQLite sont naïfs → systématiquement passés par `a
 from __future__ import annotations
 
 import statistics
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta, tzinfo
+from datetime import date, datetime, timedelta, tzinfo
+from typing import Any
 
 from app.db.models import MatchParticipant, Player, Queue, RankSnapshot, Team, game_end_of
 from app.db.session import as_utc
@@ -51,6 +53,21 @@ RANK_COLORS: dict[str, str] = {
     "CHALLENGER": "#7fe0ff",
     "UNRANKED": "#6b7280",
 }
+# Libellés français des tiers (classement des rangs)
+TIER_LABELS_FR: dict[str, str] = {
+    "IRON": "Fer",
+    "BRONZE": "Bronze",
+    "SILVER": "Argent",
+    "GOLD": "Or",
+    "PLATINUM": "Platine",
+    "EMERALD": "Émeraude",
+    "DIAMOND": "Diamant",
+    "MASTER": "Maître",
+    "GRANDMASTER": "Grand Maître",
+    "CHALLENGER": "Challenger",
+    "UNRANKED": "Non classé",
+}
+UNRANKED_LABEL_FR = "Non classé"
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +129,34 @@ def rank_color(tier: str | None) -> str:
     """Couleur hex associée au tier (Unranked si None / inconnu)."""
     tier_norm = _norm_tier(tier)
     return RANK_COLORS[tier_norm or "UNRANKED"]
+
+
+def label_from_absolute_lp(value: float | None) -> str:
+    """Libellé d'une valeur absolue (inverse d'`absolute_lp`) : "Gold II · 45 LP", "Master · 120 LP",
+    "Non classé" pour None. Arrondie à l'entier ; ≥ 2800 → Master (les tiers apex partagent la base)."""
+    if value is None:
+        return UNRANKED_LABEL_FR
+    tier, division, lp = rank_from_absolute_lp(round(value))
+    return format_rank(tier, division, lp)
+
+
+def color_from_absolute_lp(value: float | None) -> str:
+    """Couleur du tier correspondant à une valeur absolue (gris « Unranked » pour None)."""
+    if value is None:
+        return rank_color(None)
+    return rank_color(rank_from_absolute_lp(round(value))[0])
+
+
+def _rank_level(tier: str | None, rank: str | None) -> int | None:
+    """Échelon (tier × 4 + division) pour compter promotions / rétrogradations ; None si Unranked."""
+    tier_norm = _norm_tier(tier)
+    if tier_norm is None:
+        return None
+    level = TIERS.index(tier_norm) * 4
+    if tier_norm not in APEX_TIERS:
+        rank_norm = (rank or "").strip().upper()
+        level += DIVISIONS.index(rank_norm) if rank_norm in DIVISIONS else 0
+    return level
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +241,14 @@ class ChampionStats:
     winrate: float | None
     avg_kda: float | None
     avg_cs_per_min: float | None
+    champion_id: int | None = None
+    avg_kills: float | None = None
+    avg_deaths: float | None = None
+    avg_assists: float | None = None
+    avg_damage: int | None = None
+    avg_kill_participation: float | None = None
+    lp_change: int | None = None  # somme des variations connues ; None si aucune
+    last_played: str | None = None  # fin de la dernière partie (ISO‑8601)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -247,6 +300,81 @@ class PlayerStats:
     top_champion_loading_url: str | None = None
     # Tous les champions joués dans la fenêtre (hors remakes), parties desc puis winrate desc
     champions: list[dict] = field(default_factory=list)
+    # --- Profil détaillé : parties de la fenêtre (hors remakes) ; None sans partie.
+    # Les colonnes de détail entières à NULL (parties antérieures à leur ajout) comptent pour 0.
+    summoner_level: int | None = None
+    kills: int | None = None
+    deaths: int | None = None
+    assists: int | None = None
+    avg_kills: float | None = None
+    avg_deaths: float | None = None
+    avg_assists: float | None = None
+    avg_kill_participation: float | None = None  # sur les parties où elle est connue
+    avg_cs: float | None = None
+    avg_gold: int | None = None
+    avg_gold_per_min: float | None = None
+    avg_damage_per_min: int | None = None
+    avg_damage_share: float | None = None  # sur les parties où elle est connue
+    avg_damage_taken: int | None = None
+    avg_heal: int | None = None
+    avg_cc_time: int | None = None  # secondes
+    avg_time_dead: int | None = None  # secondes
+    avg_wards_placed: float | None = None
+    avg_wards_killed: float | None = None
+    avg_control_wards: float | None = None
+    double_kills: int | None = None
+    triple_kills: int | None = None
+    quadra_kills: int | None = None
+    penta_kills: int | None = None
+    multikills: int | None = None  # doubles + triples + quadras + pentas
+    first_bloods: int | None = None
+    largest_killing_spree: int | None = None
+    largest_multi_kill: int | None = None
+    turret_kills: int | None = None
+    dragon_kills: int | None = None
+    baron_kills: int | None = None
+    objectives_stolen: int | None = None
+    surrenders: int | None = None  # parties terminées par un abandon (des deux côtés)
+    avg_game_duration: int | None = None  # secondes
+    total_time_played: int | None = None  # secondes
+    longest_game_s: int | None = None
+    shortest_game_s: int | None = None
+    # LP
+    lp_per_game: float | None = None  # lp_net / parties
+    lp_known_games: int | None = None  # parties dont la variation de LP est connue
+    avg_lp_win: float | None = None
+    avg_lp_loss: float | None = None
+    best_lp_gain: int | None = None
+    worst_lp_loss: int | None = None
+    # Côtés (100 = bleu, 200 = rouge)
+    games_blue: int | None = None
+    wins_blue: int | None = None
+    winrate_blue: float | None = None
+    games_red: int | None = None
+    wins_red: int | None = None
+    winrate_red: float | None = None
+    # Répartitions : [{position, label, icon_url, games, wins, losses, winrate, avg_kda}] ;
+    # durée (3 tranches) ; jour [{day, label, games, wins, losses, winrate, lp_change, limit}] ;
+    # moment de la journée (4 tranches, heure de début dans le fuseau)
+    by_position: list[dict] = field(default_factory=list)
+    by_duration: list[dict] = field(default_factory=list)
+    by_day: list[dict] = field(default_factory=list)
+    by_hour: list[dict] = field(default_factory=list)
+    # Records : clé (RECORD_KEYS) → {match_id, champion_name, …, value, label, win, game_end, position} | None
+    records: dict = field(default_factory=dict)
+    # Saison (dernier snapshot de la file) et évolution du rang dans la fenêtre
+    season_wins: int | None = None
+    season_losses: int | None = None
+    season_winrate: float | None = None
+    peak_absolute_lp: int | None = None
+    peak_rank_label: str | None = None
+    low_absolute_lp: int | None = None
+    low_rank_label: str | None = None
+    promotions: int = 0
+    demotions: int = 0
+    rank_delta_lp: int | None = None  # rang actuel − référence (None si l'un est inconnu)
+    # Coéquipier du duo (rempli par `app.api.leaderboard`) : voir `partner_record`
+    partner: dict | None = None
 
     def to_dict(self) -> dict:
         """Types JSON uniquement (les dates sont déjà des chaînes ISO‑8601)."""
@@ -297,6 +425,382 @@ def _live_to_dict(live: LiveGameState, now: datetime, version: str | None) -> di
         "elapsed_s": max(0, int((now - start).total_seconds())),
         "queue_id": live.queue_id,
         "game_mode": live.game_mode,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Profil joueur : répartitions, records, libellés français
+# ---------------------------------------------------------------------------
+
+# `teamPosition` Match-V5 → libellé affiché (ordre d'affichage à égalité de parties)
+POSITION_LABELS: dict[str, str] = {
+    "TOP": "Top",
+    "JUNGLE": "Jungle",
+    "MIDDLE": "Mid",
+    "BOTTOM": "Bot",
+    "UTILITY": "Support",
+}
+UNKNOWN_POSITION_LABEL = "Inconnu"
+# Tranches de durée de partie (secondes) : < 25 min, 25 à 35 min (bornes incluses), > 35 min
+DURATION_BUCKETS: tuple[str, ...] = ("< 25 min", "25–35 min", "> 35 min")
+DURATION_SHORT_MAX_S = 25 * 60
+DURATION_LONG_MIN_S = 35 * 60
+# Moments de la journée (heure de début dans le fuseau du challenge) : (libellé, début inclus, fin exclue)
+HOUR_BUCKETS: tuple[tuple[str, int, int], ...] = (
+    ("Matin (6h–12h)", 6, 12),
+    ("Après-midi (12h–18h)", 12, 18),
+    ("Soirée (18h–24h)", 18, 24),
+    ("Nuit (0h–6h)", 0, 6),
+)
+RECORD_KEYS: tuple[str, ...] = (
+    "best_kda",
+    "most_kills",
+    "most_assists",
+    "most_damage",
+    "best_cs_per_min",
+    "most_vision",
+    "biggest_lp_gain",
+    "longest_game",
+    "shortest_game",
+)
+# Abréviations françaises (sans dépendre de la locale du système)
+FR_WEEKDAYS = ("lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim.")
+FR_MONTHS = ("janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc.")
+BLUE_SIDE = 100
+RED_SIDE = 200
+EMPTY_DISPLAY = "—"
+
+
+def fr_day_label(day: str) -> str:
+    """"2026-10-11" → "dim. 11 oct." (abréviations françaises, indépendant de la locale)."""
+    parsed = date.fromisoformat(day)
+    return f"{FR_WEEKDAYS[parsed.weekday()]} {parsed.day} {FR_MONTHS[parsed.month - 1]}"
+
+
+def format_duration(seconds: float | None) -> str:
+    """1872 → "31 min 12 s" ; minute ronde → "31 min" ; < 1 min → "45 s" ; None → "—"."""
+    if seconds is None:
+        return EMPTY_DISPLAY
+    total = max(0, round(seconds))
+    minutes, secs = divmod(total, 60)
+    if minutes == 0:
+        return f"{secs} s"
+    return f"{minutes} min" if secs == 0 else f"{minutes} min {secs} s"
+
+
+def format_signed_lp(value: float | None, unit: str = "LP", digits: int = 0) -> str:
+    """+28 → "+28 LP", -12 → "-12 LP", 0 → "0 LP" ; None → "—"."""
+    if value is None:
+        return EMPTY_DISPLAY
+    number = f"{abs(value):.{digits}f}" if digits else str(abs(round(value)))
+    sign = "" if round(value, digits) == 0 else ("+" if value > 0 else "-")
+    return f"{sign}{number} {unit}"
+
+
+def format_int_fr(value: float) -> str:
+    """Entier avec séparateur de milliers français (espace fine insécable) : 32456 → "32 456"."""
+    return f"{round(value):,}".replace(",", " ")
+
+
+def _n(value: int | None) -> int:
+    """Colonne de détail entière : NULL compte pour 0."""
+    return int(value or 0)
+
+
+def _round(value: float, digits: int | None) -> float | int:
+    return round(value) if digits is None else round(value, digits)
+
+
+def _per_min(value: float, duration_s: int) -> float:
+    return value / (duration_s / 60) if duration_s > 0 else 0.0
+
+
+def _split_entry(rows: list[MatchParticipant], **extra: Any) -> dict[str, Any]:
+    """{…extra, games, wins, losses, winrate} sur un sous-ensemble de parties."""
+    wins = sum(1 for p in rows if p.win)
+    return {**extra, "games": len(rows), "wins": wins, "losses": len(rows) - wins, "winrate": winrate(wins, len(rows) - wins)}
+
+
+def _duration_bucket(duration_s: int) -> int:
+    if duration_s < DURATION_SHORT_MAX_S:
+        return 0
+    return 1 if duration_s <= DURATION_LONG_MIN_S else 2
+
+
+def _hour_bucket(game_start: datetime, tz: tzinfo) -> int:
+    start = as_utc(game_start)
+    assert start is not None
+    hour = start.astimezone(tz).hour
+    return next(index for index, (_label, low, high) in enumerate(HOUR_BUCKETS) if low <= hour < high)
+
+
+def _norm_position(position: str | None) -> str | None:
+    upper = (position or "").strip().upper()
+    return upper if upper in POSITION_LABELS else None
+
+
+def _known_sum(values: list[int | None]) -> int | None:
+    """Somme des valeurs connues ; None si aucune."""
+    known = [int(v) for v in values if v is not None]
+    return sum(known) if known else None
+
+
+def _by_position(games: list[MatchParticipant], ddragon) -> list[dict[str, Any]]:  # noqa: ANN001
+    groups: dict[str | None, list[MatchParticipant]] = {}
+    for p in games:
+        groups.setdefault(_norm_position(p.position), []).append(p)
+    order = list(POSITION_LABELS) + [None]
+    entries = []
+    for position, rows in groups.items():
+        entry = _split_entry(
+            rows,
+            position=position,
+            label=POSITION_LABELS.get(position or "", UNKNOWN_POSITION_LABEL),
+            icon_url=_ddragon_url(ddragon, "position_icon_url", position) if position else None,
+        )
+        entry["avg_kda"] = round(statistics.fmean(kda(p.kills, p.deaths, p.assists) for p in rows), 2)
+        entries.append(entry)
+    entries.sort(key=lambda e: (-e["games"], -e["wins"], order.index(e["position"])))
+    return entries
+
+
+def _by_day(games: list[MatchParticipant], tz: tzinfo, games_limit: int) -> list[dict[str, Any]]:
+    groups: dict[str, list[MatchParticipant]] = {}
+    for p in games:
+        groups.setdefault(day_key(game_end_of(p), tz), []).append(p)
+    return [
+        {
+            **_split_entry(rows, day=day, label=fr_day_label(day)),
+            "lp_change": _known_sum([p.lp_change for p in rows]),
+            "limit": int(games_limit),
+        }
+        for day, rows in sorted(groups.items())
+    ]
+
+
+def _pick_record(
+    games: list[MatchParticipant], key: Callable[[MatchParticipant], float | None], *, lowest: bool = False
+) -> tuple[MatchParticipant, float] | None:
+    """Partie au meilleur `key` (max, ou min si `lowest`) ; égalité → la plus récente ; None ignoré."""
+    best: tuple[MatchParticipant, float] | None = None
+    for p in games:  # ordre chronologique
+        value = key(p)
+        if value is None:
+            continue
+        if best is None or value == best[1] or (value < best[1] if lowest else value > best[1]):
+            best = (p, value)
+    return best
+
+
+def _records(games: list[MatchParticipant], version: str | None, ddragon) -> dict[str, dict | None]:  # noqa: ANN001
+    """Records personnels de la fenêtre (une entrée par clé de `RECORD_KEYS`, None sans partie éligible)."""
+
+    def score(p: MatchParticipant) -> str:
+        return f"{p.kills}/{p.deaths}/{p.assists}"
+
+    def kda_label(p: MatchParticipant, value: float) -> str:
+        return f"{score(p)} · KDA parfait" if p.deaths == 0 else f"{score(p)} · KDA {value:.1f}"
+
+    specs: dict[str, tuple[Callable[[MatchParticipant], float | None], Callable[[MatchParticipant, float], str], bool]] = {
+        "best_kda": (lambda p: round(kda(p.kills, p.deaths, p.assists), 2), kda_label, False),
+        "most_kills": (lambda p: p.kills, lambda p, v: f"{p.kills} kills · {score(p)}", False),
+        "most_assists": (lambda p: p.assists, lambda p, v: f"{p.assists} assists · {score(p)}", False),
+        "most_damage": (lambda p: p.damage_to_champions, lambda p, v: f"{format_int_fr(v)} dégâts", False),
+        "best_cs_per_min": (
+            lambda p: round(_per_min(p.cs, p.game_duration), 1) if p.game_duration > 0 else None,
+            lambda p, v: f"{v:.1f} CS/min · {p.cs} CS",
+            False,
+        ),
+        "most_vision": (lambda p: p.vision_score, lambda p, v: f"Score de vision {round(v)}", False),
+        "biggest_lp_gain": (
+            lambda p: p.lp_change if p.lp_change is not None and p.lp_change > 0 else None,
+            lambda p, v: format_signed_lp(v),
+            False,
+        ),
+        "longest_game": (lambda p: p.game_duration, lambda p, v: format_duration(v), False),
+        "shortest_game": (lambda p: p.game_duration, lambda p, v: format_duration(v), True),
+    }
+    records: dict[str, dict | None] = {}
+    for key in RECORD_KEYS:
+        value_of, label_of, lowest = specs[key]
+        picked = _pick_record(games, value_of, lowest=lowest)
+        if picked is None:
+            records[key] = None
+            continue
+        p, value = picked
+        records[key] = {
+            "match_id": p.match_id,
+            "champion_name": p.champion_name,
+            "champion_icon_url": _ddragon_url(ddragon, "champion_icon_url", version, p.champion_name)
+            if version is not None
+            else None,
+            "champion_splash_url": _ddragon_url(ddragon, "champion_splash_url", p.champion_name),
+            "value": value,
+            "label": label_of(p, value),
+            "win": bool(p.win),
+            "game_end": game_end_of(p).isoformat(),
+            "position": p.position,
+        }
+    return records
+
+
+def game_profile(
+    games: list[MatchParticipant],
+    *,
+    tz: tzinfo,
+    games_limit: int,
+    version: str | None = None,
+) -> dict[str, Any]:
+    """Champs « profil » de `PlayerStats` sur des parties filtrées (fenêtre, file, hors remakes,
+    ordre chronologique). Sans partie : compteurs et moyennes None, `by_duration` / `by_hour`
+    à zéro (toujours 3 / 4 entrées), `by_position` / `by_day` vides, records à None.
+    """
+    ddragon = _ddragon_module()
+    profile: dict[str, Any] = {
+        "by_duration": [
+            _split_entry([p for p in games if _duration_bucket(p.game_duration) == index], label=label)
+            for index, label in enumerate(DURATION_BUCKETS)
+        ],
+        "by_hour": [
+            _split_entry([p for p in games if _hour_bucket(p.game_start, tz) == index], label=label)
+            for index, (label, _low, _high) in enumerate(HOUR_BUCKETS)
+        ],
+        "by_position": _by_position(games, ddragon),
+        "by_day": _by_day(games, tz, games_limit),
+        "records": _records(games, version, ddragon),
+    }
+    if not games:
+        return profile
+
+    def total(attr: str) -> int:
+        return sum(_n(getattr(p, attr)) for p in games)
+
+    def mean(values: list[float], digits: int | None) -> float | int:
+        return _round(statistics.fmean(values), digits)
+
+    def avg(attr: str, digits: int | None) -> float | int:
+        return mean([_n(getattr(p, attr)) for p in games], digits)
+
+    durations = [int(p.game_duration) for p in games]
+    multikills = {attr: total(attr) for attr in ("double_kills", "triple_kills", "quadra_kills", "penta_kills")}
+    known_lp = [p.lp_change for p in games if p.lp_change is not None]
+    win_lp = [p.lp_change for p in games if p.win and p.lp_change is not None]
+    loss_lp = [p.lp_change for p in games if not p.win and p.lp_change is not None]
+    blue = [p for p in games if p.team_side == BLUE_SIDE]
+    red = [p for p in games if p.team_side == RED_SIDE]
+    blue_wins = sum(1 for p in blue if p.win)
+    red_wins = sum(1 for p in red if p.win)
+    profile.update(
+        kills=total("kills"),
+        deaths=total("deaths"),
+        assists=total("assists"),
+        avg_kills=avg("kills", 1),
+        avg_deaths=avg("deaths", 1),
+        avg_assists=avg("assists", 1),
+        avg_kill_participation=_mean_or_none([p.kill_participation for p in games], 1),
+        avg_cs=avg("cs", 1),
+        avg_gold=avg("gold", None),
+        avg_gold_per_min=mean([_per_min(_n(p.gold), p.game_duration) for p in games], 1),
+        avg_damage_per_min=mean([_per_min(_n(p.damage_to_champions), p.game_duration) for p in games], None),
+        avg_damage_share=_mean_or_none([p.damage_share for p in games], 1),
+        avg_damage_taken=avg("damage_taken", None),
+        avg_heal=avg("total_heal", None),
+        avg_cc_time=avg("time_ccing_others", None),
+        avg_time_dead=avg("time_spent_dead", None),
+        avg_wards_placed=avg("wards_placed", 1),
+        avg_wards_killed=avg("wards_killed", 1),
+        avg_control_wards=avg("control_wards_bought", 1),
+        **multikills,
+        multikills=sum(multikills.values()),
+        first_bloods=sum(1 for p in games if p.first_blood_kill),
+        largest_killing_spree=max(_n(p.largest_killing_spree) for p in games),
+        largest_multi_kill=max(_n(p.largest_multi_kill) for p in games),
+        turret_kills=total("turret_kills"),
+        dragon_kills=total("dragon_kills"),
+        baron_kills=total("baron_kills"),
+        objectives_stolen=total("objectives_stolen"),
+        surrenders=sum(1 for p in games if p.surrendered),
+        avg_game_duration=round(statistics.fmean(durations)),
+        total_time_played=sum(durations),
+        longest_game_s=max(durations),
+        shortest_game_s=min(durations),
+        lp_known_games=len(known_lp),
+        avg_lp_win=round(statistics.fmean(win_lp), 1) if win_lp else None,
+        avg_lp_loss=round(statistics.fmean(loss_lp), 1) if loss_lp else None,
+        best_lp_gain=max((v for v in known_lp if v > 0), default=None),
+        worst_lp_loss=min((v for v in known_lp if v < 0), default=None),
+        games_blue=len(blue),
+        wins_blue=blue_wins,
+        winrate_blue=winrate(blue_wins, len(blue) - blue_wins),
+        games_red=len(red),
+        wins_red=red_wins,
+        winrate_red=winrate(red_wins, len(red) - red_wins),
+    )
+    return profile
+
+
+def rank_progress(snapshots: list[RankSnapshot]) -> dict[str, Any]:
+    """Pic, creux, promotions et rétrogradations sur des snapshots chronologiques d'une file.
+
+    Promotion / rétrogradation = changement de tier ou de division entre deux snapshots classés
+    consécutifs (les passages par Unranked sont ignorés).
+    """
+    ranked = [(s, _snapshot_absolute_lp(s)) for s in snapshots]
+    ranked = [(s, value) for s, value in ranked if value is not None]
+    result: dict[str, Any] = {
+        "peak_absolute_lp": None,
+        "peak_rank_label": None,
+        "low_absolute_lp": None,
+        "low_rank_label": None,
+        "promotions": 0,
+        "demotions": 0,
+    }
+    if not ranked:
+        return result
+    peak = max(ranked, key=lambda item: item[1])
+    low = min(ranked, key=lambda item: item[1])
+    result.update(
+        peak_absolute_lp=peak[1],
+        peak_rank_label=format_rank(peak[0].tier, peak[0].rank, peak[0].lp),
+        low_absolute_lp=low[1],
+        low_rank_label=format_rank(low[0].tier, low[0].rank, low[0].lp),
+    )
+    previous: int | None = None
+    for snapshot in snapshots:
+        level = _rank_level(snapshot.tier, snapshot.rank)
+        if level is not None and previous is not None:
+            if level > previous:
+                result["promotions"] += 1
+            elif level < previous:
+                result["demotions"] += 1
+        previous = level
+    return result
+
+
+def partner_record(
+    stats: PlayerStats,
+    *,
+    partner_id: int,
+    display_name: str,
+    icon_url: str | None,
+    together: tuple[int, int, int],
+) -> dict[str, Any]:
+    """Bilan avec le coéquipier du duo : parties ensemble (`together_record`) et sans lui (le reste)."""
+    games, wins, losses = (int(v) for v in together)
+    solo_wins = max(0, stats.wins - wins)
+    solo_losses = max(0, stats.losses - losses)
+    return {
+        "player_id": int(partner_id),
+        "display_name": display_name,
+        "icon_url": icon_url,
+        "together_games": games,
+        "together_wins": wins,
+        "together_losses": losses,
+        "together_winrate": winrate(wins, losses),
+        "solo_games": solo_wins + solo_losses,
+        "solo_wins": solo_wins,
+        "solo_losses": solo_losses,
+        "solo_winrate": winrate(solo_wins, solo_losses),
     }
 
 
@@ -444,6 +948,22 @@ def compute_player_stats(
     live_dict = _live_to_dict(live, now_utc, version) if live is not None else None
     champions = [c.to_dict() for c in compute_champion_stats(games_in_window, version)]
 
+    # --- Profil détaillé : saison, évolution du rang dans la fenêtre, parties --------
+    season_wins: int | None = None
+    season_losses: int | None = None
+    if latest is not None and current_abs is not None:
+        season_wins, season_losses = int(latest.wins), int(latest.losses)
+    # Snapshots de la fenêtre (avec sa période de grâce), précédés de la référence
+    window_snapshots = [
+        s
+        for s in queue_snapshots
+        if (start_utc is None or as_utc(s.captured_at) >= start_utc)  # type: ignore[operator]
+        and (end_utc is None or as_utc(s.captured_at) <= end_utc + WINDOW_END_GRACE)  # type: ignore[operator]
+    ]
+    if baseline is not None and not any(s is baseline for s in window_snapshots):
+        window_snapshots.insert(0, baseline)
+    profile = game_profile(games_in_window, tz=tz, games_limit=games_limit, version=version)
+
     return PlayerStats(
         player_id=int(player.id or 0),
         display_name=player.display_name,
@@ -487,6 +1007,14 @@ def compute_player_stats(
         top_champion_splash_url=top_champion_splash_url,
         top_champion_loading_url=top_champion_loading_url,
         champions=champions,
+        summoner_level=player.summoner_level,
+        lp_per_game=round(lp_net / games, 1) if games else None,
+        season_wins=season_wins,
+        season_losses=season_losses,
+        season_winrate=winrate(season_wins, season_losses) if season_wins is not None and season_losses is not None else None,
+        rank_delta_lp=current_abs - baseline_abs if (current_abs is not None and baseline_abs is not None) else None,
+        **rank_progress(window_snapshots),
+        **profile,
     )
 
 
@@ -528,6 +1056,14 @@ def compute_champion_stats(games: list[MatchParticipant], version: str | None = 
                 avg_cs_per_min=round(
                     statistics.fmean(p.cs / (p.game_duration / 60) if p.game_duration > 0 else 0.0 for p in rows), 2
                 ),
+                champion_id=next((p.champion_id for p in reversed(rows) if p.champion_id is not None), None),
+                avg_kills=round(statistics.fmean(p.kills for p in rows), 1),
+                avg_deaths=round(statistics.fmean(p.deaths for p in rows), 1),
+                avg_assists=round(statistics.fmean(p.assists for p in rows), 1),
+                avg_damage=round(statistics.fmean(p.damage_to_champions for p in rows)),
+                avg_kill_participation=_mean_or_none([p.kill_participation for p in rows], 1),
+                lp_change=_known_sum([p.lp_change for p in rows]),
+                last_played=max(game_end_of(p) for p in rows).isoformat(),
             )
         )
     result.sort(key=lambda c: (-c.games, c.winrate is None, -(c.winrate or 0.0), c.champion_name.lower()))
@@ -570,6 +1106,36 @@ class TeamStats:
     together_winrate: float | None = None
     # Splash du champion favori du MVP (fond de carte) ; None sans MVP / sans partie
     mvp_top_champion_splash_url: str | None = None
+    # Rang moyen des joueurs classés (None si aucun) et meilleur rang du duo
+    avg_absolute_lp: int | None = None
+    rank_label: str = UNRANKED_LABEL_FR
+    rank_color: str = RANK_COLORS["UNRANKED"]
+    top_player_id: int | None = None
+    top_player_rank_label: str | None = None
+    # Sommes sur les deux joueurs (None si aucun n'a de partie)
+    kills: int | None = None
+    deaths: int | None = None
+    assists: int | None = None
+    avg_kill_participation: float | None = None  # moyenne des moyennes des joueurs
+    lp_per_game: float | None = None  # lp_net / parties
+    best_win_streak: int = 0
+    multikills: int | None = None
+    penta_kills: int | None = None
+    first_bloods: int | None = None
+    dragon_kills: int | None = None
+    baron_kills: int | None = None
+    turret_kills: int | None = None
+    objectives_stolen: int | None = None
+    surrenders: int | None = None
+    avg_game_duration: int | None = None  # secondes (temps total / parties)
+    total_time_played: int | None = None  # secondes
+    avg_damage_share: float | None = None
+    avg_gold_per_min: float | None = None
+    avg_wards_placed: float | None = None
+    # Saison : victoires / défaites cumulées des joueurs classés
+    season_wins: int | None = None
+    season_losses: int | None = None
+    season_winrate: float | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -620,9 +1186,20 @@ def compute_team_stats(
     """
     wins = sum(p.wins for p in players)
     losses = sum(p.losses for p in players)
+    games = sum(p.games for p in players)
+    lp_net = sum(p.lp_net for p in players)
     together_games, together_wins, together_losses = (int(v) for v in together)
     mvp_id = team_mvp(players)
     mvp = next((p for p in players if p.player_id == mvp_id), None) if mvp_id is not None else None
+    ranked = [p for p in players if p.absolute_lp is not None]
+    avg_abs = round(statistics.fmean(p.absolute_lp for p in ranked)) if ranked else None  # type: ignore[misc]
+    top = max(ranked, key=lambda p: (p.absolute_lp, p.lp_net)) if ranked else None
+    total_time = _known_sum([p.total_time_played for p in players])
+    season_wins = _known_sum([p.season_wins for p in players])
+    season_losses = _known_sum([p.season_losses for p in players])
+
+    def sums(attr: str) -> int | None:
+        return _known_sum([getattr(p, attr) for p in players])
     return TeamStats(
         team_id=int(team.id or 0),
         name=team.name,
@@ -631,8 +1208,8 @@ def compute_team_stats(
         position=0,
         window_start=_iso_or_none(team.window_start),
         window_end=_iso_or_none(team.window_end),
-        lp_net=sum(p.lp_net for p in players),
-        games=sum(p.games for p in players),
+        lp_net=lp_net,
+        games=games,
         wins=wins,
         losses=losses,
         winrate=winrate(wins, losses),
@@ -650,6 +1227,35 @@ def compute_team_stats(
         together_wins=together_wins,
         together_losses=together_losses,
         together_winrate=winrate(together_wins, together_losses),
+        avg_absolute_lp=avg_abs,
+        rank_label=label_from_absolute_lp(avg_abs),
+        rank_color=color_from_absolute_lp(avg_abs),
+        top_player_id=top.player_id if top is not None else None,
+        top_player_rank_label=top.rank_label if top is not None else None,
+        kills=sums("kills"),
+        deaths=sums("deaths"),
+        assists=sums("assists"),
+        avg_kill_participation=_mean_or_none([p.avg_kill_participation for p in players], 1),
+        lp_per_game=round(lp_net / games, 1) if games else None,
+        best_win_streak=max((p.best_win_streak for p in players), default=0),
+        multikills=sums("multikills"),
+        penta_kills=sums("penta_kills"),
+        first_bloods=sums("first_bloods"),
+        dragon_kills=sums("dragon_kills"),
+        baron_kills=sums("baron_kills"),
+        turret_kills=sums("turret_kills"),
+        objectives_stolen=sums("objectives_stolen"),
+        surrenders=sums("surrenders"),
+        avg_game_duration=round(total_time / games) if total_time is not None and games else None,
+        total_time_played=total_time,
+        avg_damage_share=_mean_or_none([p.avg_damage_share for p in players], 1),
+        avg_gold_per_min=_mean_or_none([p.avg_gold_per_min for p in players], 1),
+        avg_wards_placed=_mean_or_none([p.avg_wards_placed for p in players], 1),
+        season_wins=season_wins,
+        season_losses=season_losses,
+        season_winrate=winrate(season_wins, season_losses)
+        if season_wins is not None and season_losses is not None
+        else None,
     )
 
 
@@ -687,3 +1293,284 @@ def sort_players(players: list[PlayerStats], key: str = "lp_net") -> list[Player
         return (value is None, -(value or 0), -p.lp_net, p.display_name.lower())
 
     return sorted(players, key=sort_key)
+
+
+# ---------------------------------------------------------------------------
+# Comparaison des duos, classement des rangs, positions par statistique
+# ---------------------------------------------------------------------------
+
+# (clé TeamStats, libellé, unité, plus haut = mieux, format d'affichage)
+COMPARISON_METRICS: tuple[tuple[str, str, str, bool, str], ...] = (
+    ("lp_net", "LP nets", "LP", True, "lp"),
+    ("lp_per_game", "LP par partie", "LP/partie", True, "dec1"),
+    ("winrate", "Winrate", "%", True, "pct"),
+    ("games", "Parties jouées", "", True, "int"),
+    ("together_games", "Parties ensemble", "", True, "int"),
+    ("together_winrate", "Winrate ensemble", "%", True, "pct"),
+    ("avg_absolute_lp", "Rang moyen", "", True, "rank"),
+    ("avg_kda", "KDA moyen", "", True, "dec2"),
+    ("avg_kill_participation", "Participation aux kills", "%", True, "pct"),
+    ("avg_cs_per_min", "CS/min", "", True, "dec1"),
+    ("avg_gold_per_min", "Or/min", "", True, "int"),
+    ("avg_damage", "Dégâts aux champions", "", True, "int"),
+    ("avg_damage_share", "Part des dégâts", "%", True, "pct"),
+    ("avg_vision", "Score de vision", "", True, "dec1"),
+    ("avg_wards_placed", "Balises posées", "", True, "dec1"),
+    ("best_win_streak", "Meilleure série de victoires", "", True, "int"),
+    ("multikills", "Multikills", "", True, "int"),
+    ("penta_kills", "Pentakills", "", True, "int"),
+    ("first_bloods", "Premiers sangs", "", True, "int"),
+    ("dragon_kills", "Dragons", "", True, "int"),
+    ("baron_kills", "Barons", "", True, "int"),
+    ("turret_kills", "Tourelles", "", True, "int"),
+    ("objectives_stolen", "Objectifs volés", "", True, "int"),
+    ("avg_game_duration", "Durée moyenne", "s", False, "duration"),
+    ("surrenders", "Abandons", "", False, "int"),
+    ("season_winrate", "Winrate saison", "%", True, "pct"),
+)
+
+
+def format_metric(value: float | None, fmt: str, unit: str = "") -> str:
+    """Valeur affichable en français : "+42 LP", "63 %", "Gold II · 45 LP", "31 min", "—" si None."""
+    if value is None:
+        return EMPTY_DISPLAY
+    suffix = f" {unit}" if unit and unit not in ("%", "s") else ""
+    if fmt == "lp":
+        return format_signed_lp(value, unit or "LP")
+    if fmt == "rank":
+        return label_from_absolute_lp(value)
+    if fmt == "pct":
+        return f"{round(value)} %"
+    if fmt == "duration":
+        return f"{round(value / 60)} min"
+    if unit.startswith("LP"):  # LP par partie : signé
+        return format_signed_lp(value, unit, digits=2 if fmt == "dec2" else 1)
+    if fmt == "dec1":
+        return f"{value:.1f}{suffix}"
+    if fmt == "dec2":
+        return f"{value:.2f}{suffix}"
+    return f"{format_int_fr(value)}{suffix}"
+
+
+def _best_and_worst(values: list[tuple[int, float]], higher_is_better: bool) -> tuple[int | None, int | None]:
+    """(meilleur, pire) duo ; (None, None) si moins de 2 valeurs ou toutes égales. Égalité → le premier."""
+    if len(values) < 2 or len({v for _id, v in values}) == 1:
+        return None, None
+    best = values[0]
+    worst = values[0]
+    for item in values[1:]:
+        if (item[1] > best[1]) if higher_is_better else (item[1] < best[1]):
+            best = item
+        if (item[1] < worst[1]) if higher_is_better else (item[1] > worst[1]):
+            worst = item
+    return best[0], worst[0]
+
+
+def compare_teams(teams: list[TeamStats]) -> dict[str, Any]:
+    """Tableau comparatif des duos (ordre de `COMPARISON_METRICS`, duos dans l'ordre donné)."""
+    metrics = []
+    for key, label, unit, higher_is_better, fmt in COMPARISON_METRICS:
+        values = []
+        known: list[tuple[int, float]] = []
+        for team in teams:
+            value = getattr(team, key)
+            values.append({"team_id": team.team_id, "value": value, "display": format_metric(value, fmt, unit)})
+            if value is not None:
+                known.append((team.team_id, value))
+        best, worst = _best_and_worst(known, higher_is_better)
+        metrics.append(
+            {
+                "key": key,
+                "label": label,
+                "unit": unit,
+                "higher_is_better": higher_is_better,
+                "format": fmt,
+                "values": values,
+                "best_team_id": best,
+                "worst_team_id": worst,
+            }
+        )
+    return {"metrics": metrics}
+
+
+def _name_key(p: PlayerStats) -> str:
+    return p.display_name.casefold()
+
+
+def build_rank_ladder(teams: list[TeamStats], unassigned: list[PlayerStats]) -> dict[str, Any]:
+    """Classement net des rangs : joueurs (absolu desc, LP nets desc, pseudo ; non classés à la fin,
+    position None), duos (rang moyen desc), répartition par tier et résumé.
+
+    `teams` portent leurs joueurs ; `unassigned` = joueurs actifs hors duo (doublons ignorés).
+    """
+    team_of: dict[int, TeamStats] = {}
+    everyone: list[PlayerStats] = []
+    for team in teams:
+        for p in team.players:
+            if p.player_id not in team_of:
+                team_of[p.player_id] = team
+                everyone.append(p)
+    seen = set(team_of)
+    for p in unassigned:
+        if p.player_id not in seen:
+            seen.add(p.player_id)
+            everyone.append(p)
+
+    ranked = sorted(
+        (p for p in everyone if p.absolute_lp is not None),
+        key=lambda p: (-(p.absolute_lp or 0), -p.lp_net, _name_key(p)),
+    )
+    unranked = sorted((p for p in everyone if p.absolute_lp is None), key=_name_key)
+    baseline_order = sorted(
+        (p for p in everyone if p.baseline_absolute_lp is not None),
+        key=lambda p: (-(p.baseline_absolute_lp or 0), _name_key(p)),
+    )
+    baseline_positions = {p.player_id: index for index, p in enumerate(baseline_order, start=1)}
+
+    players = []
+    for index, p in enumerate(ranked + unranked, start=1):
+        position = index if p.absolute_lp is not None else None
+        baseline_position = baseline_positions.get(p.player_id)
+        team = team_of.get(p.player_id)
+        players.append(
+            {
+                "position": position,
+                "player_id": p.player_id,
+                "display_name": p.display_name,
+                "icon_url": p.icon_url,
+                "summoner_level": p.summoner_level,
+                "team_id": team.team_id if team is not None else p.team_id,
+                "team_name": team.name if team is not None else None,
+                "team_color": team.color if team is not None else None,
+                "tier": p.tier if p.absolute_lp is not None else None,
+                "rank": p.rank if p.absolute_lp is not None else None,
+                "lp": p.lp,
+                "rank_label": p.rank_label if p.absolute_lp is not None else UNRANKED_LABEL_FR,
+                "rank_color": p.rank_color,
+                "rank_emblem_url": p.rank_emblem_url,
+                "rank_crest_url": p.rank_crest_url,
+                "absolute_lp": p.absolute_lp,
+                "baseline_absolute_lp": p.baseline_absolute_lp,
+                "baseline_rank_label": label_from_absolute_lp(p.baseline_absolute_lp),
+                "baseline_position": baseline_position,
+                "position_delta": baseline_position - position
+                if baseline_position is not None and position is not None
+                else None,
+                "lp_net": p.lp_net,
+                "rank_delta_lp": p.rank_delta_lp,
+                "season_wins": p.season_wins,
+                "season_losses": p.season_losses,
+                "season_winrate": p.season_winrate,
+                "hot_streak": p.hot_streak,
+                "peak_rank_label": p.peak_rank_label,
+                "promotions": p.promotions,
+                "demotions": p.demotions,
+                "is_linked": p.is_linked,
+                "live": p.live,
+                "games": p.games,
+                "winrate": p.winrate,
+            }
+        )
+
+    ordered_teams = sorted(
+        teams,
+        key=lambda t: (t.avg_absolute_lp is None, -(t.avg_absolute_lp or 0), -t.lp_net, t.name.casefold()),
+    )
+    team_rows = []
+    for index, team in enumerate(ordered_teams, start=1):
+        team_rows.append(
+            {
+                "position": index if team.avg_absolute_lp is not None else None,
+                "team_id": team.team_id,
+                "name": team.name,
+                "color": team.color,
+                "avg_absolute_lp": team.avg_absolute_lp,
+                "rank_label": team.rank_label,
+                "rank_color": team.rank_color,
+                "top_player_id": team.top_player_id,
+                "top_player_rank_label": team.top_player_rank_label,
+                "players": [p.player_id for p in team.players],
+                "lp_net": team.lp_net,
+            }
+        )
+
+    tiers = []
+    for tier in [*reversed(TIERS), "UNRANKED"]:
+        members = (
+            [p for p in ranked if _norm_tier(p.tier) == tier] if tier != "UNRANKED" else unranked
+        )
+        if members:
+            tiers.append(
+                {
+                    "tier": tier,
+                    "label": TIER_LABELS_FR[tier],
+                    "color": RANK_COLORS[tier],
+                    "count": len(members),
+                    "players": [p.display_name for p in members],
+                }
+            )
+
+    def brief(p: PlayerStats) -> dict[str, Any]:
+        return {"player_id": p.player_id, "display_name": p.display_name, "rank_label": p.rank_label}
+
+    avg_abs = round(statistics.fmean(p.absolute_lp for p in ranked)) if ranked else None  # type: ignore[misc]
+    return {
+        "players": players,
+        "teams": team_rows,
+        "tiers": tiers,
+        "summary": {
+            "ranked_players": len(ranked),
+            "unranked_players": len(unranked),
+            "highest": brief(ranked[0]) if ranked else None,
+            "lowest": brief(ranked[-1]) if ranked else None,
+            "avg_absolute_lp": avg_abs,
+            "avg_rank_label": label_from_absolute_lp(avg_abs),
+        },
+    }
+
+
+# (clé PlayerStats, plus haut = mieux) : positions de la fiche joueur
+RANKING_METRICS: tuple[tuple[str, bool], ...] = (
+    ("absolute_lp", True),
+    ("lp_net", True),
+    ("lp_per_game", True),
+    ("winrate", True),
+    ("games", True),
+    ("avg_kda", True),
+    ("avg_kills", True),
+    ("avg_deaths", False),
+    ("avg_assists", True),
+    ("avg_kill_participation", True),
+    ("avg_cs_per_min", True),
+    ("avg_gold_per_min", True),
+    ("avg_damage", True),
+    ("avg_damage_share", True),
+    ("avg_vision", True),
+    ("avg_wards_placed", True),
+    ("best_win_streak", True),
+    ("multikills", True),
+    ("penta_kills", True),
+    ("first_bloods", True),
+    ("dragon_kills", True),
+    ("turret_kills", True),
+)
+
+
+def metric_rankings(players: list[PlayerStats], player_id: int) -> dict[str, dict[str, Any]]:
+    """Position du joueur sur chaque statistique de `RANKING_METRICS`, parmi les joueurs actifs liés.
+
+    Classement « compétition » (1, 1, 3) ; les valeurs None sont exclues du total et donnent une
+    position None. Un joueur hors de ce groupe (inactif, non lié) garde sa valeur, sans position.
+    """
+    pool = [p for p in players if p.active and p.is_linked]
+    target = next((p for p in players if p.player_id == player_id), None)
+    in_pool = any(p.player_id == player_id for p in pool)
+    result: dict[str, dict[str, Any]] = {}
+    for key, higher_is_better in RANKING_METRICS:
+        values = [getattr(p, key) for p in pool if getattr(p, key) is not None]
+        value = getattr(target, key) if target is not None else None
+        position = None
+        if in_pool and value is not None:
+            position = 1 + sum(1 for v in values if (v > value if higher_is_better else v < value))
+        result[key] = {"position": position, "total": len(values), "value": value, "higher_is_better": higher_is_better}
+    return result

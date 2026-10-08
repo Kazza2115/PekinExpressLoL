@@ -294,3 +294,37 @@ async def test_match_has_items_spells_and_coherent_kills(api):
             assert team["objectives"]["champion"]["kills"] == team_kills
             for member in members:
                 assert member["kills"] + member["assists"] <= team_kills
+
+
+DETAIL_KEYS = (
+    "doubleKills", "tripleKills", "quadraKills", "pentaKills", "largestMultiKill", "largestKillingSpree",
+    "turretKills", "inhibitorKills", "dragonKills", "baronKills", "objectivesStolen", "totalDamageTaken",
+    "damageSelfMitigated", "totalHeal", "totalHealsOnTeammates", "timeCCingOthers", "totalTimeSpentDead",
+    "wardsPlaced", "wardsKilled", "visionWardsBoughtInGame",
+)
+
+
+@pytest.mark.anyio
+async def test_match_has_profile_details(api):
+    """Champs de détail Match-V5 (multikills, objectifs, balises, first blood, abandon) cohérents."""
+    account = await api.get_account_by_riot_id("La Peace", "CHILL")
+    ids = await play_games(api, account.puuid, 6)
+    for match_id in ids:
+        info = (await api.get_match(match_id))["info"]
+        remake = info["gameDuration"] < 300
+        parts = info["participants"]
+        for participant in parts:
+            for key in DETAIL_KEYS:
+                assert isinstance(participant[key], int) and participant[key] >= 0, key
+            assert isinstance(participant["firstBloodKill"], bool)
+            assert isinstance(participant["gameEndedInSurrender"], bool)
+            multis = sum(participant[k] * n for k, n in (("doubleKills", 2), ("tripleKills", 3), ("quadraKills", 4), ("pentaKills", 5)))
+            assert multis <= participant["kills"]
+            assert participant["largestMultiKill"] <= max(1, participant["kills"])
+            if remake:
+                assert participant["firstBloodKill"] is False and participant["gameEndedInSurrender"] is False
+        # Un seul first blood (parmi les joueurs ayant tué), abandon identique pour les 10 joueurs
+        if not remake and any(p["kills"] > 0 for p in parts):
+            first_bloods = [p for p in parts if p["firstBloodKill"]]
+            assert len(first_bloods) == 1 and first_bloods[0]["kills"] > 0
+        assert len({p["gameEndedInSurrender"] for p in parts}) == 1

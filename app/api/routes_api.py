@@ -51,6 +51,7 @@ from app.events import bus
 from app.riot import ddragon, get_api
 from app.riot.base import RiotAPI
 from app.services.registration import link_player, parse_riot_id, register_player
+from app.services.stats import PlayerStats, TeamStats, build_rank_ladder, compare_teams, metric_rankings
 from app.services.tunnel import public_url
 from app.state import state
 from app.version import ASSET_VERSION, SITE_VERSION
@@ -306,20 +307,43 @@ def get_leaderboard(
     }
 
 
+def _ladder(teams: list[TeamStats], players: list[PlayerStats]) -> dict[str, Any]:
+    """Classement des rangs (`build_rank_ladder`) : joueurs des duos + joueurs actifs hors duo."""
+    in_teams = {member.player_id for team in teams for member in team.players}
+    return build_rank_ladder(teams, [p for p in players if p.player_id not in in_teams])
+
+
 @router.get("/api/duos")
 def get_duos(
     session: Session = Depends(get_session), challenge: Challenge = Depends(get_challenge)
 ) -> dict[str, Any]:
-    """Page « Duos » : stats complètes par duo (classées) + joueurs actifs sans duo."""
+    """Page « Duos » : stats complètes par duo (classées), comparatif, classement des rangs
+    et joueurs actifs sans duo."""
     now = utcnow()
-    teams, _players = build_leaderboard(session, challenge, now=now)
+    teams, players = build_leaderboard(session, challenge, now=now)
     unassigned = [p for p in _all_players(session) if p.active and p.team_id is None]
     return {
         "challenge": challenge_to_dict(challenge),
         "teams": [team.to_dict() for team in teams],
         "unassigned_players": _players_public(session, unassigned),
         "games_per_day": challenge.games_per_day,
+        "comparison": compare_teams(teams),
+        "ladder": _ladder(teams, players)["players"],
         "generated_at": now.isoformat(),
+    }
+
+
+@router.get("/api/rankings")
+def get_rankings(
+    session: Session = Depends(get_session), challenge: Challenge = Depends(get_challenge)
+) -> dict[str, Any]:
+    """Classement net des plus hauts rangs : joueurs actifs (non liés = non classés), duos, tiers."""
+    now = utcnow()
+    teams, players = build_leaderboard(session, challenge, now=now)
+    return {
+        "challenge": challenge_to_dict(challenge),
+        "generated_at": now.isoformat(),
+        **_ladder(teams, players),
     }
 
 
@@ -331,7 +355,14 @@ def get_player(
 ) -> dict[str, Any]:
     player = _player_or_404(session, player_id)
     team = session.get(Team, player.team_id) if player.team_id is not None else None
-    stats = compute_single_player_stats(session, challenge, player, team)
+    now = utcnow()
+    # Un seul calcul du classement : stats du joueur (s'il est actif), de son duo et positions
+    teams, players = build_leaderboard(session, challenge, now=now)
+    stats = next((p for p in players if p.player_id == player_id), None)
+    if stats is None:  # joueur inactif : absent du classement
+        stats = compute_single_player_stats(session, challenge, player, team, now=now)
+        players = [*players, stats]
+    team_stats = next((t for t in teams if team is not None and t.team_id == team.id), None)
     participants = session.exec(
         select(MatchParticipant)
         .where(col(MatchParticipant.player_id) == player_id)
@@ -347,6 +378,8 @@ def get_player(
         "player": player_public(player, snapshots[-1] if snapshots else None),
         "team": team_dict,
         "stats": stats.to_dict(),
+        "rankings": metric_rankings(players, player_id),
+        "team_stats": team_stats.to_dict() if team_stats is not None else None,
         "matches": [match_row(participant, player) for participant in participants],
         "snapshots": [snapshot_row(snapshot) for snapshot in snapshots],
     }
