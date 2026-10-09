@@ -19,10 +19,10 @@ rem Un second lancement ouvrirait un second tunnel (adresse differente) : on l'e
 curl.exe -s -o nul -m 3 http://127.0.0.1:8000/health >nul 2>nul
 if errorlevel 1 goto not_running
 echo  Le site tourne deja dans une autre fenetre : rien a relancer.
-echo  Le navigateur s'ouvre sur http://127.0.0.1:8000
+echo  Le navigateur s'ouvre sur le lien du site.
 echo  Pour redemarrer : ferme d'abord la fenetre du site, puis relance ce fichier.
 echo  Si seul le tunnel manque ^(lien qui ne repond pas^), lance Tunnel.bat.
-start "" http://127.0.0.1:8000
+call :open_browser
 goto end
 :not_running
 
@@ -81,7 +81,9 @@ echo  [2/3] Dependances : OK
 rem --- 3. Lancement -------------------------------------------------------
 echo  [3/3] Demarrage du site ...
 echo.
-echo  Site : http://127.0.0.1:8000
+echo  Lien a partager : https://kazza2115.github.io/PekinExpressLoL/
+echo  ^(le navigateur l'ouvre tout seul des qu'il est pret, en general moins d'une minute^)
+echo  Sur ce PC seulement : http://127.0.0.1:8000
 echo  Autres PC du reseau : http://^<IP de ce PC^>:8000  ^(ipconfig pour l'IP^)
 echo  Pour installer une nouvelle version : double-clic sur MiseAJour.bat,
 echo  le site redemarre tout seul.
@@ -89,21 +91,33 @@ echo  LAISSE CETTE FENETRE OUVERTE pendant le challenge. Ctrl+C pour arreter.
 echo.
 rem Tunnel Internet (adresse https://....trycloudflare.com pour les amis a distance),
 rem dans sa propre fenetre, sauf AUTO_TUNNEL=false dans .env
+set "OPEN_MODE=--local"
 findstr /b /i /c:"AUTO_TUNNEL=false" ".env" >nul 2>nul
 if errorlevel 1 (
     if exist "Tunnel.bat" (
+        set "OPEN_MODE="
         call :stop_old_tunnel
         echo  Ouverture du tunnel Internet dans une autre fenetre ^(AUTO_TUNNEL, TUNNEL^) ...
         start "Pekin Express LoL - tunnel" cmd /c "Tunnel.bat"
     )
 )
-rem Le navigateur s'ouvre 3 s plus tard, le temps que le serveur demarre
-start "" cmd /c "timeout /t 3 /nobreak >nul & start "" http://127.0.0.1:8000"
+rem Le navigateur s'ouvre sur le lien fixe GitHub des que la nouvelle adresse du tunnel y est
+rem publiee (moins d'une minute), sinon sur l'adresse du tunnel, sinon en local
+call :open_browser
 rem --reload : le serveur redemarre de lui-meme quand les fichiers du site changent
 ".venv\Scripts\python.exe" -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir app
 echo.
 echo  Le serveur s'est arrete.
 goto end
+
+:open_browser
+rem Petit programme sans fenetre : attend que le lien soit pret puis ouvre le navigateur
+if exist ".venv\Scripts\pythonw.exe" (
+    start "" ".venv\Scripts\pythonw.exe" -m app.open_site %OPEN_MODE%
+) else (
+    start "" cmd /c "timeout /t 3 /nobreak >nul & start "" http://127.0.0.1:8000"
+)
+goto :eof
 
 :stop_old_tunnel
 rem Tunnel d'un lancement precedent (sa fenetre reste ouverte quand on ferme le site) :

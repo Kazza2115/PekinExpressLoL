@@ -367,9 +367,12 @@ page voulue.
    Contents* : **Read and write**. Choisis une expiration après la fin du challenge.
 3. Colle le jeton dans `.env` après `GITHUB_TOKEN=` (il ne quitte jamais ton PC, n'est jamais
    envoyé sur GitHub ni affiché par le site ; ne le colle nulle part ailleurs).
-4. Relance `PekinExpress.bat` (avec `TUNNEL=rapide`, la valeur par défaut). Une minute après
-   l'ouverture du tunnel, **Admin → Système** affiche « Lien fixe à partager » avec l'adresse
-   vers laquelle il renvoie. Les messages Discord utilisent aussi ce lien fixe.
+4. Relance `PekinExpress.bat` (avec `TUNNEL=rapide`, la valeur par défaut). Le navigateur
+   s'ouvre tout seul **sur le lien fixe GitHub** dès que la nouvelle adresse y est publiée (en
+   général moins d'une minute). **Admin → Système** affiche « Lien fixe à partager » et
+   l'adresse vers laquelle il renvoie. Les messages Discord utilisent aussi ce lien fixe.
+   Sans jeton, le navigateur s'ouvre sur l'adresse du tunnel ; avec `AUTO_TUNNEL=false`, en
+   local.
 
 Le site ne publie une adresse qu'une fois qu'elle répond vraiment (jamais celle d'un lancement
 précédent). Si le PC est éteint, la page renvoie vers le dernier lien publié, qui ne répond

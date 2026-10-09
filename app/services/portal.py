@@ -34,6 +34,7 @@ log = logging.getLogger("pekin.portal")
 GITHUB_API = "https://api.github.com"
 SITE_FILE = "docs/site.json"
 SYNC_INTERVAL_S = 30
+FAST_SYNC_INTERVAL_S = 5
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 PROBE_TIMEOUT = httpx.Timeout(10.0, connect=8.0)
 # Adresse d'un journal écrit après le démarrage du serveur, qui ne répond toujours pas à ce PC
@@ -223,7 +224,9 @@ async def run_portal_sync() -> None:
             raise
         except Exception:  # noqa: BLE001
             log.exception("Synchronisation du lien fixe en échec")
-        await asyncio.sleep(SYNC_INTERVAL_S)
+        # Tant que la nouvelle adresse n'est pas publiée : toutes les 5 s (le navigateur l'attend)
+        pending = portal_state.enabled and (portal_state.published_url is None or portal_state.waiting)
+        await asyncio.sleep(FAST_SYNC_INTERVAL_S if pending else SYNC_INTERVAL_S)
 
 
 def share_url(settings: Settings | None = None) -> str:
