@@ -11,7 +11,14 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from app.riot.base import AccountDTO, ActiveGameDTO, LeagueEntryDTO, SummonerDTO
+from app.riot.base import (
+    AccountDTO,
+    ActiveGameDTO,
+    ActiveParticipantDTO,
+    BannedChampionDTO,
+    LeagueEntryDTO,
+    SummonerDTO,
+)
 
 
 def _component(value: str | int) -> str:
@@ -132,19 +139,54 @@ def game_start_from_ms(value: Any) -> datetime:
     return datetime.fromtimestamp(max(0, millis) / 1000, tz=timezone.utc)
 
 
+def _parse_active_participant(raw: dict[str, Any]) -> ActiveParticipantDTO:
+    """Participant Spectator-V5 → DTO (Riot ID « Nom#TAG », sorts, runes, icône)."""
+    riot_id = str(raw.get("riotId") or "").strip()
+    name, sep, tag = riot_id.rpartition("#")
+    if not sep:
+        name, tag = riot_id, ""
+    name = name.strip() or str(raw.get("summonerName") or "").strip() or "Joueur"
+    perks = raw.get("perks") if isinstance(raw.get("perks"), dict) else {}
+    perk_ids = [p for p in (perks.get("perkIds") or []) if isinstance(p, int) and not isinstance(p, bool) and p > 0]
+    return ActiveParticipantDTO(
+        puuid=str(raw["puuid"]) if raw.get("puuid") else None,
+        riot_name=name,
+        riot_tag=tag.strip() or None,
+        team_id=_opt_int(raw.get("teamId")) or 0,
+        champion_id=_opt_int(raw.get("championId")) or 0,
+        spell_ids=(_opt_int(raw.get("spell1Id")) or 0, _opt_int(raw.get("spell2Id")) or 0),
+        keystone_id=perk_ids[0] if perk_ids else None,
+        primary_style_id=_opt_int(perks.get("perkStyle")),
+        sub_style_id=_opt_int(perks.get("perkSubStyle")),
+        profile_icon_id=_opt_int(raw.get("profileIconId")),
+        bot=bool(raw.get("bot")),
+    )
+
+
 def parse_active_game(data: dict[str, Any], puuid: str) -> ActiveGameDTO:
-    """Spectator-V5 : champion du participant dont le `puuid` correspond (0 si absent)."""
-    champions: dict[str, int] = {}
-    for participant in data.get("participants") or []:
-        if isinstance(participant, dict) and participant.get("puuid"):
-            champions[str(participant["puuid"])] = _opt_int(participant.get("championId")) or 0
-    champion_id = champions.get(puuid, 0)
+    """Spectator-V5 : la partie du joueur `puuid`, avec la composition complète (10 joueurs, bans)."""
+    participants = [
+        _parse_active_participant(raw) for raw in data.get("participants") or [] if isinstance(raw, dict)
+    ]
+    champions = {p.puuid: p.champion_id for p in participants if p.puuid}
+    bans = [
+        BannedChampionDTO(
+            team_id=_opt_int(ban.get("teamId")) or 0,
+            champion_id=_opt_int(ban.get("championId")) or 0,
+            pick_turn=_opt_int(ban.get("pickTurn")) or 0,
+        )
+        for ban in data.get("bannedChampions") or []
+        if isinstance(ban, dict) and (_opt_int(ban.get("championId")) or 0) > 0  # -1 : pas de ban
+    ]
     return ActiveGameDTO(
         game_id=int(data.get("gameId") or 0),
         game_start=game_start_from_ms(data.get("gameStartTime")),
         queue_id=int(data.get("gameQueueConfigId") or 0),
         game_mode=str(data.get("gameMode") or ""),
-        champion_id=champion_id,
+        champion_id=champions.get(puuid, 0),
         champion_name=None,
         champions_by_puuid=champions,
+        participants=participants,
+        bans=bans,
+        map_id=_opt_int(data.get("mapId")),
     )

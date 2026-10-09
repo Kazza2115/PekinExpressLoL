@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from app.riot.base import ActiveGameDTO
+
 
 @dataclass
 class LiveGameState:
@@ -16,6 +18,8 @@ class LiveGameState:
     game_mode: str
     game_start: datetime  # UTC
     detected_at: datetime  # UTC : premier poll où la partie a été vue
+    # Composition complète (Spectator), partagée par les joueurs du challenge de la même partie
+    board: ActiveGameDTO | None = None
 
     def elapsed_seconds(self, now: datetime | None = None) -> int:
         now = now or datetime.now(timezone.utc)

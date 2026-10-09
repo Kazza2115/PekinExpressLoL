@@ -431,7 +431,9 @@ def _live_to_dict(live: LiveGameState, now: datetime, version: str | None) -> di
         loading_url = _ddragon_url(ddragon, "champion_loading_url", live.champion_name)
         splash_url = _ddragon_url(ddragon, "champion_splash_url", live.champion_name)
     return {
-        "champion_name": live.champion_name,
+        "game_id": live.game_id,
+        # Nom affiché (« Wukong ») ; les images utilisent l'identifiant Data Dragon (« MonkeyKing »)
+        "champion_name": _ddragon_url(ddragon, "champion_display_name", live.champion_name) or live.champion_name,
         "champion_icon_url": icon_url,
         "champion_loading_url": loading_url,
         "champion_splash_url": splash_url,

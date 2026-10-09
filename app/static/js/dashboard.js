@@ -15,6 +15,9 @@
     feed: $('#feed'),
     liveList: $('#live-list'),
     liveBadge: $('#live-badge'),
+    liveStage: $('#live-stage'),
+    liveBoards: $('#live-boards'),
+    liveStageHint: $('#live-stage-hint'),
     legend: $('#lp-legend'),
     chartEmpty: $('#chart-empty'),
     chartHint: $('#chart-hint'),
@@ -52,8 +55,8 @@
   }
   async function loadLive() {
     live = await api('/api/live');
+    App.setLive(live); // bandeau, compteur, fenêtres ouvertes → puis `pekin:live` redessine la scène
     renderLive();
-    App.setLiveCount((live && live.live && live.live.length) || 0);
   }
 
   async function loadRanks() {
@@ -117,13 +120,8 @@
   /* ------------------------------------------------------------------ */
   /* Duos                                                                 */
   /* ------------------------------------------------------------------ */
-  function liveBadgeHtml(liveInfo) {
-    if (!liveInfo) return '';
-    const start = liveInfo.game_start ? Date.parse(liveInfo.game_start) : NaN;
-    const elapsed = liveInfo.elapsed_s !== undefined && liveInfo.elapsed_s !== null ? liveInfo.elapsed_s : 0;
-    const startMs = !isNaN(start) && start > 0 ? start : Date.now() - elapsed * 1000;
-    const icon = liveInfo.champion_icon_url ? App.champIcon({ name: liveInfo.champion_name, src: liveInfo.champion_icon_url, size: 'xs', title: liveInfo.champion_name }) : '';
-    return `<span class="badge-live">${icon}<span class="dot"></span>En game${liveInfo.champion_name ? ` <span class="detail">· ${esc(liveInfo.champion_name)}</span>` : ''} <span class="detail tnum" data-elapsed-start="${startMs}">${App.formatDuration(elapsed)}</span></span>`;
+  function liveBadgeHtml(liveInfo, playerId) {
+    return App.liveBadgeHtml(liveInfo, { playerId });
   }
 
   function playerRowHtml(p, color) {
@@ -131,15 +129,15 @@
     const limit = p.games_limit_today || p.games_limit || gamesPerDay;
     const pct = Math.min(100, Math.round((today / Math.max(1, limit)) * 100));
     const rankColor = p.rank_color || App.rankColor(p.tier);
-    return `<div class="team-player">
+    return `<div class="team-player${p.live ? ' is-live' : ''}">
       <div class="tp-row">
-        ${avatar({ name: p.display_name, src: p.icon_url, color, size: 'sm' })}
+        ${avatar({ name: p.display_name, src: p.icon_url, color, size: 'sm', className: p.live ? 'is-live' : '' })}
         <div class="grow truncate"><div class="tp-line"><a class="tp-name" href="/player/${p.player_id}">${esc(p.display_name)}</a>${p.top_champion ? App.champIcon({ name: p.top_champion, src: p.top_champion_icon_url, size: 'xs', className: 'tp-champ', title: `Champion favori : ${p.top_champion} · ${p.top_champion_games || 0} ${p.top_champion_games > 1 ? 'parties' : 'partie'}` }) : ''}</div>
           <div class="tp-rank rank" style="--rank-color:${esc(rankColor)}">${App.rankEmblem(p.rank_emblem_url, 'sm', App.tierName(p.tier))}${esc(p.rank_label || App.formatRank(p.tier, p.rank, p.lp))}</div></div>
         ${App.lpHtml(p.lp_net, 'tp-lp')}
       </div>
       <div class="tp-today"><span>aujourd'hui ${today}/${limit}${p.games_today_over_quota ? ` · <span class="lp-neg" title="Parties au-delà du quota : elles ne comptent pas">+${p.games_today_over_quota} hors quota</span>` : ''}</span><div class="progress ${today >= limit ? 'done' : ''}"><span style="width:${pct}%"></span></div></div>
-      ${p.live ? liveBadgeHtml(p.live) : ''}
+      ${p.live ? liveBadgeHtml(p.live, p.player_id) : ''}
     </div>`;
   }
 
@@ -152,7 +150,7 @@
     }
     els.teamsGrid.innerHTML = teams.map((t) => {
       const wr = App.formatPct(t.winrate);
-      return `<article class="card team-card is-link pos-${t.position}" style="--team-color:${esc(t.color)}" data-href="/duos#duo-${t.team_id}" tabindex="0" role="link" aria-label="${esc(t.name)} : voir les stats du duo">
+      return `<article class="card team-card is-link pos-${t.position}${t.live_count ? ' is-live' : ''}" style="--team-color:${esc(t.color)}" data-href="/duos#duo-${t.team_id}" tabindex="0" role="link" aria-label="${esc(t.name)} : voir les stats du duo">
         <div class="team-head"><span class="pos-badge pos-${t.position}">${t.position}</span><span class="team-name truncate">${esc(t.name)}</span>${t.live_count ? `<span class="badge-live" title="${t.live_count} en partie"><span class="dot"></span>${t.live_count}</span>` : ''}${t.joker_today ? `<span class="chip chip-gold team-joker" title="Joker actif aujourd'hui : ${gamesPerDay + (t.joker_extra_games || 0)} parties comptées">🃏</span>` : ''}<span class="team-more" aria-hidden="true" title="Voir le détail du duo">→</span></div>
         <div class="team-lp ${App.lpClass(t.lp_net)}">${esc(App.formatLp(t.lp_net).replace(' LP', ''))}<small>LP</small></div>
         <div class="team-record"><span><strong>${t.wins}</strong> V – <strong>${t.losses}</strong> D</span><span>${wr === '—' ? 'Pas de partie' : `<strong>${wr}</strong> winrate`}</span><span><strong>${t.games}</strong> ${t.games > 1 ? 'parties' : 'partie'}</span></div>
@@ -164,7 +162,7 @@
   /* Clic (ou Entrée) sur une carte de duo → page Duos, sauf sur un lien interne (fiche joueur). */
   function cardNavigate(e) {
     const card = e.target.closest('.team-card[data-href]');
-    if (!card || e.target.closest('a')) return;
+    if (!card || e.target.closest('a, button')) return;
     if (e.type === 'keydown' && e.key !== 'Enter') return;
     window.location.href = card.dataset.href;
   }
@@ -201,9 +199,9 @@
       const team = teamOf(p.team_id);
       const color = team ? team.color : (p.rank_color || App.rankColor(p.tier));
       const streak = p.streak && p.streak !== '—' ? `<span class="chip ${p.streak.startsWith('W') ? 'chip-green' : 'chip-red'}">${esc(p.streak)}${p.hot_streak ? ' 🔥' : ''}</span>` : '<span class="muted">—</span>';
-      return `<tr class="${p.active === false ? 'is-stale' : ''}">
+      return `<tr class="${p.active === false ? 'is-stale' : ''}${p.live ? ' is-live' : ''}">
         <td class="muted tnum">${i + 1}</td>
-        <td><div class="cell-player">${avatar({ name: p.display_name, src: p.icon_url, color, size: 'sm' })}<a href="/player/${p.player_id}">${esc(p.display_name)}</a>${p.top_champion ? App.champIcon({ name: p.top_champion, src: p.top_champion_icon_url, size: 'sm', title: `Champion favori : ${p.top_champion} · ${p.top_champion_games || 0} ${p.top_champion_games > 1 ? 'parties' : 'partie'}` }) : ''}${team ? `<span class="chip chip-team" style="--team-color:${esc(team.color)}" title="${esc(team.name)}"><span class="swatch"></span>${esc(team.name.replace(/^Duo\s+/i, ''))}</span>` : ''}${p.live ? '<span class="badge-live"><span class="dot"></span>Live</span>' : ''}</div></td>
+        <td><div class="cell-player">${avatar({ name: p.display_name, src: p.icon_url, color, size: 'sm', className: p.live ? 'is-live' : '' })}<a href="/player/${p.player_id}">${esc(p.display_name)}</a>${p.top_champion ? App.champIcon({ name: p.top_champion, src: p.top_champion_icon_url, size: 'sm', title: `Champion favori : ${p.top_champion} · ${p.top_champion_games || 0} ${p.top_champion_games > 1 ? 'parties' : 'partie'}` }) : ''}${team ? `<span class="chip chip-team" style="--team-color:${esc(team.color)}" title="${esc(team.name)}"><span class="swatch"></span>${esc(team.name.replace(/^Duo\s+/i, ''))}</span>` : ''}${p.live ? App.liveBadgeHtml(p.live, { compact: true, playerId: p.player_id }) : ''}</div></td>
         <td><span class="cell-rank">${App.rankEmblem(p.rank_crest_url, 'sm', App.tierName(p.tier))}<span class="rank" style="--rank-color:${esc(p.rank_color || App.rankColor(p.tier))}">${esc(p.rank_label || App.formatRank(p.tier, p.rank, p.lp))}</span></span></td>
         <td class="num">${App.lpHtml(p.lp_net)}</td>
         <td class="num">${p.games || 0}<span class="muted"> · ${p.games_today || 0}/${p.games_limit_today || p.games_limit || gamesPerDay} auj.</span></td>
@@ -386,7 +384,7 @@
     els.liveList.innerHTML = items.map((l) => {
       const start = l.game_start ? Date.parse(l.game_start) : NaN;
       const startMs = !isNaN(start) && start > 0 ? start : Date.now() - (l.elapsed_s || 0) * 1000;
-      return `<div class="live-item">
+      return `<div class="live-item is-action" data-live-game="${esc(l.game_id)}" data-live-player="${esc(l.player_id)}" role="button" tabindex="0" title="Voir la partie en direct" style="--team-color:${esc(l.team_color || '#f05a5a')}">
         ${App.loadingArt({ name: l.champion_name || '?', src: l.champion_loading_url, iconSrc: l.champion_icon_url, title: l.champion_name })}
         <div class="live-main truncate">
           <div class="live-name"><a href="/player/${l.player_id}" style="color:inherit">${esc(l.display_name)}</a>${l.team_name ? ` <span class="chip chip-team" style="--team-color:${esc(l.team_color || '#e5b64d')}"><span class="swatch"></span>${esc(l.team_name)}</span>` : ''}</div>
@@ -396,6 +394,47 @@
       </div>`;
     }).join('');
   }
+
+  /* Scène « En direct » en haut du classement : un tableau par partie, redessiné seulement quand
+     la partie change (les durées défilent toutes seules). */
+  const stageSigs = new Map();
+  function renderLiveStage() {
+    if (!els.liveStage || !els.liveBoards) return;
+    const games = App.live.games || [];
+    els.liveStage.hidden = !games.length;
+    if (els.liveStageHint) {
+      const n = App.live.items.length;
+      els.liveStageHint.textContent = games.length ? `${n} joueur${n > 1 ? 's' : ''} en partie` : '';
+    }
+    const keep = new Set();
+    games.forEach((g, index) => {
+      const id = `live-game-${g.game_id}`;
+      keep.add(id);
+      const sig = JSON.stringify([g.game_start, g.loading, g.challenge_players, (g.teams || []).map((t) => (t.players || []).map((p) => [p.champion_id, p.rank_label]))]);
+      let card = document.getElementById(id);
+      if (!card) {
+        card = document.createElement('article');
+        card.id = id;
+        card.className = 'card lb-card is-live';
+        els.liveBoards.appendChild(card);
+      }
+      const color = ((g.challenge_players || [])[0] || {}).team_color;
+      if (color) card.style.setProperty('--team-color', color);
+      if (stageSigs.get(id) !== sig) {
+        stageSigs.set(id, sig);
+        card.innerHTML = App.liveBoardHtml(g);
+      }
+      if (els.liveBoards.children[index] !== card) els.liveBoards.insertBefore(card, els.liveBoards.children[index] || null);
+    });
+    Array.from(els.liveBoards.children).forEach((card) => {
+      if (!keep.has(card.id)) { stageSigs.delete(card.id); card.remove(); }
+    });
+  }
+  document.addEventListener('pekin:live', renderLiveStage);
+  els.liveList.addEventListener('keydown', (e) => {
+    const item = e.target.closest('[data-live-game]');
+    if (item && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); item.click(); }
+  });
 
   /* Top 5 des rangs actuels (détail sur /rankings). */
   function renderTopRanks() {

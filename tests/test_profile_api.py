@@ -103,7 +103,7 @@ def test_profile_endpoints_on_demo_data(client: TestClient, admin_headers: dict,
     assert rankings["summary"]["highest"]["player_id"] == rankings["players"][0]["player_id"]
 
     # --- /api/players/{id} -----------------------------------------------------------
-    assert set(detail) == {"player", "team", "stats", "rankings", "team_stats", "matches", "snapshots"}
+    assert set(detail) == {"player", "team", "stats", "rankings", "team_stats", "matches", "snapshots", "live_game"}
     stats = detail["stats"]
     assert PLAYER_PROFILE_KEYS <= set(stats) and stats["games"] > 0
     assert len(stats["by_duration"]) == 3 and len(stats["by_hour"]) == 4 and stats["by_day"]

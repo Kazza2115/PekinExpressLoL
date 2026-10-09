@@ -644,8 +644,10 @@ def test_challenge_flow(client: TestClient, admin_headers: dict) -> None:
     assert isinstance(champions, list) and len(champions) >= 1
     assert sum(c["games"] for c in champions) == detail["stats"]["games"]
     assert [c["games"] for c in champions] == sorted((c["games"] for c in champions), reverse=True)
-    assert champions[0]["champion_name"] == detail["stats"]["top_champion"]
-    assert champions[0]["splash_url"] == detail["stats"]["top_champion_splash_url"]
+    # Champion favori : un des plus joués (à égalité, le plus récent ; la liste, elle, départage au winrate)
+    top = next(c for c in champions if c["champion_name"] == detail["stats"]["top_champion"])
+    assert top["games"] == champions[0]["games"] == detail["stats"]["top_champion_games"]
+    assert top["splash_url"] == detail["stats"]["top_champion_splash_url"]
     assert champions[0]["icon_url"].endswith(f"/img/champion/{champions[0]['image_name']}.png")
     assert detail["snapshots"] and all(s["queue"] == "SOLO" for s in detail["snapshots"])
     assert client.get("/api/players/9999").status_code == 404

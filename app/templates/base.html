@@ -37,10 +37,19 @@
 
       <div class="nav-right">
         {% if demo_mode %}<span class="pill pill-demo" title="Données simulées : aucun appel à l'API Riot"><span class="pill-demo-prefix">MODE </span>DÉMO</span>{% endif %}
-        <a href="/dashboard#live" class="pill pill-live" id="nav-live" data-count="0" title="Joueurs actuellement en partie">
+        <button type="button" class="pill pill-online" id="nav-online" data-count="0" hidden title="Qui a le site ouvert en ce moment">
+          <span class="dot"></span><span class="pill-online-text">… en ligne</span>
+        </button>
+        <a href="/dashboard#live-stage" class="pill pill-live" id="nav-live" data-count="0" title="Joueurs actuellement en partie">
           <span class="dot"></span><span class="pill-live-text">0 en game</span>
         </a>
         <button type="button" class="btn btn-ghost btn-sm" id="btn-notifications" hidden>🔔 Activer les notifications</button>
+      </div>
+    </div>
+    <div class="live-strip" id="live-strip" hidden>
+      <div class="live-strip-inner">
+        <span class="live-strip-label"><span class="dot"></span><span class="txt">En direct</span></span>
+        <div class="live-strip-items" id="live-strip-items"></div>
       </div>
     </div>
   </header>

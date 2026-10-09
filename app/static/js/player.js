@@ -34,6 +34,8 @@
     matchesCount: $('#matches-count'),
     chartCanvas: $('#lp-chart'),
     chartEmpty: $('#chart-empty'),
+    liveSection: $('#live-section'),
+    liveBoard: $('#pf-live-board'),
   };
 
   let data = null;     // /api/players/{id}
@@ -144,10 +146,9 @@
     let badges = '';
     if (team) badges += `<a class="chip chip-team chip-lg pf-duo-chip" href="/duos#duo-${encodeURIComponent(team.id)}" style="--team-color:${esc(team.color)}" title="Voir le duo"><span class="swatch"></span>${esc(team.name)}</a>`;
     if (p.active === false) badges += '<span class="chip">Inactif</span>';
-    if (s.live) {
-      const lc = s.live.champion_name;
-      badges += `<span class="badge-live"><span class="dot"></span>En game${lc ? ` <span class="detail">· ${App.champIcon({ name: lc, src: s.live.champion_icon_url, size: 'xs', title: lc })} ${esc(lc)}</span>` : ''}</span>`;
-    }
+    if (s.live) badges += App.liveBadgeHtml(s.live, { playerId });
+    els.profile.classList.toggle('is-live', !!s.live);
+    els.avatar.classList.toggle('is-live', !!s.live);
     if (s.hot_streak) badges += '<span class="chip chip-gold" title="Série de victoires en cours (Riot)">🔥 En feu</span>';
     els.badges.innerHTML = badges;
 
@@ -779,6 +780,7 @@
     if (results[0].status === 'fulfilled') {
       data = results[0].value || {};
       safe(renderProfile, 'en-tête');
+      safe(renderLiveBoard, 'partie en cours');
       safe(renderRanks, 'classements');
       safe(renderTiles, 'tuiles');
       safe(renderGroups, 'statistiques');
@@ -806,6 +808,22 @@
     }
     safe(renderChart, 'graphe LP');
   }
+
+  /* Partie en cours : le tableau des 10 joueurs sous l'en-tête (état partagé App.live, sinon la
+     fiche), redessiné seulement quand la partie change. */
+  let liveSig = '';
+  function renderLiveBoard() {
+    if (!els.liveSection || !els.liveBoard) return;
+    const mine = App.live.byPlayer.get(playerId);
+    const game = (mine && App.live.byGame.get(String(mine.game_id))) || (App.live.items.length || !data ? null : data.live_game) || null;
+    els.liveSection.hidden = !game;
+    if (!game) { liveSig = ''; els.liveBoard.innerHTML = ''; return; }
+    const sig = JSON.stringify([game.game_id, game.game_start, game.loading, (game.teams || []).map((t) => (t.players || []).map((p) => [p.champion_id, p.rank_label]))]);
+    if (sig === liveSig) return;
+    liveSig = sig;
+    els.liveBoard.innerHTML = `<article class="card lb-card is-live" id="live-game-${esc(game.game_id)}">${App.liveBoardHtml(game, { focusPlayerId: playerId })}</article>`;
+  }
+  document.addEventListener('pekin:live', () => safe(renderLiveBoard, 'partie en cours'));
 
   const refresh = App.debounce(() => load().catch((e) => console.warn(e)), 1000);
   App.connectEvents({

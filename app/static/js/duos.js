@@ -135,13 +135,20 @@
     els.updated.textContent = s < 5 ? "Mis à jour à l'instant" : `Mis à jour il y a ${s < 60 ? s + ' s' : App.timeAgoSeconds(s).replace('il y a ', '')}`;
   }
 
-  function liveBadgeHtml(liveInfo) {
-    if (!liveInfo) return '';
-    const start = liveInfo.game_start ? Date.parse(liveInfo.game_start) : NaN;
-    const elapsed = liveInfo.elapsed_s !== undefined && liveInfo.elapsed_s !== null ? liveInfo.elapsed_s : 0;
-    const startMs = !isNaN(start) && start > 0 ? start : Date.now() - elapsed * 1000;
-    const icon = liveInfo.champion_icon_url ? App.champIcon({ name: liveInfo.champion_name, src: liveInfo.champion_icon_url, size: 'xs', title: liveInfo.champion_name }) : '';
-    return `<span class="badge-live">${icon}<span class="dot"></span>En game${liveInfo.champion_name ? ` <span class="detail detail-champ">· ${esc(liveInfo.champion_name)}</span>` : ''} <span class="detail tnum" data-elapsed-start="${startMs}">${App.formatDuration(elapsed)}</span></span>`;
+  function liveBadgeHtml(liveInfo, playerId) {
+    return App.liveBadgeHtml(liveInfo, { playerId });
+  }
+
+  /* Badge du duo : « 2 en game · ensemble » quand les deux jouent la même partie (cliquable). */
+  function teamLiveBadge(t, players) {
+    if (!t.live_count) return '';
+    const lives = players.filter((p) => p && p.live);
+    const games = new Set(lives.map((p) => p.live.game_id).filter((id) => id !== undefined && id !== null));
+    const together = lives.length >= 2 && games.size === 1;
+    const first = lives[0];
+    const attrs = first && first.live.game_id !== undefined && first.live.game_id !== null
+      ? ` data-live-game="${esc(first.live.game_id)}" data-live-player="${esc(first.player_id)}"` : '';
+    return `<button type="button" class="badge-live is-action"${attrs} title="Voir la partie en direct"><span class="dot"></span>${t.live_count} en game${together ? ' · ensemble' : ''}</button>`;
   }
 
   function tile(label, value, sub) {
@@ -173,14 +180,14 @@
       ? `Fenêtre${t.window_start ? ` du ${esc(App.formatDateTime(t.window_start))}` : ''}${t.window_end ? ` au ${esc(App.formatDateTime(t.window_end))}` : ''}`
       : '';
     const splash = t.mvp_top_champion_splash_url || null;
-    return `<article class="card duo-big pos-${pos} ${splash ? 'splash-bg' : ''}" id="duo-${t.team_id}" style="--team-color:${esc(t.color || '#e5b64d')}">
+    return `<article class="card duo-big pos-${pos} ${splash ? 'splash-bg' : ''}${t.live_count ? ' is-live' : ''}" id="duo-${t.team_id}" style="--team-color:${esc(t.color || '#e5b64d')}">
       ${splash ? App.splashImg(splash, pos === 1) : ''}
       <div class="duo-band"></div>
       <header class="duo-head">
         <span class="pos-badge pos-${pos} ${medal ? 'is-medal' : ''}" title="${pos ? `${pos}${pos === 1 ? 'er' : 'e'} duo` : 'Non classé'}">${medal ? '🥇' : (pos || '–')}</span>
         <div class="duo-title">
           <h2><span class="swatch"></span><span class="name">${esc(t.name)}</span></h2>
-          <div class="sub"><span>${players.length ? players.map((p) => esc(p.display_name)).join(' & ') : 'Aucun joueur pour l’instant'}</span>${t.live_count ? `<span class="badge-live" title="${t.live_count} en partie"><span class="dot"></span>${t.live_count} en game</span>` : ''}${windowTxt ? `<span>· ${windowTxt}</span>` : ''}</div>
+          <div class="sub"><span>${players.length ? players.map((p) => esc(p.display_name)).join(' & ') : 'Aucun joueur pour l’instant'}</span>${teamLiveBadge(t, players)}${windowTxt ? `<span>· ${windowTxt}</span>` : ''}</div>
         </div>
         <div class="duo-lp-big">
           <div class="val ${App.lpClass(t.lp_net)}">${esc(App.formatLp(t.lp_net).replace(' LP', ''))}<small>LP</small></div>
@@ -293,7 +300,8 @@
     if (!t) return;
     const players = (t.players || []).filter(Boolean);
     const extra = t.joker_extra_games || 0;
-    const options = players.map((p) => `<option value="${p.player_id}">${esc(p.display_name)}</option>`).join('');
+    const me = App.getMe ? App.getMe() : null; // « Qui es-tu ? » : présélection seulement
+    const options = players.map((p) => `<option value="${p.player_id}"${me && me.id === p.player_id ? ' selected' : ''}>${esc(p.display_name)}</option>`).join('');
     const res = await App.confirm({
       title: `Activer le joker de ${t.name} ?`,
       message: `Vous aurez droit à ${gamesPerDay + extra} parties comptées aujourd'hui au lieu de ${gamesPerDay}, tous les deux. Seules les parties terminées à partir de maintenant profitent des ${extra} parties en plus. Il n'y a qu'un joker pour tout le challenge : il sera annoncé à tout le monde.`,
@@ -318,11 +326,11 @@
     // Couronne seulement si le MVP a quelque chose à montrer (pas de MVP à 0 partie et 0 LP net)
     const mvp = t.mvp_player_id !== null && t.mvp_player_id !== undefined && t.mvp_player_id === p.player_id && !((p.games || 0) === 0 && (p.lp_net || 0) === 0);
     const rankColor = p.rank_color || App.rankColor(p.tier);
-    return `<div class="face-player ${mvp ? 'is-mvp' : ''}">
-      <div class="fp-avatar">${mvp ? '<span class="fp-crown" aria-hidden="true">👑</span>' : ''}${avatar({ name: p.display_name, src: p.icon_url, color: t.color, size: 'lg' })}</div>
+    return `<div class="face-player ${mvp ? 'is-mvp' : ''}${p.live ? ' is-live' : ''}">
+      <div class="fp-avatar">${mvp ? '<span class="fp-crown" aria-hidden="true">👑</span>' : ''}${avatar({ name: p.display_name, src: p.icon_url, color: t.color, size: 'lg', className: p.live ? 'is-live' : '' })}</div>
       <a class="fp-name" href="/player/${p.player_id}">${esc(p.display_name)}</a>
       <div class="fp-rank rank" style="--rank-color:${esc(rankColor)}">${App.rankEmblem(p.rank_emblem_url, 'sm', App.tierName(p.tier))}${esc(p.rank_label || App.formatRank(p.tier, p.rank, p.lp))}</div>
-      ${p.live ? liveBadgeHtml(p.live) : ''}
+      ${p.live ? liveBadgeHtml(p.live, p.player_id) : ''}
       ${mvp ? '<div class="fp-mvp"><span class="chip chip-gold">👑 MVP du duo</span><span class="fp-mvp-sub">le plus de LP nets</span></div>' : ''}
     </div>`;
   }

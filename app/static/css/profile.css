@@ -242,3 +242,8 @@ a.pf-duo-chip:hover { border-color: var(--team-color, var(--accent)); color: var
 .pf-tag.is-fb { background: var(--red-soft); color: #ff8a8a; border-color: rgba(240, 90, 90, 0.35); }
 .pf-tag.is-ff { color: var(--muted); }
 @media (max-width: 720px) { .pf-m-extra { gap: 4px 8px; } }
+
+/* Joueur en partie : en-tête en surbrillance et tableau de la partie juste en dessous */
+.pf-hero.is-live { border-color: var(--live-ring); box-shadow: var(--live-glow), var(--shadow-sm); animation: live-glow 2.4s ease-in-out infinite; }
+.pf-hero.is-live .pf-avatar-wrap .avatar { box-shadow: 0 0 0 3px var(--surface), 0 0 0 6px var(--live), 0 0 24px rgba(240, 90, 90, 0.5); }
+.pf-live[hidden] { display: none; }

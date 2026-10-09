@@ -280,3 +280,157 @@ def player_highlights(match: Match, player: Player) -> dict[str, Any] | None:
             [other["kda"] for other_team, other in rows if other_team is not team],
         ),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Partie en cours (Spectator-V5) : tableau des 10 joueurs
+# --------------------------------------------------------------------------- #
+
+
+def _side(team_id: int) -> tuple[str, str]:
+    if team_id == 100:
+        return "blue", "Équipe bleue"
+    if team_id == 200:
+        return "red", "Équipe rouge"
+    return "other", f"Équipe {team_id}" if team_id else "Équipe"
+
+
+def build_live_board(
+    lives: list[Any],
+    players_by_puuid: dict[str, Player],
+    teams_by_id: dict[int, Any],
+    snapshots: dict[int, Any],
+    now: datetime,
+) -> dict[str, Any]:
+    """Tableau d'une partie en cours, à partir des `LiveGameState` du challenge qui y jouent.
+
+    Les 10 joueurs (champion, sorts, runes, Riot ID), les bans, et pour les joueurs du challenge
+    leur duo (couleur) et leur rang (dernier snapshot Solo/Duo). Aucun appel Riot : tout vient de
+    la réponse Spectator déjà reçue par le poller. `teams` est vide si la composition est inconnue.
+    """
+    from app.db.session import as_utc  # import local : pas d'autre usage du module
+    from app.services.stats import format_rank, rank_color
+
+    first = lives[0]
+    board = next((live.board for live in lives if live.board is not None), None)
+    starts = [s for s in (as_utc(live.game_start) for live in lives) if s is not None and s.timestamp() > 0]
+    loading = not starts
+    start = min(starts) if starts else min(as_utc(live.detected_at) or now for live in lives)
+    version = ddragon.CURRENT_VERSION
+    in_game_ids = {live.player_id for live in lives}
+
+    def challenge_info(player: Player | None) -> dict[str, Any]:
+        if player is None:
+            return {"is_challenge": False, "player_id": None, "display_name": None, "team_id": None,
+                    "team_name": None, "team_color": None, "rank_label": None, "rank_color": None,
+                    "rank_crest_url": None}
+        team = teams_by_id.get(player.team_id) if player.team_id is not None else None
+        snap = snapshots.get(player.id)
+        tier = getattr(snap, "tier", None)
+        return {
+            "is_challenge": True,
+            "player_id": player.id,
+            "display_name": player.display_name,
+            "team_id": getattr(team, "id", None),
+            "team_name": getattr(team, "name", None),
+            "team_color": getattr(team, "color", None),
+            "rank_label": format_rank(tier, snap.rank, snap.lp) if snap is not None else None,
+            "rank_color": rank_color(tier) if snap is not None else None,
+            "rank_crest_url": ddragon.rank_mini_crest_url(tier),
+        }
+
+    teams: list[dict[str, Any]] = []
+    challenge_players: list[dict[str, Any]] = []
+    if board is not None:
+        by_team: dict[int, list[Any]] = {}
+        for participant in board.participants:
+            by_team.setdefault(participant.team_id, []).append(participant)
+        for team_id in sorted(by_team, key=lambda t: (t not in (100, 200), t)):
+            side, side_label = _side(team_id)
+            members = by_team[team_id]
+            if all(m.position in POSITION_ORDER for m in members):
+                members = sorted(members, key=lambda m: POSITION_ORDER.index(m.position))
+            rows = []
+            for participant in members:
+                image = participant.champion_name or ddragon.cached_champion_name(participant.champion_id)
+                keystone_name, keystone_url = ddragon.rune_icon(participant.keystone_id)
+                style_name, style_url = ddragon.rune_icon(participant.sub_style_id, style=True)
+                player = players_by_puuid.get(participant.puuid) if participant.puuid else None
+                row = {
+                    "riot_name": participant.riot_name,
+                    "riot_tag": participant.riot_tag,
+                    "bot": participant.bot,
+                    "profile_icon_url": ddragon.profile_icon_url(version, participant.profile_icon_id),
+                    "champion_id": participant.champion_id,
+                    "champion_name": ddragon.champion_display_name(image) if image else f"Champion {participant.champion_id}",
+                    "champion_icon_url": ddragon.champion_icon_url(version, image) if image else None,
+                    "spell_urls": [ddragon.spell_icon_url(version, s) for s in participant.spell_ids],
+                    "keystone": keystone_name,
+                    "keystone_url": keystone_url,
+                    "secondary_style": style_name,
+                    "secondary_style_url": style_url,
+                    "position": participant.position,
+                    "position_label": POSITION_LABELS.get(participant.position or "", ""),
+                    "position_icon_url": ddragon.position_icon_url(participant.position),
+                    **challenge_info(player),
+                }
+                rows.append(row)
+                if row["is_challenge"]:
+                    challenge_players.append(
+                        {key: row[key] for key in ("player_id", "display_name", "team_id", "team_name", "team_color")}
+                        | {"side": side, "champion_name": row["champion_name"]}
+                    )
+            bans = [
+                {
+                    "champion_id": ban.champion_id,
+                    "champion_name": ddragon.champion_display_name(ban.champion_name or ddragon.cached_champion_name(ban.champion_id))
+                    or f"Champion {ban.champion_id}",
+                    "champion_icon_url": ddragon.champion_icon_url(
+                        version, ban.champion_name or ddragon.cached_champion_name(ban.champion_id)
+                    ),
+                    "pick_turn": ban.pick_turn,
+                }
+                for ban in sorted(board.bans, key=lambda b: b.pick_turn)
+                if ban.team_id == team_id
+            ]
+            teams.append(
+                {
+                    "team_id": team_id,
+                    "side": side,
+                    "side_label": side_label,
+                    "has_challenge_player": any(r["is_challenge"] for r in rows),
+                    "bans": bans,
+                    "players": rows,
+                }
+            )
+    # Joueurs du challenge en partie que la composition ne montre pas (Spectator incomplet)
+    shown = {c["player_id"] for c in challenge_players}
+    for live in lives:
+        if live.player_id in shown:
+            continue
+        player = next((p for p in players_by_puuid.values() if p.id == live.player_id), None)
+        if player is None:
+            continue
+        info = challenge_info(player)
+        challenge_players.append(
+            {key: info[key] for key in ("player_id", "display_name", "team_id", "team_name", "team_color")}
+            | {"side": None, "champion_name": ddragon.champion_display_name(live.champion_name)}
+        )
+    duo_counts: dict[Any, int] = {}
+    for cp in challenge_players:
+        duo_counts[cp["team_id"]] = duo_counts.get(cp["team_id"], 0) + 1
+    return {
+        "game_id": first.game_id,
+        "queue_id": first.queue_id,
+        "queue_label": QUEUE_LABELS.get(int(first.queue_id or 0), "Partie"),
+        "game_mode": first.game_mode,
+        "map_id": getattr(board, "map_id", None),
+        "game_start": start.isoformat(),
+        "loading": loading,
+        "elapsed_s": max(0, int((now - start).total_seconds())),
+        "challenge_players": challenge_players,
+        "in_game_player_ids": sorted(in_game_ids),
+        "duo_together": any(n >= 2 for tid, n in duo_counts.items() if tid is not None),
+        "versus": len({cp["side"] for cp in challenge_players if cp["side"]}) > 1,
+        "teams": teams,
+    }

@@ -64,6 +64,9 @@ def engine():
     from app.api import routes_api
 
     routes_api._write_hits.clear()  # noqa: SLF001 — garde-fou anti-spam remis à zéro
+    from app.presence import presence
+
+    presence.clear()  # personne de connecté au début de chaque test
     yield engine
     db_session.set_engine(None)
     engine.dispose()

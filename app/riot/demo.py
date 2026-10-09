@@ -34,7 +34,15 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from app.riot.base import AccountDTO, ActiveGameDTO, LeagueEntryDTO, RiotNotFound, SummonerDTO
+from app.riot.base import (
+    AccountDTO,
+    ActiveGameDTO,
+    ActiveParticipantDTO,
+    BannedChampionDTO,
+    LeagueEntryDTO,
+    RiotNotFound,
+    SummonerDTO,
+)
 from app.services.stats import absolute_lp, rank_from_absolute_lp
 
 RANKED_SOLO_QUEUE_ID = 420
@@ -58,6 +66,10 @@ DEMO_RUNES_BY_POSITION: dict[str, list[tuple[int, int, int]]] = {
 
 # Probabilité qu'une partie normale se termine par un abandon (gameEndedInSurrender)
 SURRENDER_CHANCE = 0.15
+# Probabilité qu'un autre joueur du challenge (libre) rejoigne la partie qui démarre, et qu'il
+# soit alors dans la même équipe (sinon : en face)
+SHARED_GAME_CHANCE = 0.3
+SHARED_SAME_TEAM_CHANCE = 0.7
 
 # Identifiants image Data Dragon (= `championName` Match-V5) et championId, par poste
 CHAMPIONS_BY_POSITION: dict[str, list[tuple[str, int]]] = {
@@ -85,6 +97,7 @@ CHAMPIONS_BY_POSITION: dict[str, list[tuple[str, int]]] = {
     ],
 }
 CHAMPION_POOL: list[tuple[str, int]] = [c for pool in CHAMPIONS_BY_POSITION.values() for c in pool]
+CHAMPION_NAMES: dict[int, str] = {champion_id: name for name, champion_id in CHAMPION_POOL}
 
 # Objets plausibles (ids Data Dragon) : 6 objets tirés dans ce pool + bibelot en `item6`
 ITEM_POOL: list[int] = [
@@ -121,6 +134,12 @@ class _LiveGame:
     position: str
     team_id: int
     ticks: int = 0  # ticks écoulés depuis le démarrage
+    # Les 10 joueurs, fixés dès le début (tableau en direct = tableau des scores final) :
+    # {participant_id, puuid, game_name, tag_line, champion, champion_id, team_id, position,
+    #  spells, runes, icon, level}
+    roster: list[dict[str, Any]] = field(default_factory=list)
+    bans: list[tuple[int, int, int]] = field(default_factory=list)  # (équipe, championId, tour)
+    members: list[str] = field(default_factory=list)  # puuid des joueurs simulés dans la partie
 
 
 @dataclass
@@ -246,7 +265,7 @@ class DemoRiotClient:
         position = self.rng.choice(POSITIONS)
         champion, champion_id = self.rng.choice(CHAMPIONS_BY_POSITION[position])
         low, high = self.game_duration_range
-        player.live = _LiveGame(
+        live = _LiveGame(
             game_id=self._game_seq,
             started_at=now,
             ends_at=now + self.rng.uniform(float(low), float(high)),
@@ -254,12 +273,68 @@ class DemoRiotClient:
             champion_id=champion_id,
             position=position,
             team_id=self.rng.choice((100, 200)),
+            members=[player.puuid],
         )
+        # Un autre joueur simulé libre rejoint parfois la partie (duo ensemble, ou adversaires)
+        seats: dict[tuple[int, str], _DemoPlayer] = {(live.team_id, position): player}
+        idle = [p for p in self._players.values() if p.live is None and not p.cooldown and p.puuid != player.puuid]
+        if idle and self.rng.random() < SHARED_GAME_CHANCE:
+            mate = self.rng.choice(idle)
+            same_team = self.rng.random() < SHARED_SAME_TEAM_CHANCE
+            mate_team = live.team_id if same_team else (200 if live.team_id == 100 else 100)
+            mate_position = self.rng.choice([pos for pos in POSITIONS if (mate_team, pos) not in seats])
+            seats[(mate_team, mate_position)] = mate
+            live.members.append(mate.puuid)
+            mate.live = live
+        self._make_roster(live, seats)
+        player.live = live
+
+    def _make_roster(self, live: _LiveGame, seats: dict[tuple[int, str], _DemoPlayer]) -> None:
+        """Les 10 joueurs de la partie (joueurs simulés aux places `seats`, bots ailleurs) et les bans."""
+        rng = self.rng
+        used = {live.champion}
+        bot_names = rng.sample(BOT_NAMES, 10 - len(seats))
+        roster: list[dict[str, Any]] = []
+        for team_id in (100, 200):
+            for position in POSITIONS:
+                participant_id = len(roster) + 1
+                seat = seats.get((team_id, position))
+                if seat is not None and seat.puuid == live.members[0]:
+                    champion, champion_id = live.champion, live.champion_id
+                else:
+                    candidates = [c for c in CHAMPIONS_BY_POSITION[position] if c[0] not in used]
+                    champion, champion_id = rng.choice(candidates)
+                used.add(champion)
+                spells = [FLASH_SPELL_ID, rng.choice(SECOND_SPELLS_BY_POSITION[position])]
+                rng.shuffle(spells)  # Flash en D ou en F, comme dans la vraie vie
+                entry = {
+                    "participant_id": participant_id,
+                    "champion": champion,
+                    "champion_id": champion_id,
+                    "team_id": team_id,
+                    "position": position,
+                    "spells": spells,
+                    "runes": rng.choice(DEMO_RUNES_BY_POSITION[position]),
+                }
+                if seat is not None:
+                    entry.update(puuid=seat.puuid, game_name=seat.game_name, tag_line=seat.tag_line,
+                                 icon=seat.profile_icon_id, level=seat.summoner_level)
+                else:
+                    entry.update(puuid=f"demo-bot-{live.game_id:06d}-{participant_id}", game_name=bot_names.pop(),
+                                 tag_line="EUW", icon=rng.randint(0, 28), level=rng.randint(30, 500))
+                roster.append(entry)
+        live.roster = roster
+        picks = {entry["champion_id"] for entry in roster}
+        banned = rng.sample([c for c in CHAMPION_POOL if c[1] not in picks], 10)
+        live.bans = [(100 if turn <= 5 else 200, champion_id, turn) for turn, (_, champion_id) in enumerate(banned, start=1)]
 
     def _finish_game(self, player: _DemoPlayer, now: float) -> None:
         live = player.live
         assert live is not None
-        player.live = None
+        members = [self._players[puuid] for puuid in live.members if puuid in self._players] or [player]
+        for member in members:
+            member.live = None
+            member.cooldown = True
         remake = self.rng.random() < self.remake_chance
         win = False if remake else self.rng.random() < self.win_chance
 
@@ -270,8 +345,12 @@ class DemoRiotClient:
 
         match_id = f"DEMO_{live.game_id:06d}"
         self._matches[match_id] = self._build_match(player, live, match_id, win, remake, start_ts, end_ts, duration)
-        player.matches.append(_StoredMatch(match_id, RANKED_SOLO_QUEUE_ID, start_ts, end_ts))
-        self._apply_result(player, win, remake)
+        winning_team = live.team_id if win else (200 if live.team_id == 100 else 100)
+        teams_by_puuid = {entry["puuid"]: entry["team_id"] for entry in live.roster}
+        for member in members:
+            member.matches.append(_StoredMatch(match_id, RANKED_SOLO_QUEUE_ID, start_ts, end_ts))
+            member_win = (not remake) and teams_by_puuid.get(member.puuid, live.team_id) == winning_team
+            self._apply_result(member, member_win, remake)
         self._trim_matches()
 
     def _apply_result(self, player: _DemoPlayer, win: bool, remake: bool) -> None:
@@ -314,36 +393,19 @@ class DemoRiotClient:
     ) -> dict[str, Any]:
         minutes = duration / 60
         winning_team = live.team_id if win else (200 if live.team_id == 100 else 100)
-        # Champions des 9 autres participants : un par poste et par équipe, sans doublon
-        used = {live.champion}
-        participants: list[dict[str, Any]] = []
-        bot_names = self.rng.sample(BOT_NAMES, 9)
-        bot_index = 0
-        for team_id in (100, 200):
-            for position in POSITIONS:
-                participant_id = len(participants) + 1
-                team_win = team_id == winning_team
-                if team_id == live.team_id and position == live.position:
-                    participants.append(
-                        self._participant(
-                            participant_id, player.puuid, player.game_name, player.tag_line, live.champion,
-                            live.champion_id, team_id, position, team_win, minutes, remake,
-                            level=player.summoner_level, icon=player.profile_icon_id,
-                        )
-                    )
-                    continue
-                candidates = [c for c in CHAMPIONS_BY_POSITION[position] if c[0] not in used]
-                champion, champion_id = self.rng.choice(candidates)
-                used.add(champion)
-                bot_puuid = f"demo-bot-{live.game_id:06d}-{participant_id}"
-                participants.append(
-                    self._participant(
-                        participant_id, bot_puuid, bot_names[bot_index], "EUW", champion, champion_id,
-                        team_id, position, team_win, minutes, remake,
-                        level=self.rng.randint(30, 500), icon=self.rng.randint(0, 28),
-                    )
-                )
-                bot_index += 1
+        if not live.roster:
+            self._make_roster(live, {(live.team_id, live.position): player})
+        # Les 10 joueurs fixés au début de la partie (ceux du tableau en direct)
+        participants: list[dict[str, Any]] = [
+            self._participant(
+                entry["participant_id"], entry["puuid"], entry["game_name"], entry["tag_line"], entry["champion"],
+                entry["champion_id"], entry["team_id"], entry["position"],
+                (not remake) and entry["team_id"] == winning_team,
+                minutes, remake, level=entry["level"], icon=entry["icon"], spells=entry["spells"],
+                runes=entry["runes"],
+            )
+            for entry in live.roster
+        ]
 
         # Cohérence par équipe : un joueur ne participe pas à plus de kills que son équipe n'en a
         # (kill participation ≤ 100 %) ; sans kill d'équipe, aucune assist
@@ -375,7 +437,11 @@ class DemoRiotClient:
                 {
                     "teamId": team_id,
                     "win": team_win,
-                    "bans": [],
+                    "bans": [
+                        {"championId": champion_id, "pickTurn": turn}
+                        for side, champion_id, turn in live.bans
+                        if side == team_id
+                    ],
                     "objectives": {
                         "champion": {"first": team_win and not remake, "kills": sum(p["kills"] for p in members)},
                         "tower": objective(team_win, (5, 11), (0, 6)),
@@ -431,6 +497,8 @@ class DemoRiotClient:
         *,
         level: int,
         icon: int,
+        spells: list[int] | None = None,
+        runes: tuple[int, int, int] | None = None,
     ) -> dict[str, Any]:
         rng = self.rng
         if remake:
@@ -460,7 +528,7 @@ class DemoRiotClient:
                 "visionScore": vision, "champLevel": level,
             }
         stats.update(self._participant_details(stats, position, win, minutes, remake))
-        keystone, primary_style, secondary_style = rng.choice(DEMO_RUNES_BY_POSITION[position])
+        keystone, primary_style, secondary_style = runes or rng.choice(DEMO_RUNES_BY_POSITION[position])
         stats["perks"] = {
             "styles": [
                 {"description": "primaryStyle", "style": primary_style, "selections": [{"perk": keystone}]},
@@ -472,8 +540,9 @@ class DemoRiotClient:
         items = rng.sample(ITEM_POOL, item_count) + [0] * (6 - item_count)
         item_slots = {f"item{i}": items[i] for i in range(6)}
         item_slots["item6"] = rng.choice(TRINKETS)
-        spells = [FLASH_SPELL_ID, rng.choice(SECOND_SPELLS_BY_POSITION[position])]
-        rng.shuffle(spells)  # Flash en D ou en F, comme dans la vraie vie
+        if spells is None:
+            spells = [FLASH_SPELL_ID, rng.choice(SECOND_SPELLS_BY_POSITION[position])]
+            rng.shuffle(spells)  # Flash en D ou en F, comme dans la vraie vie
         return {
             "participantId": participant_id,
             "puuid": puuid,
@@ -627,13 +696,38 @@ class DemoRiotClient:
             return None
         # Comme Spectator-V5 : gameStartTime vaut 0 pendant l'écran de chargement (première vue)
         started_at = live.started_at if live.ticks >= 1 else 0.0
+        mine = next((entry for entry in live.roster if entry["puuid"] == puuid), None)
+        participants = [
+            ActiveParticipantDTO(
+                puuid=entry["puuid"],
+                riot_name=entry["game_name"],
+                riot_tag=entry["tag_line"],
+                team_id=entry["team_id"],
+                champion_id=entry["champion_id"],
+                champion_name=entry["champion"],
+                spell_ids=(entry["spells"][0], entry["spells"][1]),
+                keystone_id=entry["runes"][0],
+                primary_style_id=entry["runes"][1],
+                sub_style_id=entry["runes"][2],
+                profile_icon_id=entry["icon"],
+                position=entry["position"],
+            )
+            for entry in live.roster
+        ]
         return ActiveGameDTO(
             game_id=live.game_id,
             game_start=datetime.fromtimestamp(started_at, tz=timezone.utc),
             queue_id=RANKED_SOLO_QUEUE_ID,
             game_mode="CLASSIC",
-            champion_id=live.champion_id,
-            champion_name=live.champion,
+            champion_id=mine["champion_id"] if mine else live.champion_id,
+            champion_name=mine["champion"] if mine else live.champion,
+            champions_by_puuid={entry["puuid"]: entry["champion_id"] for entry in live.roster},
+            participants=participants,
+            bans=[
+                BannedChampionDTO(team_id=side, champion_id=champion_id, pick_turn=turn, champion_name=CHAMPION_NAMES.get(champion_id))
+                for side, champion_id, turn in live.bans
+            ],
+            map_id=11,
         )
 
     async def aclose(self) -> None:

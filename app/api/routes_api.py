@@ -17,7 +17,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, col, select
@@ -59,7 +59,7 @@ from app.events import bus
 from app.riot import ddragon, get_api
 from app.riot.base import RiotAPI
 from app.services import notifications
-from app.services.scoreboard import ScoreboardError, build_scoreboard
+from app.services.scoreboard import ScoreboardError, build_live_board, build_scoreboard
 from app.services.registration import link_player, parse_riot_id, register_player
 from app.services.stats import (
     WINDOW_END_GRACE,
@@ -72,6 +72,7 @@ from app.services.stats import (
 )
 from app.services.tunnel import public_url
 from app.services.portal import portal_page_url, portal_state
+from app.presence import PresenceSnapshot, presence
 from app.state import state
 from app.version import ASSET_VERSION, SITE_VERSION
 
@@ -96,7 +97,8 @@ WRITE_RATE_LIMIT = 40
 WRITE_RATE_WINDOW_S = 600
 RELINK_LOCKED_DETAIL = "Le challenge a démarré : seul l'organisateur peut changer un compte déjà lié."
 # Identifiants : SQLite n'accepte pas d'entiers > 2^63 et un id démesuré n'existe jamais
-PlayerId = Annotated[int, Path(ge=1, le=2**31 - 1)]
+MAX_DB_ID = 2**31 - 1
+PlayerId = Annotated[int, Path(ge=1, le=MAX_DB_ID)]
 
 
 # ---------------------------------------------------------------------------
@@ -253,11 +255,12 @@ def _live_items(session: Session, now: datetime | None = None) -> list[dict[str,
         items.append(
             {
                 "player_id": player.id,
+                "game_id": game.game_id,
                 "display_name": player.display_name,
                 "team_id": team.id if team is not None else None,
                 "team_name": team.name if team is not None else None,
                 "team_color": team.color if team is not None else None,
-                "champion_name": game.champion_name,
+                "champion_name": ddragon.champion_display_name(game.champion_name) or game.champion_name,
                 "champion_icon_url": ddragon.champion_icon_url(ddragon.CURRENT_VERSION, game.champion_name),
                 "champion_loading_url": ddragon.champion_loading_url(game.champion_name),
                 "champion_splash_url": ddragon.champion_splash_url(game.champion_name),
@@ -268,6 +271,23 @@ def _live_items(session: Session, now: datetime | None = None) -> list[dict[str,
             }
         )
     return items
+
+
+def _live_games(session: Session, now: datetime | None = None, game_id: int | None = None) -> list[dict[str, Any]]:
+    """Une entrée par partie en cours (les joueurs du challenge d'une même partie regroupés), avec
+    le tableau des 10 joueurs quand Spectator l'a fourni. `game_id` : cette partie seulement."""
+    now = now or utcnow()
+    groups: dict[int, list[Any]] = {}
+    for live in sorted(state.live_games.values(), key=lambda g: as_utc(g.detected_at) or now):
+        if game_id is None or live.game_id == game_id:
+            groups.setdefault(live.game_id, []).append(live)
+    if not groups:
+        return []
+    players = _all_players(session)
+    players_by_puuid = {p.puuid: p for p in players if p.puuid}
+    teams = _teams_by_id(session, {p.team_id for p in players if p.team_id is not None})
+    snapshots = _last_solo_snapshots(session, [p.id for p in players if p.id is not None])
+    return [build_live_board(lives, players_by_puuid, teams, snapshots, now) for lives in groups.values()]
 
 
 # ---------------------------------------------------------------------------
@@ -435,7 +455,17 @@ def get_player(
             for participant in participants
         ],
         "snapshots": [snapshot_row(snapshot) for snapshot in snapshots],
+        "live_game": _player_live_game(session, player_id, now),
     }
+
+
+def _player_live_game(session: Session, player_id: int, now: datetime) -> dict[str, Any] | None:
+    """Tableau de la partie en cours du joueur (None s'il n'est pas en partie)."""
+    live = state.live_games.get(player_id)
+    if live is None:
+        return None
+    games = _live_games(session, now, game_id=live.game_id)
+    return games[0] if games else None
 
 
 @router.get("/api/players/{player_id}/lp-history")
@@ -559,7 +589,8 @@ def get_match_scoreboard(match_id: str, session: Session = Depends(get_session))
 
 @router.get("/api/live")
 def get_live(session: Session = Depends(get_session)) -> dict[str, Any]:
-    return {"live": _live_items(session)}
+    now = utcnow()
+    return {"live": _live_items(session, now), "games": _live_games(session, now)}
 
 
 # ---------------------------------------------------------------------------
@@ -611,12 +642,64 @@ async def _event_stream(since_id: int | None, hello: dict[str, Any], max_events:
             await pump
 
 
+def _presence_public(session: Session, snap: PresenceSnapshot) -> dict[str, Any]:
+    """Personnes connectées : joueurs qui se sont identifiés (duo, page, en game) + visiteurs.
+
+    Jamais d'identifiant de navigateur, d'adresse IP ni de fiche consultée : la page seulement.
+    """
+    ids = [pid for pid in snap.players if 1 <= pid <= MAX_DB_ID]
+    players = (
+        [p for p in session.exec(select(Player).where(col(Player.id).in_(ids))).all() if p.id is not None and p.active]
+        if ids
+        else []
+    )
+    teams = _teams_by_id(session, {p.team_id for p in players if p.team_id is not None})
+    people = []
+    for player in sorted(players, key=lambda p: p.display_name.lower()):
+        info = snap.players[player.id]  # type: ignore[index]
+        team = teams.get(player.team_id) if player.team_id is not None else None
+        people.append(
+            {
+                "player_id": player.id,
+                "display_name": player.display_name,
+                "icon_url": ddragon.profile_icon_url(ddragon.CURRENT_VERSION, player.profile_icon_id),
+                "team_id": team.id if team is not None else None,
+                "team_name": team.name if team is not None else None,
+                "team_color": team.color if team is not None else None,
+                "active": info["active"],
+                "page": info["page"],
+                "in_game": player.id in state.live_games,
+            }
+        )
+    return {"online": len(people) + snap.anonymous, "anonymous": snap.anonymous, "players": people}
+
+
+def _parse_player_id(raw: str | None) -> int | None:
+    """Identifiant de joueur envoyé par une page (texte libre) : entier plausible, sinon None."""
+    try:
+        value = int(str(raw or "").strip())
+    except ValueError:
+        return None
+    return value if 1 <= value <= MAX_DB_ID else None
+
+
 @router.get("/api/events/recent")
-def get_recent_events(since: int | None = None, limit: int = Query(default=200, ge=1, le=500)) -> dict[str, Any]:
+def get_recent_events(
+    response: Response,
+    since: int | None = None,
+    limit: int = Query(default=200, ge=1, le=500),
+    cid: str | None = None,
+    tab: str | None = None,
+    page: str | None = None,
+    me: str | None = None,
+    vis: str | None = None,
+) -> dict[str, Any]:
     """Nouveautés depuis `since` (id d'événement) : interrogé toutes les 5 s par les pages.
 
     Sans `since` (premier appel d'une page) : aucun événement n'est rejoué, seulement l'état
-    courant (`hello`) et le dernier id à partir duquel suivre.
+    courant (`hello`) et le dernier id à partir duquel suivre. Sert aussi de signe de présence
+    (`cid`, `tab`, `page`, `me`, `vis`, tous optionnels et jamais refusés : une erreur ici
+    couperait les notifications de la page) ; la réponse dit qui est connecté (`presence`).
     """
     recent = bus.recent(limit=limit)
     last_id = recent[-1]["id"] if recent else 0
@@ -629,7 +712,35 @@ def get_recent_events(since: int | None = None, limit: int = Query(default=200, 
             "live_count": len(state.live_games),
             "asset_version": ASSET_VERSION,
         }
-    return {"events": events, "last_id": last_id, "hello": hello, "asset_version": ASSET_VERSION}
+        me_id = _parse_player_id(me)
+        me_player = session.get(Player, me_id) if me_id is not None else None
+        if me_player is not None and not me_player.active:
+            me_player = None
+        presence.touch(cid, tab, page, me_player.id if me_player is not None else None, vis != "0")
+        online = _presence_public(session, presence.snapshot())
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "events": events,
+        "last_id": last_id,
+        "hello": hello,
+        "asset_version": ASSET_VERSION,
+        "presence": online,
+        "me": {"player_id": me_player.id, "display_name": me_player.display_name} if me_player is not None else None,
+    }
+
+
+@router.post("/api/presence/leave", status_code=status.HTTP_204_NO_CONTENT)
+async def presence_leave(request: Request) -> Response:
+    """Onglet fermé (`navigator.sendBeacon`) : la personne disparaît tout de suite de la liste.
+    Toujours 204 (le navigateur n'écoute pas la réponse)."""
+    try:
+        body = (await request.body())[:512]
+        data = json.loads(body or b"{}")
+        if isinstance(data, dict):
+            presence.leave(str(data.get("cid") or ""), str(data.get("tab") or ""))
+    except (ValueError, UnicodeDecodeError):
+        pass
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/api/events")

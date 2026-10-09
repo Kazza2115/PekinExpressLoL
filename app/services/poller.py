@@ -46,6 +46,7 @@ from app.db.session import as_utc, session_scope
 from app.events import EventBus
 from app.riot import ddragon
 from app.riot.base import (
+    ActiveGameDTO,
     LeagueEntryDTO,
     RiotAPI,
     RiotError,
@@ -1144,6 +1145,8 @@ class Poller:
             known_start = as_utc(game.game_start)
             if current.game_start.timestamp() <= 0 and known_start is not None and known_start.timestamp() > 0:
                 current.game_start = known_start
+            if current.board is None and game.participants:
+                current.board = self._shared_board(game.game_id) or await self._prepare_board(game)
             return
         if current is not None:
             # Nouvelle partie sans avoir vu la fin de la précédente
@@ -1151,6 +1154,8 @@ class Poller:
 
         champion_name = game.champion_name or await self._champion_name(game.champion_id)
         game_start = as_utc(game.game_start) or datetime.fromtimestamp(0, tz=timezone.utc)
+        # Tableau de la partie : partagé avec un autre joueur du challenge déjà vu dans cette partie
+        board = self._shared_board(game.game_id) or (await self._prepare_board(game) if game.participants else None)
         live = LiveGameState(
             player_id=player.id,
             game_id=game.game_id,
@@ -1160,6 +1165,7 @@ class Poller:
             game_mode=game.game_mode,
             game_start=game_start,
             detected_at=ctx.now,
+            board=board,
         )
         self.state.live_games[player.id] = live
         ranked = game.queue_id in RANKED_QUEUE_IDS
@@ -1221,6 +1227,34 @@ class Poller:
             queue_id=queue_id,
             rank_label=format_rank(snapshot.tier, snapshot.rank, snapshot.lp) if snapshot is not None else None,
         )
+
+    def _shared_board(self, game_id: int) -> ActiveGameDTO | None:
+        """Tableau déjà connu de la partie `game_id` (coéquipier ou adversaire du challenge)."""
+        return next(
+            (live.board for live in self.state.live_games.values() if live.game_id == game_id and live.board is not None),
+            None,
+        )
+
+    @staticmethod
+    async def _prepare_board(game: ActiveGameDTO) -> ActiveGameDTO:
+        """Noms des champions joués et bannis (Data Dragon, en cache) ; jamais d'exception."""
+        names: dict[int, str | None] = {}
+
+        async def name_of(champion_id: int) -> str | None:
+            if champion_id not in names:
+                try:
+                    names[champion_id] = await ddragon.champion_name_from_id(champion_id)
+                except Exception:  # noqa: BLE001 — l'icône manquera, le tableau reste affiché
+                    names[champion_id] = None
+            return names[champion_id]
+
+        for participant in game.participants:
+            if not participant.champion_name and participant.champion_id:
+                participant.champion_name = await name_of(participant.champion_id)
+        for ban in game.bans:
+            if not ban.champion_name and ban.champion_id:
+                ban.champion_name = await name_of(ban.champion_id)
+        return game
 
     @staticmethod
     async def _champion_name(champion_id: int) -> str:

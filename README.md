@@ -237,6 +237,27 @@ Pendant le challenge, la page classement affiche :
 - le panneau **« En game »** : qui joue en ce moment, avec quel champion, depuis combien
   de temps.
 
+**Partie en direct** : dès qu'un joueur est en partie (à partir de l'écran de chargement), le site
+le met en **surbrillance** (lueur rouge sur sa carte de duo, sa ligne, son avatar et sa fiche) et
+affiche le **tableau de la partie** : les 10 joueurs, alliés et ennemis, avec champion, sorts,
+runes, Riot ID et bans ; les joueurs du challenge sont surlignés à la couleur de leur duo, avec
+leur rang. Le tableau apparaît en haut du classement (« 🔴 En direct », un par partie : deux
+joueurs du challenge dans la même partie, en duo ou face à face, partagent le même tableau), sous
+l'en-tête de la fiche du joueur, et dans une fenêtre en cliquant n'importe quel badge
+« En game ». Un **bandeau « En direct »** sous la barre de navigation montre les parties en cours
+sur toutes les pages. Aucune requête Riot en plus : tout vient de la vérification « qui est en
+game » que le site fait déjà. Riot ne donne ni le poste ni le score pendant la partie : le
+tableau final (KDA, or, objets…) arrive dans « Dernières parties » quelques minutes après.
+
+**Qui est connecté** : la pastille **« 🟢 N en ligne »** de la barre de navigation compte les
+personnes qui ont le site ouvert (mise à jour toutes les 5 s, sans requête en plus). Un clic
+montre la liste : les joueurs qui se sont identifiés (avec la page où ils sont, « en arrière-plan »
+si l'onglet est caché, et un badge s'ils sont en game) et le nombre de visiteurs anonymes. Chacun
+choisit **« Qui es-tu ? »** dans cette fenêtre (sinon il reste « spectateur ») ; ce choix est
+retenu par le navigateur. C'est déclaratif (pas de connexion) : ça sert à l'affichage, jamais à
+autoriser quoi que ce soit. Rien n'est enregistré sur disque, ni adresse IP : la liste est en
+mémoire et une personne disparaît dès qu'elle ferme le site (ou au bout de 30 s à 75 s).
+
 Chaque joueur a aussi sa fiche (`/player/<id>`) : rang, saison et pic, sa place parmi tous
 les joueurs sur 22 statistiques, une cinquantaine de stats (combat, multikills, farm, or,
 dégâts, vision, objectifs, temps, LP, séries), les répartitions par poste, côté, durée, heure

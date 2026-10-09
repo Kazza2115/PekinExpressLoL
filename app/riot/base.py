@@ -63,6 +63,33 @@ class LeagueEntryDTO:
 
 
 @dataclass
+class ActiveParticipantDTO:
+    """Un des 10 joueurs d'une partie en cours (Spectator-V5)."""
+
+    puuid: str | None
+    riot_name: str  # partie gauche du Riot ID (« Joueur » si masqué)
+    riot_tag: str | None
+    team_id: int  # 100 (bleu) / 200 (rouge)
+    champion_id: int
+    champion_name: str | None = None  # identifiant Data Dragon, résolu par le poller
+    spell_ids: tuple[int, int] = (0, 0)
+    keystone_id: int | None = None  # rune principale (perkIds[0])
+    primary_style_id: int | None = None
+    sub_style_id: int | None = None
+    profile_icon_id: int | None = None
+    bot: bool = False
+    position: str | None = None  # inconnue en vrai (Spectator) ; renseignée par le client démo
+
+
+@dataclass
+class BannedChampionDTO:
+    team_id: int
+    champion_id: int
+    pick_turn: int
+    champion_name: str | None = None
+
+
+@dataclass
 class ActiveGameDTO:
     game_id: int
     game_start: datetime  # UTC (0 → début non encore connu : utiliser detected_at)
@@ -72,6 +99,10 @@ class ActiveGameDTO:
     champion_name: str | None = None  # résolu via Data Dragon si None
     # puuid → championId de tous les joueurs de la partie (duo dans la même partie) ; vide si inconnu
     champions_by_puuid: dict[str, int] = field(default_factory=dict)
+    # Composition complète (tableau de la partie en direct) ; vide si inconnue
+    participants: list[ActiveParticipantDTO] = field(default_factory=list)
+    bans: list[BannedChampionDTO] = field(default_factory=list)
+    map_id: int | None = None
 
 
 class RiotAPI(Protocol):
