@@ -501,6 +501,7 @@
     }
     let status;
     if (portal.error) status = `<span class="lp-neg">✗ ${esc(portal.error)}</span>`;
+    else if (portal.waiting) status = `⏳ ${esc(portal.waiting)}${portal.published_url ? ` Pour l'instant, il renvoie encore vers <code>${esc(portal.published_url)}</code>.` : ''}`;
     else if (portal.published_url) status = `Renvoie vers <code>${esc(portal.published_url)}</code>${portal.published_at ? ` (mis à jour ${esc(App.timeAgo(portal.published_at))})` : ''}.`;
     else status = 'En attente de l\'adresse du tunnel pour la publier…';
     return `

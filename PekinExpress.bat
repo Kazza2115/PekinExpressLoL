@@ -14,6 +14,18 @@ echo.
 echo  ===== Pekin Express LoL =====
 echo  Dossier : %CD%
 echo.
+rem --- 0. Deja lance ? ----------------------------------------------------
+rem Un second lancement ouvrirait un second tunnel (adresse differente) : on l'evite
+curl.exe -s -o nul -m 3 http://127.0.0.1:8000/health >nul 2>nul
+if errorlevel 1 goto not_running
+echo  Le site tourne deja dans une autre fenetre : rien a relancer.
+echo  Le navigateur s'ouvre sur http://127.0.0.1:8000
+echo  Pour redemarrer : ferme d'abord la fenetre du site, puis relance ce fichier.
+echo  Si seul le tunnel manque ^(lien qui ne repond pas^), lance Tunnel.bat.
+start "" http://127.0.0.1:8000
+goto end
+:not_running
+
 
 rem --- 1. Fichier .env --------------------------------------------------
 if exist ".env" goto env_ok
@@ -80,6 +92,7 @@ rem dans sa propre fenetre, sauf AUTO_TUNNEL=false dans .env
 findstr /b /i /c:"AUTO_TUNNEL=false" ".env" >nul 2>nul
 if errorlevel 1 (
     if exist "Tunnel.bat" (
+        call :stop_old_tunnel
         echo  Ouverture du tunnel Internet dans une autre fenetre ^(AUTO_TUNNEL, TUNNEL^) ...
         start "Pekin Express LoL - tunnel" cmd /c "Tunnel.bat"
     )
@@ -91,6 +104,21 @@ rem --reload : le serveur redemarre de lui-meme quand les fichiers du site chang
 echo.
 echo  Le serveur s'est arrete.
 goto end
+
+:stop_old_tunnel
+rem Tunnel d'un lancement precedent (sa fenetre reste ouverte quand on ferme le site) :
+rem on le ferme, sinon deux tunnels tournent et le lien publie peut etre l'ancien.
+tasklist /FI "IMAGENAME eq cloudflared.exe" 2>nul | find /I "cloudflared.exe" >nul
+if not errorlevel 1 (
+    echo  Fermeture de l'ancien tunnel Cloudflare encore ouvert ...
+    taskkill /IM cloudflared.exe /F >nul 2>nul
+    timeout /t 2 /nobreak >nul
+)
+tasklist /FI "IMAGENAME eq tailscale.exe" 2>nul | find /I "tailscale.exe" >nul
+if not errorlevel 1 taskkill /IM tailscale.exe /F >nul 2>nul
+rem Ancienne adresse : le site ne doit pas la lire (ni la publier) avant la nouvelle
+if exist "data\tunnel.log" del /q "data\tunnel.log" >nul 2>nul
+goto :eof
 
 :create_env
 rem Ecrit un .env complet (identique a .env.example) sans dependre de la copie

@@ -51,8 +51,18 @@ class FakeGitHub:
 @pytest.fixture(autouse=True)
 def _reset_state():
     portal.portal_state.__init__()
+    portal._first_seen.clear()  # noqa: SLF001
     yield
     portal.portal_state.__init__()
+    portal._first_seen.clear()  # noqa: SLF001
+
+
+async def answers(url: str) -> bool:
+    return True
+
+
+async def silent(url: str) -> bool:
+    return False
 
 
 def test_portal_page_url() -> None:
@@ -109,8 +119,8 @@ async def test_sync_publishes_tunnel_url_once(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setattr(portal, "public_url", lambda s: tunnel.public_url(s, log))
     gh = FakeGitHub(existing_url=None)
     async with gh.client() as client:
-        await portal.sync_portal_once(settings(), client)
-        await portal.sync_portal_once(settings(), client)  # même adresse : pas de nouvel envoi
+        await portal.sync_portal_once(settings(), client, probe=answers)
+        await portal.sync_portal_once(settings(), client, probe=answers)  # même adresse : pas de nouvel envoi
     assert len(gh.puts) == 1
     state = portal.portal_state
     assert state.enabled and state.error is None
@@ -152,3 +162,52 @@ def test_pages_entry_files() -> None:
     assert "claude/quirky-pascal-y84evb" in page and "location.replace" in page and "docs/site.json" in page
     assert (root / ".nojekyll").exists()
     assert json.loads((root / "site.json").read_text(encoding="utf-8")).keys() >= {"url"}
+
+
+@pytest.mark.anyio
+async def test_stale_address_from_previous_launch_is_never_published(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Le journal du lancement précédent est lu avant que le nouveau tunnel existe : son adresse
+    (tunnel fermé) ne doit pas être publiée, même longtemps après."""
+    log = tmp_path / "tunnel.log"
+    log.write_text(LOG, encoding="utf-8")
+    import os
+    old = portal.STARTED_AT.timestamp() - 3600
+    os.utime(log, (old, old))  # écrit une heure avant le démarrage du serveur
+    monkeypatch.setattr(portal, "public_url", lambda s: tunnel.public_url(s, log))
+    now = {"t": 0.0}
+    gh = FakeGitHub(existing_url=None)
+    async with gh.client() as client:
+        await portal.sync_portal_once(settings(), client, probe=silent, clock=lambda: now["t"])
+        now["t"] = 10_000.0
+        await portal.sync_portal_once(settings(), client, probe=silent, clock=lambda: now["t"])
+    assert gh.puts == [] and portal.portal_state.published_url is None
+    assert "lancement précédent" in portal.portal_state.waiting
+
+    # Même vieille adresse, mais le tunnel répond (fenêtre restée ouverte) : publiée
+    async with gh.client() as client:
+        await portal.sync_portal_once(settings(), client, probe=answers, clock=lambda: now["t"])
+    assert len(gh.puts) == 1 and portal.portal_state.waiting is None
+
+
+@pytest.mark.anyio
+async def test_fresh_address_waits_for_the_tunnel_then_falls_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    log = tmp_path / "tunnel.log"
+    log.write_text(LOG, encoding="utf-8")  # écrit maintenant : après le démarrage du serveur
+    monkeypatch.setattr(portal, "public_url", lambda s: tunnel.public_url(s, log))
+    now = {"t": 100.0}
+    gh = FakeGitHub(existing_url=None)
+    async with gh.client() as client:
+        await portal.sync_portal_once(settings(), client, probe=silent, clock=lambda: now["t"])
+        assert gh.puts == [] and "ne répond pas encore" in portal.portal_state.waiting
+        now["t"] += portal.UNVERIFIED_PUBLISH_AFTER_S
+        await portal.sync_portal_once(settings(), client, probe=silent, clock=lambda: now["t"])
+    assert len(gh.puts) == 1  # publiée quand même : ce PC n'arrive peut-être pas à joindre son propre tunnel
+
+
+@pytest.mark.anyio
+async def test_base_url_domain_is_published_without_probe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(portal, "public_url", lambda s: tunnel.public_url(s, tmp_path / "absent.log"))
+    gh = FakeGitHub(existing_url=None)
+    async with gh.client() as client:
+        await portal.sync_portal_once(settings(base_url="https://pekin.exemple.fr"), client, probe=silent)
+    assert len(gh.puts) == 1

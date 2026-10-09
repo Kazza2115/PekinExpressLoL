@@ -17,6 +17,8 @@ import asyncio
 import base64
 import json
 import logging
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -33,6 +35,12 @@ GITHUB_API = "https://api.github.com"
 SITE_FILE = "docs/site.json"
 SYNC_INTERVAL_S = 30
 REQUEST_TIMEOUT = httpx.Timeout(15.0, connect=5.0)
+PROBE_TIMEOUT = httpx.Timeout(10.0, connect=8.0)
+# Adresse d'un journal écrit après le démarrage du serveur, qui ne répond toujours pas à ce PC
+# (DNS lent, réseau qui bloque l'aller-retour) : publiée quand même au bout de ce délai
+UNVERIFIED_PUBLISH_AFTER_S = 180
+# Démarrage du serveur : un journal plus ancien vient d'un lancement précédent
+STARTED_AT = datetime.now(timezone.utc)
 
 
 class PortalError(Exception):
@@ -46,6 +54,7 @@ class PortalState:
     published_url: str | None = None  # adresse du site écrite dans docs/site.json
     published_at: str | None = None
     error: str | None = None
+    waiting: str | None = None  # adresse vue mais pas encore publiée (le tunnel ne répond pas encore)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -132,10 +141,41 @@ async def publish_site_url(
             await http.aclose()
 
 
+async def tunnel_answers(url: str) -> bool:
+    """Le site répond-il par cette adresse ? (`/health` en passant par le tunnel)"""
+    try:
+        async with httpx.AsyncClient(timeout=PROBE_TIMEOUT, follow_redirects=True) as http:
+            response = await http.get(f"{url.rstrip('/')}/health")
+        return response.status_code == 200
+    except httpx.HTTPError:
+        return False
+
+
+_first_seen: dict[str, float] = {}  # adresse de tunnel → première fois vue (horloge monotone)
+
+
+def _fresh(detected_at: str | None) -> bool:
+    """Journal du tunnel écrit depuis le démarrage du serveur (donc pas un reste du lancement précédent)."""
+    if not detected_at:
+        return False
+    try:
+        return datetime.fromisoformat(detected_at) >= STARTED_AT
+    except ValueError:
+        return False
+
+
 async def sync_portal_once(
-    settings: Settings | None = None, client: httpx.AsyncClient | None = None
+    settings: Settings | None = None,
+    client: httpx.AsyncClient | None = None,
+    probe: Callable[[str], Awaitable[bool]] | None = None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> None:
-    """Publie l'adresse publique actuelle si elle a changé depuis la dernière publication réussie."""
+    """Publie l'adresse publique actuelle si elle a changé depuis la dernière publication réussie.
+
+    Une adresse de tunnel n'est publiée que si le site répond par elle (`probe`) : une adresse
+    restée dans le journal d'un lancement précédent (tunnel fermé) n'est jamais publiée. Si une
+    adresse toute neuve ne répond pas à ce PC au bout de 3 min, elle est publiée quand même.
+    """
     settings = settings or get_settings()
     portal_state.enabled = bool(settings.github_token)
     portal_state.portal_url = portal_page_url(settings.github_repo)
@@ -145,7 +185,21 @@ async def sync_portal_once(
     if current.source == "local":
         return  # pas encore de tunnel : rien à publier
     if current.url == portal_state.published_url and portal_state.error is None:
+        portal_state.waiting = None
         return
+    if current.source == "tunnel":
+        seen = _first_seen.setdefault(current.url, clock())
+        answers = await (probe or tunnel_answers)(current.url)
+        waited = clock() - seen
+        if not answers and not (_fresh(current.detected_at) and waited >= UNVERIFIED_PUBLISH_AFTER_S):
+            portal_state.waiting = (
+                f"Le tunnel {current.url} ne répond pas encore : publication dès qu'il répond."
+                if _fresh(current.detected_at)
+                else f"Ancienne adresse {current.url} (lancement précédent) : elle ne répond plus, "
+                "en attente du nouveau tunnel."
+            )
+            return
+    portal_state.waiting = None
     try:
         changed = await publish_site_url(current.url, settings=settings, client=client)
     except PortalError as exc:

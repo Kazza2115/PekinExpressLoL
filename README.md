@@ -371,8 +371,11 @@ page voulue.
    l'ouverture du tunnel, **Admin → Système** affiche « Lien fixe à partager » avec l'adresse
    vers laquelle il renvoie. Les messages Discord utilisent aussi ce lien fixe.
 
-Si le PC est éteint, la page affiche le dernier lien publié, qui ne répond plus : relance
-simplement le site.
+Le site ne publie une adresse qu'une fois qu'elle répond vraiment (jamais celle d'un lancement
+précédent). Si le PC est éteint, la page renvoie vers le dernier lien publié, qui ne répond
+plus : relance simplement le site. Lance `PekinExpress.bat` **une seule fois** : il ferme
+lui-même un ancien tunnel resté ouvert, et un second lancement se contente d'ouvrir le
+navigateur (pas de second tunnel).
 
 #### Autres liens fixes
 

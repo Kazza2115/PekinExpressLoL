@@ -70,7 +70,20 @@ goto wait_loop
 
 :run
 if not exist "data" mkdir "data"
+rem Un seul tunnel a la fois : un ancien tunnel encore ouvert est ferme (sinon deux
+rem adresses se melangent dans data\tunnel.log et le lien publie peut etre l'ancien)
+tasklist /FI "IMAGENAME eq cloudflared.exe" 2>nul | find /I "cloudflared.exe" >nul
+if not errorlevel 1 (
+    echo  Fermeture de l'ancien tunnel Cloudflare encore ouvert ...
+    taskkill /IM cloudflared.exe /F >nul 2>nul
+    timeout /t 2 /nobreak >nul
+)
 del /q "data\tunnel.log" 2>nul
+if exist "data\tunnel.log" (
+    echo  ATTENTION : data\tunnel.log est encore utilise par un autre programme.
+    echo  Ferme les autres fenetres de tunnel, puis relance ce fichier.
+    goto fail
+)
 if /i "%TUNNEL%"=="tailscale" goto run_tailscale
 if /i "%TUNNEL%"=="cloudflare" goto run_cloudflare
 
