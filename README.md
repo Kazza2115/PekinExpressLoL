@@ -39,6 +39,16 @@ Passer de Gold IV 80 LP à Gold III 10 LP fait donc **+30 LP nets**, promotion c
 Un joueur non classé (« Unranked ») compte pour 0. Les LP nets d'un duo = somme de ses deux
 joueurs. En cas d'égalité, le winrate puis le nombre de parties départagent.
 
+### Programmer le début et la fin
+
+Dans **Admin → Challenge**, renseigne **Début** et **Fin** (heure de Paris), puis clique sur
+**🚀 Démarrer** quand tous les joueurs sont inscrits et en duo, même la veille : seules les
+parties **terminées** entre le début et la fin comptent. Les pages affichent « ⏳ Démarre … »
+jusqu'à l'heure de début. À l'heure de fin, les stats sont figées, et 15 minutes plus tard le
+challenge passe tout seul à « Terminé » (inutile de cliquer « Terminer » ; si tu le fais après
+la fin, la fin programmée est gardée). Laisse le site tourner **avant le début** (les LP de
+référence sont relevés à cette heure-là) et **jusqu'à 15 min après la fin**.
+
 ### Ce qui compte, ce qui ne compte pas
 
 - Seules les parties **Ranked Solo/Duo** comptent (la **Flex** peut être ajoutée en option).

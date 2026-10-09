@@ -130,7 +130,15 @@
     }
   };
 
-  App.statusChip = function (status) {
+  /* `startAt` : challenge démarré mais début programmé pas encore atteint → « ⏳ Démarre sam. 10 oct. 09:00 ». */
+  App.statusChip = function (status, startAt) {
+    if (status === 'running' && startAt) {
+      const t = Date.parse(startAt);
+      if (!isNaN(t) && t > Date.now()) {
+        const label = new Date(t).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        return `<span class="chip chip-gold chip-lg" title="Les parties comptent à partir de cette heure">⏳ Démarre ${esc(label)}</span>`;
+      }
+    }
     const cls = { registration: 'chip-blue', drawn: 'chip-gold', running: 'chip-green', finished: 'chip' }[status] || 'chip';
     const dot = status === 'running' ? '<span class="dot" style="width:7px;height:7px;border-radius:50%;background:currentColor"></span>' : '';
     return `<span class="chip ${cls} chip-lg">${dot}${esc(App.statusLabel(status))}</span>`;
@@ -768,7 +776,14 @@
     App.toast('🤝 Les duos sont formés !', { type: 'info' });
     App.notify('🤝 Les duos sont formés !', 'Découvre ton partenaire sur la page Duos.');
   });
-  App.onEvent('challenge_started', () => {
+  App.onEvent('challenge_started', (d) => {
+    const start = d && d.challenge && d.challenge.start_at ? Date.parse(d.challenge.start_at) : NaN;
+    if (!isNaN(start) && start > Date.now()) {
+      const when = new Date(start).toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+      App.toast(`🚀 Tout est prêt : le challenge commence le ${when}.`, { type: 'success', timeout: 9000 });
+      App.notify('🚀 Tout est prêt !', `Le challenge commence le ${when}.`);
+      return;
+    }
     App.toast('🚀 Le challenge a commencé, bonne chance !', { type: 'success' });
     App.notify('🚀 Le challenge a commencé !', 'Que le meilleur duo gagne.');
   });

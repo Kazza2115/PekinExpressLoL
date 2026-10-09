@@ -22,7 +22,7 @@ from app.api.deps import get_challenge, require_admin
 from app.api.serializers import challenge_to_dict, player_public, team_public
 from app.config import get_settings, reload_settings
 from app.db.models import Challenge, ChallengeStatus, Match, MatchParticipant, Player, Queue, RankSnapshot, Team, utcnow
-from app.db.session import get_session
+from app.db.session import as_utc, get_session
 from app.events import bus
 from app.riot import get_api, reset_api
 from app.services import notifications
@@ -299,10 +299,23 @@ async def start_challenge(
             "(relance PekinExpress.bat). En attendant, les journées sont comptées en UTC."
         )
 
-    start_at = parse_datetime(body.start_at if body is not None else None, "start_at") or utcnow()
+    # Dates programmées dans l'Admin (Début / Fin) avant le démarrage : on les garde. « Démarrer » la
+    # veille avec un début à samedi 9h ne compte que les parties terminées à partir de samedi 9h.
+    # Après un challenge terminé, les anciennes dates appartiennent au challenge précédent.
+    planned = challenge.status in (ChallengeStatus.REGISTRATION, ChallengeStatus.DRAWN)
+    planned_start = as_utc(challenge.start_at) if planned else None
+    planned_end = as_utc(challenge.end_at) if planned else None
+    start_at = (
+        as_utc(parse_datetime(body.start_at if body is not None else None, "start_at"))
+        or planned_start
+        or utcnow()
+    )
+    end_at = planned_end if planned_end is not None and planned_end > start_at else None
+    if planned_end is not None and end_at is None:
+        warnings.append("La date de fin enregistrée est avant le début : ignorée (fin au clic sur « Terminer »).")
     challenge.status = ChallengeStatus.RUNNING
     challenge.start_at = start_at
-    challenge.end_at = None
+    challenge.end_at = end_at
     session.add(challenge)
     session.commit()
     session.refresh(challenge)
@@ -356,7 +369,11 @@ async def finish_challenge(
     session.expire_all()
     challenge = get_challenge(session)
     challenge.status = ChallengeStatus.FINISHED
-    challenge.end_at = utcnow()
+    # Une fin programmée déjà passée reste la fin (cliquer « Terminer » lundi à 10h ne fait pas
+    # compter les parties de lundi matin) ; sinon, la fin est maintenant.
+    now = utcnow()
+    planned_end = as_utc(challenge.end_at)
+    challenge.end_at = planned_end if planned_end is not None and planned_end < now else now
     session.add(challenge)
     session.commit()
     session.refresh(challenge)

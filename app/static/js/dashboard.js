@@ -86,7 +86,7 @@
   function renderHeader() {
     const c = leaderboard.challenge || {};
     els.name.textContent = c.name || 'Pékin Express LoL';
-    els.status.innerHTML = App.statusChip(c.status);
+    els.status.innerHTML = App.statusChip(c.status, c.start_at);
     if (c.status === 'running' && c.start_at) {
       const day = Math.floor((Date.now() - Date.parse(c.start_at)) / 86400000) + 1;
       els.day.textContent = day >= 1 ? `Jour ${day} · objectif ${gamesPerDay} games par joueur` : `Objectif ${gamesPerDay} games par jour`;

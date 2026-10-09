@@ -43,8 +43,8 @@
         <div class="field"><label for="ch-gpd">Games par jour et par joueur</label><input id="ch-gpd" name="games_per_day" type="number" min="1" max="50"></div>
       </div>
       <div class="form-row">
-        <div class="field"><label for="ch-start">Début</label><input id="ch-start" name="start_at" type="datetime-local"><div class="help">Les parties avant cette date ne comptent pas.</div></div>
-        <div class="field"><label for="ch-end">Fin</label><input id="ch-end" name="end_at" type="datetime-local"><div class="help">Vide = jusqu'au clic sur « Terminer ».</div></div>
+        <div class="field"><label for="ch-start">Début</label><input id="ch-start" name="start_at" type="datetime-local"><div class="help">Seules les parties terminées après comptent. Tu peux cliquer « Démarrer » à l'avance : le suivi commencera à cette heure.</div></div>
+        <div class="field"><label for="ch-end">Fin</label><input id="ch-end" name="end_at" type="datetime-local"><div class="help">Fin automatique à cette heure (les parties terminées après ne comptent pas). Vide = jusqu'au clic sur « Terminer ».</div></div>
       </div>
       <label class="check"><input type="checkbox" name="track_flex" id="ch-flex"> Suivre aussi la file Flex</label>
       <div class="btn-row">

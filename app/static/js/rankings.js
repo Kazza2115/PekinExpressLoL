@@ -163,7 +163,7 @@
 
   function render() {
     const s = data.summary;
-    els.status.innerHTML = App.statusChip(data.challenge.status);
+    els.status.innerHTML = App.statusChip(data.challenge.status, data.challenge.start_at);
     const ranked = num(s.ranked_players) || 0;
     const unranked = num(s.unranked_players) || 0;
     els.count.textContent = data.players.length

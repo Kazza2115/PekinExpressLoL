@@ -41,7 +41,7 @@
     const c = state.challenge || {};
     const players = state.players || [];
     els.name.textContent = c.name || 'Pékin Express LoL';
-    els.status.innerHTML = App.statusChip(c.status);
+    els.status.innerHTML = App.statusChip(c.status, c.start_at);
     const active = players.filter((p) => p.active !== false);
     els.count.innerHTML = `<strong>${active.length}</strong> / ${Math.max(MAX_PLAYERS, active.length)} joueurs`;
 

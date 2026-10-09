@@ -61,6 +61,8 @@ log = logging.getLogger(__name__)
 
 # Files classées (420 solo, 440 flex) : les seules « ranked » pour le challenge
 RANKED_QUEUE_IDS = frozenset(QUEUE_IDS.values())
+# Fin automatique : 15 min après la fin programmée (les derniers LP arrivent 1 à 3 min après la partie)
+AUTO_FINISH_DELAY = timedelta(minutes=15)
 # Tiers sans division : `rank` stocké à None (cf. models.RankSnapshot)
 APEX_TIERS = frozenset({"MASTER", "GRANDMASTER", "CHALLENGER"})
 # Une partie terminée depuis plus longtemps n'est plus annoncée sur Discord
@@ -505,6 +507,10 @@ class Poller:
             self.state.poll_count += 1
             self.state.polling = False
         self.bus.publish("poll_done", report.to_dict())
+        try:
+            self._auto_finish()
+        except Exception:  # noqa: BLE001 — jamais bloquant
+            log.exception("Fin automatique du challenge en échec")
         if report.errors:
             log.info("Cycle terminé avec %d erreur(s) en %.2fs", len(report.errors), report.duration_s)
         else:
@@ -516,6 +522,30 @@ class Poller:
                 report.duration_s,
             )
         return report
+
+    def _auto_finish(self) -> bool:
+        """Fin programmée passée depuis `AUTO_FINISH_DELAY` : le challenge passe à « terminé ».
+
+        La fin reste celle programmée (les stats sont déjà figées à cette date) ; le délai laisse
+        le temps aux derniers résultats Riot d'arriver (période de grâce de 10 min des stats).
+        """
+        with session_scope() as session:
+            challenge = session.exec(select(Challenge).order_by(col(Challenge.id))).first()
+            if challenge is None or challenge.status != ChallengeStatus.RUNNING:
+                return False
+            end = as_utc(challenge.end_at)
+            if end is None or _utcnow() < end + AUTO_FINISH_DELAY:
+                return False
+            challenge.status = ChallengeStatus.FINISHED
+            session.add(challenge)
+            session.commit()
+            session.refresh(challenge)
+            from app.api.serializers import challenge_to_dict  # import local : pas de cycle services → api
+
+            payload = challenge_to_dict(challenge)
+        log.info("Fin programmée atteinte : challenge terminé automatiquement")
+        self.bus.publish("challenge_finished", {"challenge": payload, "automatic": True})
+        return True
 
     async def poll_player(
         self,

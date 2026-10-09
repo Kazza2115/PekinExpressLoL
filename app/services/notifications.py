@@ -132,15 +132,20 @@ def format_match_recorded(
 def format_challenge_started(challenge: Challenge, *, settings: Settings | None = None) -> str:
     """Annonce du lancement du challenge (objectif quotidien + lien vers le classement)."""
     settings = settings if settings is not None else get_settings()
+    from datetime import datetime, timezone  # import local : seul usage du module
+
+    start_at = as_utc(getattr(challenge, "start_at", None))
+    end_at = as_utc(getattr(challenge, "end_at", None))
+    upcoming = start_at is not None and start_at > datetime.now(timezone.utc)
     lines = [
-        f"🚀 **{challenge.name}** : le challenge commence !",
-        f"Objectif : **{challenge.games_per_day} parties par jour** et par joueur — le duo qui"
-        " gagne le plus de LP l'emporte.",
+        f"🚀 **{challenge.name}** : " + ("tout est prêt !" if upcoming else "le challenge commence !"),
+        f"Objectif : **{challenge.games_per_day} parties par jour** et par joueur (au-delà, elles ne"
+        " comptent pas) — le duo qui gagne le plus de LP l'emporte.",
     ]
-    start_at = getattr(challenge, "start_at", None)
     if start_at is not None:
-        local = as_utc(start_at).astimezone(settings.tz)
-        lines.append(f"Début : {local.strftime('%d/%m/%Y %H:%M')}")
+        lines.append(f"Début : {start_at.astimezone(settings.tz).strftime('%d/%m/%Y %H:%M')}")
+    if end_at is not None:
+        lines.append(f"Fin : {end_at.astimezone(settings.tz).strftime('%d/%m/%Y %H:%M')}")
     lines.append(f"Classement : {share_url(settings)}/dashboard")
     return "\n".join(lines)
 

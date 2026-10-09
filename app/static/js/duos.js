@@ -120,7 +120,7 @@
   function renderHeader() {
     const c = data.challenge || {};
     els.name.textContent = c.name || 'Pékin Express LoL';
-    els.status.innerHTML = App.statusChip(c.status);
+    els.status.innerHTML = App.statusChip(c.status, c.start_at);
     const teams = data.teams || [];
     const nPlayers = teams.reduce((n, t) => n + (t.players || []).length, 0);
     els.count.textContent = teams.length

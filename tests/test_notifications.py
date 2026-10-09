@@ -175,13 +175,26 @@ def test_format_lp_delta():
 
 
 def test_format_challenge_started():
-    start_at = datetime(2026, 10, 10, 18, 0, tzinfo=timezone.utc)
+    # Début déjà passé : « le challenge commence »
+    start_at = datetime(2025, 10, 10, 18, 0, tzinfo=timezone.utc)
     challenge = Challenge(name="Pékin Express LoL", games_per_day=10, start_at=start_at)
     text = notifications.format_challenge_started(challenge, settings=make_settings(""))
     assert text.startswith("🚀 **Pékin Express LoL** : le challenge commence !")
     assert "**10 parties par jour**" in text
-    assert "Début : 10/10/2026 20:00" in text  # Europe/Paris = UTC+2 en octobre
+    assert "Début : 10/10/2025 20:00" in text  # Europe/Paris = UTC+2 en octobre
+    assert "Fin :" not in text
     assert "http://localhost:8000/dashboard" in text
+
+    # Début programmé (« Démarrer » cliqué la veille) : « tout est prêt », avec la fin
+    planned = Challenge(
+        name="Pékin Express LoL",
+        games_per_day=10,
+        start_at=datetime(2099, 10, 10, 7, 0, tzinfo=timezone.utc),
+        end_at=datetime(2099, 10, 11, 22, 0, tzinfo=timezone.utc),
+    )
+    text = notifications.format_challenge_started(planned, settings=make_settings(""))
+    assert text.startswith("🚀 **Pékin Express LoL** : tout est prêt !")
+    assert "Début : 10/10/2099 09:00" in text and "Fin : 12/10/2099 00:00" in text
 
 
 def test_format_draw_done():

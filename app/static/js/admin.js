@@ -153,7 +153,7 @@
   /* ------------------------------------------------------------------ */
   function renderChallenge() {
     const c = state.challenge || {};
-    els.status.innerHTML = App.statusChip(c.status);
+    els.status.innerHTML = App.statusChip(c.status, c.start_at);
     const f = els.chForm;
     if (document.activeElement && f.contains(document.activeElement)) return; // ne pas écraser une saisie en cours
     f.name.value = c.name || '';
@@ -189,14 +189,36 @@
     }
   });
 
+  const longDate = (iso) => new Date(iso).toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+  const sameInstant = (a, b) => (a ? Date.parse(a) : null) === (b ? Date.parse(b) : null);
+
   els.btnStart.addEventListener('click', async () => {
-    const res = await App.confirm({ title: 'Démarrer le challenge ?', message: 'Le suivi des parties commence maintenant. Les joueurs seront prévenus.', confirmText: '🚀 Démarrer' });
+    // Les dates saisies (Début / Fin) sont celles du challenge : enregistrées avant de démarrer
+    const f = els.chForm;
+    const c = state.challenge || {};
+    const startAt = fromLocalInput(f.start_at.value);
+    const endAt = fromLocalInput(f.end_at.value);
+    const dirty = !sameInstant(startAt, c.start_at) || !sameInstant(endAt, c.end_at);
+    const startTxt = !startAt
+      ? 'Le suivi des parties commence maintenant'
+      : (Date.parse(startAt) > Date.now() ? `Les parties compteront à partir du ${longDate(startAt)}` : `Les parties comptent depuis le ${longDate(startAt)}`);
+    const endTxt = endAt ? ` jusqu'au ${longDate(endAt)} (fin automatique)` : ' jusqu\'au clic sur « Terminer »';
+    const res = await App.confirm({
+      title: 'Démarrer le challenge ?',
+      message: `${startTxt}${endTxt}. Les inscriptions et la composition des duos seront figées. Les joueurs seront prévenus.`,
+      confirmText: '🚀 Démarrer',
+    });
     if (!res.ok) return;
     App.setLoading(els.btnStart, true);
     try {
+      if (dirty) {
+        const saved = await admin(() => api('/api/admin/challenge', { method: 'PATCH', admin: true, body: { start_at: startAt, end_at: endAt } }));
+        if (saved === undefined) return;
+      }
       const r = await admin(() => api('/api/admin/challenge/start', { method: 'POST', admin: true, body: {} }));
       if (r !== undefined) {
-        toast('Challenge démarré !', { type: 'success' });
+        const started = r.challenge && r.challenge.start_at;
+        toast(started && Date.parse(started) > Date.now() ? `Challenge prêt : les parties compteront à partir du ${longDate(started)}.` : 'Challenge démarré !', { type: 'success', timeout: 9000 });
         (r.warnings || []).forEach((w) => toast(`⚠️ ${w}`, { type: 'warning', timeout: 9000 }));
       }
     } catch (err) {
