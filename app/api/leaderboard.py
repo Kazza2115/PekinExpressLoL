@@ -89,13 +89,16 @@ def together_record(
     window_end: datetime | None,
     *,
     queue: Queue | None = Queue.SOLO,
+    exclude_match_ids: set[str] | None = None,
 ) -> tuple[int, int, int]:
     """(parties, victoires, défaites) jouées *ensemble* par deux joueurs.
 
     Une partie compte si les deux y étaient, du même côté (`team_side` égal et connu),
     hors remake, et si elle se termine dans la fenêtre (`game_end_of`). Comme les stats
     joueur, seule la file `queue` est prise en compte (None → toutes les files).
+    `exclude_match_ids` : parties hors quota quotidien de l'un ou l'autre (non comptées).
     """
+    excluded = exclude_match_ids or set()
     start_utc = as_utc(window_start)
     end_utc = as_utc(window_end)
 
@@ -108,7 +111,7 @@ def together_record(
     games = wins = losses = 0
     seen: set[str] = set()
     for part_b in participants_b:
-        if not eligible(part_b) or part_b.match_id in seen:
+        if not eligible(part_b) or part_b.match_id in seen or part_b.match_id in excluded:
             continue
         part_a = sides_a.get(part_b.match_id)
         if part_a is None or part_a.team_side != part_b.team_side:
@@ -177,13 +180,20 @@ def compute_single_player_stats(
     )
     if partner is not None and partner.id is not None:
         window_start, window_end = team_window(challenge, team)
+        partner_stats = _player_stats(
+            partner, challenge, team, snapshots_by.get(partner.id, []), participants_by.get(partner.id, []), now
+        )
         stats.partner = partner_record(
             stats,
             partner_id=partner.id,
             display_name=partner.display_name,
             icon_url=ddragon.profile_icon_url(ddragon.CURRENT_VERSION, partner.profile_icon_id),
             together=together_record(
-                participants_by.get(player.id, []), participants_by.get(partner.id, []), window_start, window_end
+                participants_by.get(player.id, []),
+                participants_by.get(partner.id, []),
+                window_start,
+                window_end,
+                exclude_match_ids=set(stats.over_quota_match_ids) | set(partner_stats.over_quota_match_ids),
             ),
         )
     return stats
@@ -222,6 +232,7 @@ def build_leaderboard(
                 participants_by.get(members[1].player_id, []),
                 window_start,
                 window_end,
+                exclude_match_ids=set(members[0].over_quota_match_ids) | set(members[1].over_quota_match_ids),
             )
             for me, mate in ((members[0], members[1]), (members[1], members[0])):
                 me.partner = partner_record(

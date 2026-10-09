@@ -217,6 +217,7 @@ def test_admin_live_check(client: TestClient, admin_headers: dict) -> None:
     for player in body["players"]:
         assert set(player) >= {"player_id", "display_name", "riot_id", "in_game", "champion_name", "ranked", "error"}
     assert body["live_poll_seconds"] >= 10 and body["poll_interval_seconds"] >= 3
+    assert body["key_hint"] is None  # pas de clé en test ; jamais la clé entière
     # Le client démo des tests lance une partie à chaque passage : la notification part
     if any(p["in_game"] for p in body["players"]):
         assert events_of("live_start")
@@ -233,3 +234,12 @@ def test_service_worker_is_served_at_root(client: TestClient) -> None:
     assert response.headers["cache-control"] == "no-cache"
     assert "notificationclick" in response.text
     assert "fetch" not in response.text.replace("aucune interception réseau", "")  # jamais de cache
+
+
+def test_key_hint_shows_only_the_last_characters(client: TestClient, admin_headers: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RIOT_API_KEY", "RGAPI-12345678-abcd-ef01-2345-6789abcd1a2b")
+    monkeypatch.setenv("DEMO_MODE", "1")
+    reload_settings()
+    body = client.post("/api/admin/live-check", headers=admin_headers, json={}).json()
+    assert body["key_hint"] == "…1a2b"
+    assert "RGAPI-1234" not in client.get("/api/state").text

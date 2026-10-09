@@ -305,7 +305,7 @@
     const today = p.games_today || 0;
     const lim = p.games_limit || gamesPerDay;
     const pct = Math.min(100, Math.round((today / Math.max(1, lim)) * 100));
-    return `${p.games || 0}<span class="f-sub">aujourd'hui ${today}/${lim}</span><div class="progress ${today >= lim ? 'done' : ''}"><span style="width:${pct}%"></span></div>`;
+    return `${p.games || 0}<span class="f-sub">aujourd'hui ${today}/${lim}${p.games_today_over_quota ? ` · <span class="lp-neg" title="Parties au-delà du quota : elles ne comptent pas">+${p.games_today_over_quota} hors quota</span>` : ''}</span><div class="progress ${today >= lim ? 'done' : ''}"><span style="width:${pct}%"></span></div>`;
   }
 
   const ROWS = [

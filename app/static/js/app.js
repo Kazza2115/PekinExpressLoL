@@ -758,8 +758,9 @@
     const win = d.win === true || d.win === 'true';
     const champ = champOf(d);
     const lpTxt = lp === null || lp === undefined ? '' : ` ${App.formatLp(lp)}`;
-    const msg = win ? `✅ ${who(d)} gagne${lpTxt}` : `❌ ${who(d)} perd${lpTxt}`;
-    App.toast(`${msg}${champ ? ` (${champ})` : ''}`, { type: win ? 'success' : 'error', timeout: 6000 });
+    const quota = d.over_quota ? ` · hors quota${d.day_game_number ? ` (${d.day_game_number}e partie du jour)` : ''}, ne compte pas` : '';
+    const msg = win ? `✅ ${who(d)} gagne${lpTxt}${quota}` : `❌ ${who(d)} perd${lpTxt}${quota}`;
+    App.toast(`${msg}${champ ? ` (${champ})` : ''}`, { type: d.over_quota ? 'warning' : (win ? 'success' : 'error'), timeout: d.over_quota ? 10000 : 6000 });
     App.notify(msg, champ ? `Partie enregistrée — ${champ}` : 'Partie enregistrée', `match-${d.match_id || Date.now()}`);
   });
   App.onEvent('draw_done', () => {

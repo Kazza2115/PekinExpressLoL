@@ -104,8 +104,14 @@ def format_match_recorded(
     team: Team | None,
     participant: MatchParticipant,
     lp_change: int | None,
+    *,
+    over_quota: bool = False,
+    day_number: int | None = None,
 ) -> str:
-    """« ✅ **Mike** (Duo Rouge) gagne avec **Ahri** · 7/2/9 · +21 LP »."""
+    """« ✅ **Mike** (Duo Rouge) gagne avec **Ahri** · 7/2/9 · +21 LP ».
+
+    Partie au-delà du quota quotidien : « · ⛔ hors quota (11e partie du jour, ne compte pas) ».
+    """
     icon, verb = ("✅", "gagne") if participant.win else ("❌", "perd")
     parts = [
         f"{icon} **{player.display_name}**{_team_suffix(team)} {verb} avec"
@@ -117,6 +123,9 @@ def format_match_recorded(
     queue = getattr(participant.queue, "value", participant.queue)
     if queue == "FLEX":
         parts.append("Flex")
+    if over_quota:
+        rank = f"{day_number}e partie du jour, " if day_number else ""
+        parts.append(f"⛔ hors quota ({rank}ne compte pas)")
     return " · ".join(parts)
 
 

@@ -208,9 +208,9 @@ def test_profile_splits():
     assert set(s.by_hour[0]) == {"label", "games", "wins", "losses", "winrate"}
     assert s.by_day == [
         {"day": "2026-10-10", "label": "sam. 10 oct.", "games": 3, "wins": 2, "losses": 1, "winrate": 66.7,
-         "lp_change": 5, "limit": 10},
+         "lp_change": 5, "limit": 10, "over_quota": 0},
         {"day": "2026-10-11", "label": "dim. 11 oct.", "games": 1, "wins": 1, "losses": 0, "winrate": 100.0,
-         "lp_change": 18, "limit": 10},
+         "lp_change": 18, "limit": 10, "over_quota": 0},
     ]
 
 

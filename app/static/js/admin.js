@@ -555,7 +555,7 @@
     const every = r && r.live_poll_seconds && r.poll_interval_seconds && r.live_poll_seconds < r.poll_interval_seconds
       ? `vérification automatique toutes les ${r.live_poll_seconds} s`
       : `vérification automatique toutes les ${(r && r.poll_interval_seconds) || 90} s`;
-    els.liveCheck.innerHTML = `<div class="muted" style="font-size:.85em">Vérifié à ${esc(when)} · ${esc(every)}${r && r.demo_mode ? ' · mode démo (parties simulées)' : ''}</div><ul style="list-style:none;margin:6px 0 0;padding:0">${rows}</ul>${empty}`;
+    els.liveCheck.innerHTML = `<div class="muted" style="font-size:.85em">Vérifié à ${esc(when)} · ${esc(every)}${r && r.demo_mode ? ' · mode démo (parties simulées)' : ''}${r && r.key_hint ? ` · clé Riot se terminant par <code>${esc(r.key_hint)}</code>` : ''}</div><ul style="list-style:none;margin:6px 0 0;padding:0">${rows}</ul>${empty}`;
     els.liveCheck.hidden = false;
   }
 

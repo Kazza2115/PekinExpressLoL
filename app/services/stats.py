@@ -375,6 +375,14 @@ class PlayerStats:
     rank_delta_lp: int | None = None  # rang actuel − référence (None si l'un est inconnu)
     # Coéquipier du duo (rempli par `app.api.leaderboard`) : voir `partner_record`
     partner: dict | None = None
+    # Quota quotidien : au-delà de `games_limit` parties terminées dans la journée, une partie
+    # ne compte plus (ni LP, ni stats). `lp_net` est déjà diminué de `lp_over_quota`.
+    games_over_quota: int = 0
+    games_today_over_quota: int = 0
+    lp_over_quota: int = 0  # LP gagnés (+) ou perdus (−) dans les parties hors quota, non comptés
+    lp_net_all_games: int = 0  # LP nets si toutes les parties comptaient (information)
+    lp_over_quota_approx: bool = False  # partage au prorata quand un relevé couvre 2 parties
+    over_quota_match_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Types JSON uniquement (les dates sont déjà des chaînes ISO‑8601)."""
@@ -804,6 +812,60 @@ def partner_record(
     }
 
 
+def split_daily_quota(
+    games: list[MatchParticipant], tz: tzinfo, limit: int
+) -> tuple[list[MatchParticipant], list[MatchParticipant]]:
+    """Sépare les parties comptées des parties « hors quota ».
+
+    `games` : parties de la fenêtre (une file, hors remakes). Par journée (fuseau `tz`, date de
+    fin de partie, comme le compteur « aujourd'hui x/10 »), seules les `limit` premières parties
+    terminées comptent ; les suivantes ne comptent pas. `limit` ≤ 0 : pas de quota.
+    """
+    counted: list[MatchParticipant] = []
+    over: list[MatchParticipant] = []
+    per_day: dict[str, int] = {}
+    for game in sorted(games, key=game_end_of):
+        key = day_key(game_end_of(game), tz)
+        per_day[key] = per_day.get(key, 0) + 1
+        (counted if limit <= 0 or per_day[key] <= limit else over).append(game)
+    return counted, over
+
+
+def over_quota_lp(
+    snapshots: list[RankSnapshot], games: list[MatchParticipant], over: list[MatchParticipant]
+) -> tuple[int, bool]:
+    """LP gagnés ou perdus pendant les parties hors quota, à retirer des LP nets.
+
+    `snapshots` : relevés de rang de la file, chronologiques, du relevé de référence au relevé de
+    fin inclus (ceux qui font les LP nets). Un relevé n'est pris que quand le rang change : l'écart
+    entre deux relevés consécutifs revient aux parties terminées entre les deux. Si cet écart mêle
+    une partie comptée et une partie hors quota (serveur arrêté entre les deux), il est partagé au
+    prorata du nombre de parties : renvoyé avec `approx=True`.
+    """
+    if not over or len(snapshots) < 2:
+        return 0, False
+    over_keys = {id(game) for game in over}
+    total = 0
+    approx = False
+    for previous, current in zip(snapshots, snapshots[1:]):
+        before = _snapshot_absolute_lp(previous)
+        after = _snapshot_absolute_lp(current)
+        if before is None or after is None:
+            continue
+        low, high = as_utc(previous.captured_at), as_utc(current.captured_at)
+        inside = [game for game in games if low < game_end_of(game) <= high]  # type: ignore[operator]
+        excluded = [game for game in inside if id(game) in over_keys]
+        if not excluded:
+            continue
+        delta = after - before
+        if len(excluded) == len(inside):
+            total += delta
+        else:
+            total += round(delta * len(excluded) / len(inside))
+            approx = True
+    return total, approx
+
+
 def compute_player_stats(
     *,
     player: Player,
@@ -881,6 +943,26 @@ def compute_player_stats(
         if end_utc is not None and game_end > end_utc:
             continue
         games_in_window.append(p)
+
+    # Quota quotidien : seules les `games_limit` premières parties terminées de chaque journée
+    # comptent. Les LP des autres sont retirés des LP nets (attribués relevé par relevé).
+    all_games_in_window = games_in_window
+    games_in_window, games_over = split_daily_quota(all_games_in_window, tz, int(games_limit))
+    lp_net_all_games = lp_net
+    lp_over = 0
+    lp_over_approx = False
+    if games_over and baseline is not None and end_snapshot is not None and end_abs is not None and baseline_abs is not None:
+        start_index = next(i for i, snap in enumerate(queue_snapshots) if snap is baseline)
+        end_index = next(i for i, snap in enumerate(queue_snapshots) if snap is end_snapshot)
+        if end_index > start_index:
+            lp_over, lp_over_approx = over_quota_lp(
+                queue_snapshots[start_index : end_index + 1], all_games_in_window, games_over
+            )
+    lp_net = lp_net_all_games - lp_over
+    over_per_day: dict[str, int] = {}
+    for p in games_over:
+        key = day_key(game_end_of(p), tz)
+        over_per_day[key] = over_per_day.get(key, 0) + 1
 
     games = len(games_in_window)
     wins = sum(1 for p in games_in_window if p.win)
@@ -963,6 +1045,8 @@ def compute_player_stats(
     if baseline is not None and not any(s is baseline for s in window_snapshots):
         window_snapshots.insert(0, baseline)
     profile = game_profile(games_in_window, tz=tz, games_limit=games_limit, version=version)
+    for entry in profile.get("by_day") or []:
+        entry["over_quota"] = over_per_day.get(entry["day"], 0)
 
     return PlayerStats(
         player_id=int(player.id or 0),
@@ -1015,6 +1099,12 @@ def compute_player_stats(
         rank_delta_lp=current_abs - baseline_abs if (current_abs is not None and baseline_abs is not None) else None,
         **rank_progress(window_snapshots),
         **profile,
+        games_over_quota=len(games_over),
+        games_today_over_quota=over_per_day.get(day_key(now_utc, tz), 0),
+        lp_over_quota=lp_over,
+        lp_net_all_games=lp_net_all_games,
+        lp_over_quota_approx=lp_over_approx,
+        over_quota_match_ids=[p.match_id for p in games_over],
     )
 
 
@@ -1136,6 +1226,9 @@ class TeamStats:
     season_wins: int | None = None
     season_losses: int | None = None
     season_winrate: float | None = None
+    # Parties au-delà du quota quotidien (non comptées) et leurs LP
+    games_over_quota: int = 0
+    lp_over_quota: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -1256,6 +1349,8 @@ def compute_team_stats(
         season_winrate=winrate(season_wins, season_losses)
         if season_wins is not None and season_losses is not None
         else None,
+        games_over_quota=sum(p.games_over_quota for p in players),
+        lp_over_quota=sum(p.lp_over_quota for p in players),
     )
 
 

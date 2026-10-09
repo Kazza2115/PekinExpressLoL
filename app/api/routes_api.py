@@ -366,6 +366,7 @@ def get_player(
         stats = compute_single_player_stats(session, challenge, player, team, now=now)
         players = [*players, stats]
     team_stats = next((t for t in teams if team is not None and t.team_id == team.id), None)
+    over_quota_ids = set(stats.over_quota_match_ids)
     participants = session.exec(
         select(MatchParticipant)
         .where(col(MatchParticipant.player_id) == player_id)
@@ -383,7 +384,10 @@ def get_player(
         "stats": stats.to_dict(),
         "rankings": metric_rankings(players, player_id),
         "team_stats": team_stats.to_dict() if team_stats is not None else None,
-        "matches": [match_row(participant, player) for participant in participants],
+        "matches": [
+            {**match_row(participant, player), "over_quota": participant.match_id in over_quota_ids}
+            for participant in participants
+        ],
         "snapshots": [snapshot_row(snapshot) for snapshot in snapshots],
     }
 
@@ -433,9 +437,18 @@ def get_lp_history(
 
 
 @router.get("/api/feed")
-def get_feed(limit: int = FEED_DEFAULT_LIMIT, session: Session = Depends(get_session)) -> dict[str, Any]:
-    """Dernières parties (toutes queues, hors remakes), la plus récente d'abord."""
+def get_feed(
+    limit: int = FEED_DEFAULT_LIMIT,
+    session: Session = Depends(get_session),
+    challenge: Challenge = Depends(get_challenge),
+) -> dict[str, Any]:
+    """Dernières parties (toutes queues, hors remakes), la plus récente d'abord.
+
+    `over_quota` : partie au-delà du quota quotidien du joueur (ne compte pas).
+    """
     limit = max(1, min(FEED_MAX_LIMIT, limit))
+    _teams, player_stats = build_leaderboard(session, challenge)
+    over_quota_ids = {(p.player_id, match_id) for p in player_stats for match_id in p.over_quota_match_ids}
     participants = session.exec(
         select(MatchParticipant)
         .where(col(MatchParticipant.is_remake).is_(False))
@@ -460,6 +473,7 @@ def get_feed(limit: int = FEED_DEFAULT_LIMIT, session: Session = Depends(get_ses
                 "team_name": team.name if team is not None else None,
                 "team_color": team.color if team is not None else None,
                 "ago_s": max(0, int((now - ended_at).total_seconds())),
+                "over_quota": (participant.player_id, participant.match_id) in over_quota_ids,
             }
         )
         items.append(row)

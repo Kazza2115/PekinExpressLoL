@@ -263,7 +263,7 @@
     const s = data.stats || {};
     const limit = s.games_limit || App.gamesPerDay || DASH;
     els.tiles.innerHTML = [
-      tile('Parties', int(s.games || 0), `aujourd'hui ${int(s.games_today || 0)}/${limit}`),
+      tile('Parties', int(s.games || 0), `aujourd'hui ${int(s.games_today || 0)}/${limit}${s.games_over_quota ? ` · ${int(s.games_over_quota)} hors quota` : ''}`),
       tile('V – D', wl(s.wins, s.losses)),
       tile('Winrate', `<span class="${App.wrClass(s.winrate)}">${pct(s.winrate)}</span>`),
       tile('Série', `${streakHtml(s.streak)}${s.hot_streak ? ' 🔥' : ''}`, 'en cours'),
@@ -342,7 +342,9 @@
         stat('Contrôle infligé / partie', dur(s.avg_cc_time), 'temps de CC sur les ennemis'),
       ]),
       group('📈', 'LP', [
-        stat('LP nets', lpSpan(s.lp_net), 'depuis le début du challenge'),
+        stat('LP nets', lpSpan(s.lp_net), s.games_over_quota
+          ? `${int(s.games_over_quota)} partie${s.games_over_quota > 1 ? 's' : ''} hors quota non comptée${s.games_over_quota > 1 ? 's' : ''} (${signed(s.lp_over_quota)} LP${s.lp_over_quota_approx ? ' environ' : ''})`
+          : 'depuis le début du challenge'),
         stat('LP / partie', lpSpan(s.lp_per_game, 1), isNum(s.lp_known_games) ? `${plural(s.lp_known_games, 'partie', 'parties')} avec LP connus` : ''),
         stat('Gain moyen', lpSpan(s.avg_lp_win, 1), 'par victoire'),
         stat('Perte moyenne', lpSpan(s.avg_lp_loss, 1), 'par défaite'),
@@ -673,6 +675,7 @@
     const tags = [multiBadges(m, true)];
     if (m.first_blood_kill) tags.push('<span class="pf-tag is-fb" title="Premier sang de la partie">🩸 Premier sang</span>');
     if (m.surrendered) tags.push('<span class="pf-tag is-ff" title="Partie terminée par reddition">🏳️ Reddition</span>');
+    if (m.over_quota) tags.push('<span class="pf-tag is-ff" title="Au-delà des parties autorisées ce jour-là : ni LP ni stats">⛔ Hors quota, ne compte pas</span>');
     const facts = [];
     if (isNum(m.damage_share)) facts.push(`<span class="pf-m-fact" title="Part des dégâts de l'équipe">${miniBar(m.damage_share, 'is-red')}${pct(m.damage_share)} dégâts</span>`);
     if (isNum(m.gold_per_min)) facts.push(`<span class="pf-m-fact" title="Or par minute">${int(m.gold_per_min)} or/min</span>`);

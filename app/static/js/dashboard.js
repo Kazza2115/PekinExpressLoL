@@ -134,7 +134,7 @@
           <div class="tp-rank rank" style="--rank-color:${esc(rankColor)}">${App.rankEmblem(p.rank_emblem_url, 'sm', App.tierName(p.tier))}${esc(p.rank_label || App.formatRank(p.tier, p.rank, p.lp))}</div></div>
         ${App.lpHtml(p.lp_net, 'tp-lp')}
       </div>
-      <div class="tp-today"><span>aujourd'hui ${today}/${limit}</span><div class="progress ${today >= limit ? 'done' : ''}"><span style="width:${pct}%"></span></div></div>
+      <div class="tp-today"><span>aujourd'hui ${today}/${limit}${p.games_today_over_quota ? ` · <span class="lp-neg" title="Parties au-delà du quota : elles ne comptent pas">+${p.games_today_over_quota} hors quota</span>` : ''}</span><div class="progress ${today >= limit ? 'done' : ''}"><span style="width:${pct}%"></span></div></div>
       ${p.live ? liveBadgeHtml(p.live) : ''}
     </div>`;
   }
@@ -364,7 +364,7 @@
           <div class="feed-sub"><span>${esc(m.champion_name || '')}</span>${m.position ? App.posIcon(m.position_icon_url, m.position) : ''}<span class="tnum">${kda}</span><span>${App.formatDuration(m.game_duration)}</span>${m.queue && m.queue !== 'SOLO' ? `<span>${esc(App.queueLabel(m.queue))}</span>` : ''}</div>
           ${hasItems ? `<div class="feed-items">${App.itemRow(m.item_urls, { size: 'sm' })}</div>` : ''}
         </div>
-        <div class="feed-lp">${m.is_remake ? '<span class="chip">Remake</span>' : App.lpHtml(m.lp_change)}<span class="ago">${esc(ago)}</span></div>
+        <div class="feed-lp">${m.is_remake ? '<span class="chip">Remake</span>' : (m.over_quota ? `<span class="chip chip-red" title="Au-delà des parties autorisées ce jour-là : ne compte pas (${esc(App.formatLp(m.lp_change))})">Hors quota</span>` : App.lpHtml(m.lp_change))}<span class="ago">${esc(ago)}</span></div>
       </div>`;
     }).join('');
   }

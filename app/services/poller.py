@@ -54,7 +54,7 @@ from app.riot.base import (
     RiotUnreachable,
 )
 from app.services.notifications import format_live_start, format_match_recorded, send_discord
-from app.services.stats import absolute_lp
+from app.services.stats import absolute_lp, day_key, split_daily_quota
 from app.state import AppState, LiveGameState, PollReport
 
 log = logging.getLogger(__name__)
@@ -775,13 +775,59 @@ class Poller:
             backfill_lp_changes(session, touched_player)
 
         for participant_player, participant in recorded:
-            self._publish_match(participant_player, participant)
+            day_number, over_quota = self._quota_position(session, participant_player, participant, challenge, ctx)
+            self._publish_match(participant_player, participant, day_number=day_number, over_quota=over_quota)
             if participant.is_remake or ctx.now - _game_end(participant) > NOTIFY_MAX_AGE:
                 continue
             team = self._team_of(participant_player, ctx)
             await self._notify(
-                format_match_recorded(participant_player, team, participant, participant.lp_change)
+                format_match_recorded(
+                    participant_player,
+                    team,
+                    participant,
+                    participant.lp_change,
+                    over_quota=over_quota,
+                    day_number=day_number,
+                )
             )
+
+    def _quota_position(
+        self,
+        session: Session,
+        player: Player,
+        participant: MatchParticipant,
+        challenge: Challenge | None,
+        ctx: _CycleContext,
+    ) -> tuple[int | None, bool]:
+        """(numéro de la partie dans la journée du joueur, hors quota ?) — même règle que les stats.
+
+        None / False pour un remake ou une partie hors de la fenêtre du duo.
+        """
+        if participant.is_remake or challenge is None:
+            return None, False
+        team = self._team_of(player, ctx)
+        start = as_utc(team.window_start if team is not None and team.window_start else challenge.start_at)
+        end = as_utc(team.window_end if team is not None and team.window_end else challenge.end_at)
+        ended = _game_end(participant)
+        if (start is not None and ended < start) or (end is not None and ended > end):
+            return None, False
+        tz = self.settings.tz
+        games = [
+            mp
+            for mp in session.exec(
+                select(MatchParticipant).where(
+                    MatchParticipant.player_id == player.id,
+                    MatchParticipant.is_remake == False,  # noqa: E712
+                    MatchParticipant.queue == participant.queue,
+                )
+            ).all()
+            if (start is None or _game_end(mp) >= start) and (end is None or _game_end(mp) <= end)
+        ]
+        _counted, over = split_daily_quota(games, tz, int(challenge.games_per_day or 0))
+        day = day_key(ended, tz)
+        same_day = sorted((mp for mp in games if day_key(_game_end(mp), tz) == day), key=_game_end)
+        number = next((i for i, mp in enumerate(same_day, start=1) if mp.match_id == participant.match_id), None)
+        return number, any(mp.match_id == participant.match_id for mp in over)
 
     async def _fetch_match_ids(
         self, session: Session, player: Player, queue_id: int, start_time: int
@@ -901,7 +947,14 @@ class Poller:
         )
         return session.exec(statement).first() is not None
 
-    def _publish_match(self, player: Player, participant: MatchParticipant) -> None:
+    def _publish_match(
+        self,
+        player: Player,
+        participant: MatchParticipant,
+        *,
+        day_number: int | None = None,
+        over_quota: bool = False,
+    ) -> None:
         self.bus.publish(
             "match_recorded",
             {
@@ -922,6 +975,9 @@ class Poller:
                 "game_end": _game_end(participant).isoformat(),
                 "game_duration": participant.game_duration,
                 "is_remake": participant.is_remake,
+                # Quota quotidien : numéro de la partie dans la journée, et si elle ne compte pas
+                "day_game_number": day_number,
+                "over_quota": over_quota,
             },
         )
 

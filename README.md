@@ -20,7 +20,7 @@ tout en temps réel grâce à l'API Riot. Le duo qui gagne le plus de LP l'empor
 
 - **8 joueurs**, inscrits sur la page d'accueil avec leur Riot ID (`Pseudo#TAG`).
 - L'organisateur compose les **4 duos** dans la page Admin (ou les tire au sort en un clic).
-- Objectif : **10 games classées par jour et par joueur** (réglable).
+- Objectif : **10 games classées par jour et par joueur** (réglable) ; au-delà, les parties ne comptent pas.
 - **Le duo gagnant est celui qui a gagné le plus de LP nets**, c'est-à-dire la somme des LP
   gagnés (ou perdus) par ses deux joueurs depuis le début du challenge.
 - Tout est suivi automatiquement : rang, parties, KDA, séries, qui est « en game »…
@@ -46,6 +46,11 @@ joueurs. En cas d'égalité, le winrate puis le nombre de parties départagent.
 - Une partie compte si elle **se termine** entre « Démarrer » et « Terminer » (c'est à la fin
   de la partie que les LP sont attribués). Une partie en cours au moment du clic sur
   « Démarrer » compte donc, et le compteur « 10 games par jour » suit la même règle.
+- **Au-delà de 10 parties dans la journée, une partie ne compte pas** : ni ses LP, ni ses
+  victoires/défaites, ni ses stats. La journée est celle de la fin de partie (heure de Paris).
+  Les LP d'une partie hors quota sont retirés des LP nets à partir des relevés de rang pris
+  avant et après elle. Elle reste visible avec la mention « ⛔ Hors quota » (fiche joueur, fil
+  des parties, Discord), et la fiche joueur indique combien de LP n'ont pas été comptés.
 
 ---
 

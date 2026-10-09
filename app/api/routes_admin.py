@@ -664,6 +664,9 @@ async def live_check(request: Request) -> dict[str, Any]:
     result["live_poll_seconds"] = settings.live_poll_seconds
     result["poll_interval_seconds"] = settings.poll_interval_seconds
     result["demo_mode"] = settings.demo_mode
+    # Fin de la clé seulement (page Admin) : à comparer avec developer.riotgames.com
+    key = settings.riot_api_key.strip()
+    result["key_hint"] = f"…{key[-4:]}" if len(key) >= 8 else None
     return result
 
 
