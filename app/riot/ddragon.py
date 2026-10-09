@@ -143,6 +143,47 @@ def spell_icon_url(version: str, spell_id: int | None) -> str | None:
     return f"{DDRAGON_BASE}/cdn/{version or CURRENT_VERSION}/img/spell/{name}.png"
 
 
+# Runes : arbre (style) et rune principale (keystone) → image Data Dragon (chemins stables, sans version)
+RUNE_STYLES: dict[int, tuple[str, str]] = {
+    8000: ("Précision", "perk-images/Styles/7201_Precision.png"),
+    8100: ("Domination", "perk-images/Styles/7200_Domination.png"),
+    8200: ("Sorcellerie", "perk-images/Styles/7202_Sorcery.png"),
+    8300: ("Inspiration", "perk-images/Styles/7203_Whimsy.png"),
+    8400: ("Volonté", "perk-images/Styles/7204_Resolve.png"),
+}
+KEYSTONES: dict[int, tuple[str, str]] = {
+    8005: ("Attaque soutenue", "perk-images/Styles/Precision/PressTheAttack/PressTheAttack.png"),
+    8008: ("Tempo mortel", "perk-images/Styles/Precision/LethalTempo/LethalTempoTemp.png"),
+    8021: ("Jeu de jambes", "perk-images/Styles/Precision/FleetFootwork/FleetFootwork.png"),
+    8010: ("Conquérant", "perk-images/Styles/Precision/Conqueror/Conqueror.png"),
+    8112: ("Électrocution", "perk-images/Styles/Domination/Electrocute/Electrocute.png"),
+    8124: ("Prédateur", "perk-images/Styles/Domination/Predator/Predator.png"),
+    8128: ("Moisson noire", "perk-images/Styles/Domination/DarkHarvest/DarkHarvest.png"),
+    9923: ("Pluie de lames", "perk-images/Styles/Domination/HailOfBlades/HailOfBlades.png"),
+    8214: ("Invocation d'Aery", "perk-images/Styles/Sorcery/SummonAery/SummonAery.png"),
+    8229: ("Comète arcanique", "perk-images/Styles/Sorcery/ArcaneComet/ArcaneComet.png"),
+    8230: ("Rush de phase", "perk-images/Styles/Sorcery/PhaseRush/PhaseRush.png"),
+    8437: ("Poigne de l'immortel", "perk-images/Styles/Resolve/GraspOfTheUndying/GraspOfTheUndying.png"),
+    8439: ("Répercussion", "perk-images/Styles/Resolve/VeteranAftershock/VeteranAftershock.png"),
+    8465: ("Gardien", "perk-images/Styles/Resolve/Guardian/Guardian.png"),
+    8351: ("Augmentation glaciale", "perk-images/Styles/Inspiration/GlacialAugment/GlacialAugment.png"),
+    8360: ("Grimoire déchaîné", "perk-images/Styles/Inspiration/UnsealedSpellbook/UnsealedSpellbook.png"),
+    8369: ("Premier coup", "perk-images/Styles/Inspiration/FirstStrike/FirstStrike.png"),
+}
+
+
+def rune_icon(rune_id: int | None, *, style: bool = False) -> tuple[str | None, str | None]:
+    """(nom FR, URL de l'icône) d'une rune principale (ou d'un arbre si `style`) ; (None, None) si inconnue."""
+    table = RUNE_STYLES if style else KEYSTONES
+    try:
+        entry = table.get(int(rune_id)) if rune_id is not None else None
+    except (TypeError, ValueError):
+        entry = None
+    if entry is None:
+        return None, None
+    return entry[0], f"{DDRAGON_BASE}/cdn/img/{entry[1]}"
+
+
 # Emblèmes / écussons de rang et icônes de poste : Community Dragon (assets du client LoL)
 CDRAGON_STATIC_BASE = "https://raw.communitydragon.org/latest/plugins/rcp-fe-lol-static-assets/global/default"
 RANKED_TIERS = frozenset(
@@ -230,6 +271,14 @@ async def _load_champions(version: str) -> dict[int, str] | None:
         return None
     _champions_cache[version] = table
     return table
+
+
+def cached_champion_name(champion_id: int | None) -> str | None:
+    """Identifiant image d'un champion depuis le cache déjà chargé (aucun appel réseau) ; None sinon."""
+    if not champion_id:
+        return None
+    table = _champions_cache.get(CURRENT_VERSION) or next(iter(_champions_cache.values()), None)
+    return table.get(int(champion_id)) if table else None
 
 
 async def champion_name_from_id(champion_id: int) -> str | None:

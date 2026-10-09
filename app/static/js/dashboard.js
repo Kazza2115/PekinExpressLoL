@@ -368,7 +368,7 @@
           <div class="feed-sub"><span>${esc(m.champion_name || '')}</span>${m.position ? App.posIcon(m.position_icon_url, m.position) : ''}<span class="tnum">${kda}</span><span>${App.formatDuration(m.game_duration)}</span>${m.queue && m.queue !== 'SOLO' ? `<span>${esc(App.queueLabel(m.queue))}</span>` : ''}</div>
           ${hasItems ? `<div class="feed-items">${App.itemRow(m.item_urls, { size: 'sm' })}</div>` : ''}
         </div>
-        <div class="feed-lp">${m.is_remake ? '<span class="chip">Remake</span>' : m.outside_window ? `<span class="chip" title="Partie terminée hors des heures du challenge : ne compte pas (${esc(App.formatLp(m.lp_change))})">Hors délai</span>` : (m.over_quota ? `<span class="chip chip-red" title="Au-delà des parties autorisées ce jour-là : ne compte pas (${esc(App.formatLp(m.lp_change))})">Hors quota</span>` : App.lpHtml(m.lp_change))}<span class="ago">${esc(ago)}</span></div>
+        <div class="feed-lp">${m.is_remake ? '<span class="chip">Remake</span>' : m.outside_window ? `<span class="chip" title="Partie terminée hors des heures du challenge : ne compte pas (${esc(App.formatLp(m.lp_change))})">Hors délai</span>` : (m.over_quota ? `<span class="chip chip-red" title="Au-delà des parties autorisées ce jour-là : ne compte pas (${esc(App.formatLp(m.lp_change))})">Hors quota</span>` : App.lpHtml(m.lp_change))}<span class="ago">${esc(ago)}</span>${m.match_id ? `<button type="button" class="feed-detail" data-match="${esc(m.match_id)}" data-player="${m.player_id}" title="Tableau des scores de la partie (10 joueurs)">📊 Tableau</button>` : ''}</div>
       </div>`;
     }).join('');
   }
@@ -433,6 +433,11 @@
   const refreshScores = App.debounce(safe(() => Promise.all([loadLeaderboard(), loadHistory(), loadFeed(), loadRanks()])), 1000);
   const refreshLive = App.debounce(safe(() => Promise.all([loadLive(), loadLeaderboard()])), 1000);
   const refreshAll = App.debounce(safe(loadAll), 1000);
+
+  els.feed.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-match]');
+    if (btn) App.openMatch(btn.dataset.match, parseInt(btn.dataset.player, 10) || null);
+  });
 
   App.connectEvents({
     match_recorded: refreshScores,

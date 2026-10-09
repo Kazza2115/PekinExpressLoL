@@ -47,6 +47,15 @@ MAX_STORED_MATCHES = 2000
 # Durée fictive d'une partie normale (secondes) et d'un remake
 NORMAL_DURATION_RANGE = (900, 1680)
 REMAKE_DURATION_S = 180
+# Runes de démo par poste : (rune principale, arbre principal, arbre secondaire)
+DEMO_RUNES_BY_POSITION: dict[str, list[tuple[int, int, int]]] = {
+    "TOP": [(8010, 8000, 8400), (8437, 8400, 8300), (8230, 8200, 8400)],
+    "JUNGLE": [(8010, 8000, 8100), (8128, 8100, 8000), (9923, 8100, 8300)],
+    "MIDDLE": [(8112, 8100, 8200), (8229, 8200, 8100), (8021, 8000, 8400)],
+    "BOTTOM": [(8008, 8000, 8100), (8005, 8000, 8200), (8021, 8000, 8300)],
+    "UTILITY": [(8214, 8200, 8400), (8465, 8400, 8300), (8439, 8400, 8100)],
+}
+
 # Probabilité qu'une partie normale se termine par un abandon (gameEndedInSurrender)
 SURRENDER_CHANCE = 0.15
 
@@ -451,6 +460,13 @@ class DemoRiotClient:
                 "visionScore": vision, "champLevel": level,
             }
         stats.update(self._participant_details(stats, position, win, minutes, remake))
+        keystone, primary_style, secondary_style = rng.choice(DEMO_RUNES_BY_POSITION[position])
+        stats["perks"] = {
+            "styles": [
+                {"description": "primaryStyle", "style": primary_style, "selections": [{"perk": keystone}]},
+                {"description": "subStyle", "style": secondary_style, "selections": []},
+            ]
+        }
         # Objets : 1 à 2 en remake, sinon de 3 à 6 selon la durée ; bibelot en `item6`
         item_count = rng.randint(1, 2) if remake else max(3, min(6, int(minutes / 4.5) + rng.randint(0, 1)))
         items = rng.sample(ITEM_POOL, item_count) + [0] * (6 - item_count)

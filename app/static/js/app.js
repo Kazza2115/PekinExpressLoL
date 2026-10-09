@@ -378,7 +378,7 @@
     const root = $('#modal-root');
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
-    backdrop.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    backdrop.innerHTML = `<div class="modal${opts.className ? ` ${esc(opts.className)}` : ''}" role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <h3 id="modal-title">${esc(opts.title || '')}</h3>
       <div class="modal-body">${opts.html || ''}</div>
       <div class="modal-actions"></div>
@@ -405,6 +405,114 @@
     const first = backdrop.querySelector('input, button.btn-primary, button');
     if (first) setTimeout(() => first.focus(), 20);
     return { el: backdrop, close };
+  };
+
+  /* ------------------------------------------------------------------ */
+  /* Tableau des scores d'une partie (style op.gg)                        */
+  /* ------------------------------------------------------------------ */
+  const scoreboardCache = {};
+  App.loadScoreboard = function (matchId) {
+    if (!scoreboardCache[matchId]) {
+      scoreboardCache[matchId] = App.api(`/api/matches/${encodeURIComponent(matchId)}`).then((r) => r.match)
+        .catch((e) => { delete scoreboardCache[matchId]; throw e; });
+    }
+    return scoreboardCache[matchId];
+  };
+
+  const fmtK = (v) => (v === null || v === undefined ? '—' : (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1).replace('.', ',')} k` : String(v)));
+  const signedK = (v) => (v === null || v === undefined ? '' : `${v > 0 ? '+' : v < 0 ? '−' : '±'}${fmtK(Math.abs(v))}`);
+
+  function runeIcon(url, name, cls) {
+    return `<span class="sb-rune ${cls || ''}${url ? '' : ' is-broken'}" title="${esc(name || 'Rune')}">${url ? `<img src="${esc(url)}" alt="" loading="lazy" onerror="this.parentNode.classList.add('is-broken');this.remove()">` : ''}</span>`;
+  }
+
+  function scoreboardRow(p, focusId) {
+    const me = focusId && p.player_id === focusId;
+    const name = p.player_id
+      ? `<a class="sb-name is-ours" href="/player/${p.player_id}" title="${esc(p.riot_name)}${p.riot_tag ? `#${esc(p.riot_tag)}` : ''}">${esc(p.display_name)}</a>`
+      : `<span class="sb-name" title="${esc(p.riot_name)}${p.riot_tag ? `#${esc(p.riot_tag)}` : ''}">${esc(p.riot_name)}</span>`;
+    const tags = [
+      p.badge ? `<span class="sb-badge ${p.badge === 'MVP' ? 'is-mvp' : 'is-ace'}" title="${p.badge === 'MVP' ? 'Meilleur joueur de l’équipe gagnante' : 'Meilleur joueur de l’équipe perdante'}">${p.badge}</span>` : '',
+      p.multi_kill_label ? `<span class="sb-tag">${esc(p.multi_kill_label)}</span>` : '',
+      p.first_blood ? '<span class="sb-tag" title="Premier sang">🩸</span>' : '',
+    ].join('');
+    const ratio = p.perfect_kda ? 'Parfait' : `${Number(p.kda).toFixed(2).replace('.', ',')}:1`;
+    const laneDiff = p.gold_diff_lane === null || p.gold_diff_lane === undefined ? ''
+      : `<span class="sb-diff ${p.gold_diff_lane > 0 ? 'pos' : p.gold_diff_lane < 0 ? 'neg' : ''}" title="Écart d'or avec l'adversaire de la même voie">${signedK(p.gold_diff_lane)}</span>`;
+    return `<tr class="${p.player_id ? 'is-ours' : ''}${me ? ' is-me' : ''}">
+      <td class="sb-player">
+        <div class="sb-player-in">
+          ${App.champIcon({ name: p.champion_name || '?', src: p.champion_icon_url, size: 'md', level: p.champ_level, title: p.champion_name })}
+          <span class="sb-stack">${App.spellIcons(p.spell_urls)}</span>
+          <span class="sb-stack sb-runes">${runeIcon(p.keystone_url, p.keystone, 'is-keystone')}${runeIcon(p.secondary_style_url, p.secondary_style, 'is-style')}</span>
+          <span class="sb-who">${name}<span class="sb-sub">${p.position_label ? esc(p.position_label) : ''}${p.riot_tag && p.player_id ? ` · ${esc(p.riot_name)}#${esc(p.riot_tag)}` : ''}</span>${tags ? `<span class="sb-tags">${tags}</span>` : ''}</span>
+        </div>
+      </td>
+      <td class="sb-kda"><strong class="tnum">${p.kills}/<span class="neg">${p.deaths}</span>/${p.assists}</strong><span class="sb-sub tnum">${ratio}${p.kill_participation !== null && p.kill_participation !== undefined ? ` · KP ${Math.round(p.kill_participation)} %` : ''}</span></td>
+      <td class="sb-dmg"><span class="tnum">${App.formatNumber(p.damage)}</span><span class="sb-bar"><span style="width:${Math.max(2, p.damage_pct_of_max || 0)}%"></span></span><span class="sb-sub tnum" title="Dégâts subis">subis ${App.formatNumber(p.damage_taken)}</span></td>
+      <td class="sb-gold"><span class="tnum">${fmtK(p.gold)}</span>${laneDiff}</td>
+      <td class="sb-cs"><span class="tnum">${p.cs}</span><span class="sb-sub tnum">${p.cs_per_min !== null && p.cs_per_min !== undefined ? `${String(p.cs_per_min).replace('.', ',')}/min` : ''}</span></td>
+      <td class="sb-vision"><span class="tnum">${p.vision_score}</span><span class="sb-sub tnum" title="Balises posées / détruites · contrôle">${p.wards_placed}/${p.wards_killed}${p.control_wards ? ` · ${p.control_wards} ctrl` : ''}</span></td>
+      <td class="sb-items">${App.itemRow(p.item_urls, { size: 'sm' })}</td>
+    </tr>`;
+  }
+
+  App.scoreboardHtml = function (m, opts) {
+    opts = opts || {};
+    const teams = m.teams || [];
+    const blue = teams.find((t) => t.side === 'blue') || teams[0] || {};
+    const red = teams.find((t) => t.side === 'red') || teams[1] || {};
+    const pct = (a, b) => (a + b > 0 ? Math.round((a / (a + b)) * 100) : 50);
+    const objectives = (t) => {
+      const o = t.objectives || {};
+      return [['tower', '🗼', 'Tourelles'], ['inhibitor', '🏚️', 'Inhibiteurs'], ['dragon', '🐉', 'Dragons'], ['baron', '👾', 'Barons'], ['riftHerald', '🦀', 'Hérauts'], ['horde', '🐛', 'Larves du Néant']]
+        .filter(([key]) => o[key] !== undefined)
+        .map(([key, icon, label]) => `<span title="${label}">${icon} ${o[key]}</span>`).join('');
+    };
+    const bans = (t) => (t.bans || []).length
+      ? `<span class="sb-bans" title="Champions bannis">${t.bans.map((b) => App.champIcon({ name: b.champion_name || '?', src: b.champion_icon_url, size: 'xs', title: b.champion_name || `Champion ${b.champion_id}` })).join('')}</span>` : '';
+    const teamBlock = (t) => `<section class="sb-team side-${esc(t.side || '')} ${t.win ? 'is-win' : 'is-loss'}">
+      <header class="sb-team-head">
+        <strong>${t.win ? 'Victoire' : 'Défaite'}</strong><span class="muted">${esc(t.side_label || '')}</span>
+        <span class="tnum">${t.kills}/${t.deaths}/${t.assists}</span><span class="tnum" title="Or total">💰 ${fmtK(t.gold)}</span>
+        <span class="sb-obj">${objectives(t)}</span>${bans(t)}
+      </header>
+      <div class="sb-scroll"><table class="sb-table">
+        <thead><tr><th>Joueur</th><th>KDA</th><th>Dégâts</th><th>Or</th><th>CS</th><th>Vision</th><th>Objets</th></tr></thead>
+        <tbody>${(t.players || []).map((p) => scoreboardRow(p, opts.focusPlayerId)).join('')}</tbody>
+      </table></div>
+    </section>`;
+    const diff = m.gold_diff || 0;
+    return `<div class="sb">
+      <div class="sb-meta">
+        <span class="chip">${esc(m.queue_label || 'Partie')}</span>
+        <span class="tnum">${App.formatDuration(m.duration_s)}</span>
+        ${m.game_start ? `<span>${esc(App.formatDateTime(m.game_start))}</span>` : ''}
+        ${m.patch ? `<span class="muted">patch ${esc(m.patch)}</span>` : ''}
+        ${m.remake ? '<span class="chip">Remake</span>' : ''}
+      </div>
+      <div class="sb-compare">
+        <div class="sb-cmp"><span class="lbl">Kills</span><div class="sb-split"><span class="b" style="width:${pct(blue.kills || 0, red.kills || 0)}%">${blue.kills || 0}</span><span class="r">${red.kills || 0}</span></div></div>
+        <div class="sb-cmp"><span class="lbl">Or</span><div class="sb-split"><span class="b" style="width:${pct(blue.gold || 0, red.gold || 0)}%">${fmtK(blue.gold || 0)}</span><span class="r">${fmtK(red.gold || 0)}</span></div><span class="sb-diff ${diff > 0 ? 'blue' : diff < 0 ? 'red' : ''}">${diff ? `${diff > 0 ? 'Bleue' : 'Rouge'} ${signedK(Math.abs(diff))}` : 'égalité'}</span></div>
+        <div class="sb-cmp"><span class="lbl">Dégâts</span><div class="sb-split"><span class="b" style="width:${pct(blue.damage || 0, red.damage || 0)}%">${fmtK(blue.damage || 0)}</span><span class="r">${fmtK(red.damage || 0)}</span></div></div>
+      </div>
+      ${teamBlock(blue)}
+      ${teamBlock(red)}
+    </div>`;
+  };
+
+  /* Ouvre le tableau des scores d'une partie dans une grande fenêtre. */
+  App.openMatch = function (matchId, focusPlayerId) {
+    const modal = App.openModal({
+      title: 'Tableau des scores',
+      className: 'modal-wide',
+      html: '<div class="sb-loading muted">Chargement…</div>',
+      actions: [{ label: 'Fermer', className: 'btn-ghost', onClick: ({ close }) => close() }],
+    });
+    App.loadScoreboard(matchId)
+      .then((m) => { const body = modal.el.querySelector('.modal-body'); if (body) body.innerHTML = App.scoreboardHtml(m, { focusPlayerId }); })
+      .catch((e) => { const body = modal.el.querySelector('.modal-body'); if (body) body.innerHTML = `<div class="empty">${esc(e.message || 'Détail indisponible.')}</div>`; });
+    return modal;
   };
 
   /* Confirmation : résout `{ok, form}` (form = valeurs des champs nommés du contenu). */

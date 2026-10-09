@@ -238,6 +238,14 @@ dégâts, vision, objectifs, temps, LP, séries), les répartitions par poste, c
 et jour, ses records, ses résultats avec et sans son partenaire, ses champions, son graphe et
 la liste de ses parties (lien op.gg).
 
+**Tableau des scores de chaque partie** (style op.gg) : bouton **📊 Détails** sous chaque partie
+de l'historique d'un joueur (le tableau se déplie dans la fiche), et **📊 Tableau** dans les
+dernières parties du classement. Les 10 joueurs, alliés et ennemis : champion, sorts, runes,
+objets, KDA, participation aux kills, dégâts infligés et subis, or et **écart d'or avec
+l'adversaire de la même voie**, CS, vision ; bilan et objectifs de chaque équipe, écart d'or
+entre les équipes, badges MVP / ACE. Aucune requête Riot en plus : le détail de la partie est
+déjà enregistré.
+
 La page **Rangs** (`/rankings`) classe les joueurs par rang actuel : podium, places gagnées
 ou perdues depuis le départ, pic de rang, saison, duos par rang moyen et répartition par
 palier. La page **Duos** se termine par un **comparatif des duos** sur 26 statistiques

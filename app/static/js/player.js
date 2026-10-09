@@ -694,6 +694,28 @@
     return `<div class="pf-m-extra">${tagHtml}${facts.join('')}</div>`;
   }
 
+  /* Tableau des scores déplié sous une partie (tous les joueurs, alliés et ennemis). */
+  const openDetails = new Set(); // parties dépliées (gardées ouvertes quand la liste se rafraîchit)
+
+  async function toggleMatchDetail(btn, forceOpen) {
+    const id = btn.dataset.detail;
+    const box = els.matches.querySelector(`[data-detail-for="${CSS.escape(id)}"]`);
+    if (!box) return;
+    const open = forceOpen === undefined ? box.hidden : forceOpen;
+    if (open) openDetails.add(id); else openDetails.delete(id);
+    box.hidden = !open;
+    btn.setAttribute('aria-expanded', String(open));
+    btn.textContent = open ? '📊 Masquer' : '📊 Détails';
+    if (!open || box.dataset.loaded) return;
+    box.innerHTML = '<div class="sb-loading muted">Chargement…</div>';
+    try {
+      box.innerHTML = App.scoreboardHtml(await App.loadScoreboard(id), { focusPlayerId: playerId });
+      box.dataset.loaded = '1';
+    } catch (e) {
+      box.innerHTML = `<div class="muted">${esc(e.message || 'Détail indisponible.')}</div>`;
+    }
+  }
+
   function renderMatches() {
     const matches = (Array.isArray(data.matches) ? data.matches : []).slice().sort((a, b) => Date.parse(b.game_start) - Date.parse(a.game_start));
     els.matchesCount.textContent = matches.length ? `${matches.length} ${matches.length > 1 ? 'parties' : 'partie'}` : '';
@@ -723,8 +745,8 @@
         </div>
         <div class="m-items">${App.itemRow(m.item_urls, { title: 'Objets en fin de partie' })}</div>
         <div class="m-time"><div class="tnum">${App.formatDuration(m.game_duration)}</div><div class="m-sub">${esc(App.formatDateTime(m.game_start))}</div></div>
-        <div class="m-right">${m.is_remake ? '<span class="muted">—</span>' : App.lpHtml(m.lp_change)}<span class="m-sub">${esc(App.timeAgo(m.game_start))}</span>${opgg}</div>
-      </div>`;
+        <div class="m-right">${m.is_remake ? '<span class="muted">—</span>' : App.lpHtml(m.lp_change)}<span class="m-sub">${esc(App.timeAgo(m.game_start))}</span>${opgg}${m.match_id ? `<button type="button" class="btn btn-sm btn-ghost m-detail-btn" data-detail="${esc(m.match_id)}" aria-expanded="false">📊 Détails</button>` : ''}</div>
+      </div>${m.match_id ? `<div class="match-detail" data-detail-for="${esc(m.match_id)}" hidden></div>` : ''}`;
     }).join('');
     // Lien direct vers une partie (#match-…) : la ligne n'existe qu'après le premier rendu
     if (!hashDone && /^#match-/.test(location.hash || '')) {
@@ -732,6 +754,10 @@
       const target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
       if (target) target.scrollIntoView({ block: 'center' });
     }
+    openDetails.forEach((id) => {
+      const btn = els.matches.querySelector(`[data-detail="${CSS.escape(id)}"]`);
+      if (btn) toggleMatchDetail(btn, true);
+    });
   }
 
   /* ------------------------------------------------------------------ */
@@ -789,5 +815,9 @@
     draw_done: refresh,
   });
   setInterval(() => { if (!document.hidden) refresh(); }, 60000);
+  els.matches.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-detail]');
+    if (btn) toggleMatchDetail(btn);
+  });
   load();
 })();

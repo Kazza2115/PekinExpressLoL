@@ -45,6 +45,7 @@ from app.db.models import (
     Challenge,
     ChallengeStatus,
     Joker,
+    Match,
     MatchParticipant,
     Player,
     Queue,
@@ -58,6 +59,7 @@ from app.events import bus
 from app.riot import ddragon, get_api
 from app.riot.base import RiotAPI
 from app.services import notifications
+from app.services.scoreboard import ScoreboardError, build_scoreboard
 from app.services.registration import link_player, parse_riot_id, register_player
 from app.services.stats import (
     WINDOW_END_GRACE,
@@ -540,6 +542,19 @@ def _outside_window(
         cache[key] = team_window(challenge, team)
     start, end = cache[key]
     return (start is not None and ended_at < start) or (end is not None and ended_at > end)
+
+
+@router.get("/api/matches/{match_id}")
+def get_match_scoreboard(match_id: str, session: Session = Depends(get_session)) -> dict[str, Any]:
+    """Tableau des scores d'une partie enregistrée (10 joueurs, équipes, objectifs, écarts d'or)."""
+    match = session.get(Match, match_id.strip()[:64])
+    if match is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Partie introuvable.")
+    players = {p.puuid: p for p in _all_players(session) if p.puuid}
+    try:
+        return {"match": build_scoreboard(match, players)}
+    except ScoreboardError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.get("/api/live")
