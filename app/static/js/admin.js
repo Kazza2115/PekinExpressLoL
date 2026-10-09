@@ -41,19 +41,52 @@
   let state = null;
 
   /* ------------------------------------------------------------------ */
-  /* Dates : ISO UTC ↔ datetime-local                                     */
+  /* Dates : ISO UTC ↔ « jj/mm/aaaa hh:mm », toujours à l'heure de Paris (fuseau du challenge),
+     quel que soit le réglage de date du navigateur.                     */
   /* ------------------------------------------------------------------ */
+  const PARIS = 'Europe/Paris';
+  const pad2 = (n) => String(n).padStart(2, '0');
+  function parisParts(ms) {
+    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: PARIS, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ms));
+    const get = (type) => parseInt((parts.find((x) => x.type === type) || {}).value, 10);
+    return { y: get('year'), m: get('month'), d: get('day'), h: get('hour') % 24, mi: get('minute') };
+  }
+  function parisWallToMs(y, m, d, h, mi) {
+    const guess = Date.UTC(y, m - 1, d, h, mi);
+    const p = parisParts(guess);
+    return guess - (Date.UTC(p.y, p.m - 1, p.d, p.h, p.mi) - guess);
+  }
   function toLocalInput(iso) {
     if (!iso) return '';
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return '';
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const ms = Date.parse(iso);
+    if (isNaN(ms)) return '';
+    const p = parisParts(ms);
+    return `${pad2(p.d)}/${pad2(p.m)}/${p.y} ${pad2(p.h)}:${pad2(p.mi)}`;
   }
+  /* « 10/10/2026 09:00 » (ou « 10/10/2026 9h », « 12/10/2026 ») → ISO ; vide → null ; invalide → undefined. */
+  const FR_DATE_RE = /^\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:\s*(?:à\s*)?(\d{1,2})\s*[:hH]\s*(\d{2})?)?\s*$/;
   function fromLocalInput(value) {
-    if (!value) return null;
-    const d = new Date(value);
-    return isNaN(d.getTime()) ? null : d.toISOString();
+    if (!value || !value.trim()) return null;
+    const m = FR_DATE_RE.exec(value);
+    if (!m) return undefined;
+    const [d, mo, y, h, mi] = [m[1], m[2], m[3], m[4] || 0, m[5] || 0].map((x) => parseInt(x, 10));
+    const check = new Date(Date.UTC(y, mo - 1, d));
+    if (check.getUTCDate() !== d || check.getUTCMonth() !== mo - 1 || h > 23 || mi > 59) return undefined;
+    return new Date(parisWallToMs(y, mo, d, h, mi)).toISOString();
+  }
+  /* Dates d'un formulaire : null si l'une est mal écrite (message affiché, champ sélectionné). */
+  function readDates(fields) {
+    const out = {};
+    for (const [key, input] of fields) {
+      const value = fromLocalInput(input.value);
+      if (value === undefined) {
+        toast('Date invalide : écris-la au format jj/mm/aaaa hh:mm (ex. 10/10/2026 09:00).', { type: 'error', timeout: 8000 });
+        input.focus();
+        return null;
+      }
+      out[key] = value;
+    }
+    return out;
   }
 
   const admin = (fn) => App.adminAction(fn);
@@ -202,8 +235,10 @@
     };
     // Dates envoyées seulement si elles ont été modifiées (sinon l'arrondi à la minute du champ
     // déplacerait un début ou une fin enregistrés à la seconde près)
-    if (chDirty.has('start_at')) body.start_at = fromLocalInput(f.start_at.value);
-    if (chDirty.has('end_at')) body.end_at = fromLocalInput(f.end_at.value);
+    const dates = readDates([['start_at', f.start_at], ['end_at', f.end_at]]);
+    if (!dates) return;
+    if (chDirty.has('start_at')) body.start_at = dates.start_at;
+    if (chDirty.has('end_at')) body.end_at = dates.end_at;
     ['jokers_per_team', 'joker_extra_games'].forEach((name) => {
       const value = parseInt(f.elements[name] && f.elements[name].value, 10);
       if (!isNaN(value)) body[name] = value;
@@ -224,15 +259,16 @@
     }
   });
 
-  const longDate = (iso) => new Date(iso).toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+  const longDate = (iso) => new Date(iso).toLocaleString('fr-FR', { timeZone: PARIS, weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   const sameInstant = (a, b) => (a ? Date.parse(a) : null) === (b ? Date.parse(b) : null);
 
   /* « jusqu'à minuit dans la nuit du dimanche 11 au lundi 12 octobre » pour une fin à 00:00. */
   function endPhrase(iso) {
     const d = new Date(iso);
-    if (d.getHours() === 0 && d.getMinutes() === 0) {
+    const wall = parisParts(d.getTime());
+    if (wall.h === 0 && wall.mi === 0) {
       const before = new Date(d.getTime() - 60000);
-      const day = (x, opts) => x.toLocaleDateString('fr-FR', opts);
+      const day = (x, opts) => x.toLocaleDateString('fr-FR', { timeZone: PARIS, ...opts });
       return `jusqu'à minuit, dans la nuit du ${day(before, { weekday: 'long', day: 'numeric' })} au ${day(d, { weekday: 'long', day: 'numeric', month: 'long' })}`;
     }
     return `jusqu'au ${longDate(iso)}`;
@@ -242,8 +278,10 @@
     const c = state.challenge || {};
     if (!(c.status === 'registration' || c.status === 'drawn')) { await load(); return; } // déjà démarré
     const f = els.chForm;
-    const startAt = fromLocalInput(f.start_at.value) || new Date().toISOString();
-    const endAt = fromLocalInput(f.end_at.value);
+    const dates = readDates([['start_at', f.start_at], ['end_at', f.end_at]]);
+    if (!dates) return;
+    const startAt = dates.start_at || new Date().toISOString();
+    const endAt = dates.end_at;
     const future = Date.parse(startAt) > Date.now() + 60000;
     const startTxt = future ? `Les parties compteront à partir du ${longDate(startAt)}` : `Les parties comptent depuis le ${longDate(startAt)}`;
     const hours = endAt ? Math.round((Date.parse(endAt) - Date.parse(startAt)) / 3600000) : null;
@@ -378,8 +416,8 @@
           <details class="ta-window" ${hasWindow ? 'open' : ''}>
             <summary>Fenêtre de dates personnalisée <span class="muted">(optionnel · sinon celle du challenge)</span></summary>
             <div class="form-row">
-              <div class="field"><label for="ta-ws-${t.id}">Début</label><input id="ta-ws-${t.id}" type="datetime-local" name="window_start" value="${toLocalInput(t.window_start)}" ${dis}></div>
-              <div class="field"><label for="ta-we-${t.id}">Fin</label><input id="ta-we-${t.id}" type="datetime-local" name="window_end" value="${toLocalInput(t.window_end)}" ${dis}></div>
+              <div class="field"><label for="ta-ws-${t.id}">Début</label><input id="ta-ws-${t.id}" type="text" placeholder="jj/mm/aaaa hh:mm" autocomplete="off" name="window_start" value="${toLocalInput(t.window_start)}" ${dis}></div>
+              <div class="field"><label for="ta-we-${t.id}">Fin</label><input id="ta-we-${t.id}" type="text" placeholder="jj/mm/aaaa hh:mm" autocomplete="off" name="window_end" value="${toLocalInput(t.window_end)}" ${dis}></div>
             </div>
           </details>
           ${jokersOfTeamHtml(t.id)}
@@ -423,10 +461,12 @@
     const body = {
       name: form.name.value.trim() || undefined,
       color: form.color.value,
-      window_start: fromLocalInput(form.window_start.value),
-      window_end: fromLocalInput(form.window_end.value),
       player_ids: [p1, p2].filter(Boolean),
     };
+    const windowDates = readDates([['window_start', form.window_start], ['window_end', form.window_end]]);
+    if (!windowDates) return;
+    body.window_start = windowDates.window_start;
+    body.window_end = windowDates.window_end;
     App.setLoading(btn, true);
     try {
       const r = await admin(() => api(`/api/admin/teams/${id}`, { method: 'PATCH', admin: true, body }));

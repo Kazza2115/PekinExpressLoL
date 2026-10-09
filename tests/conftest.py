@@ -11,6 +11,9 @@ os.environ.setdefault("ADMIN_PASSWORD", "test-password")
 os.environ.setdefault("PEKIN_DISABLE_POLLER", "1")
 os.environ.setdefault("DISCORD_WEBHOOK_URL", "")
 os.environ.setdefault("DATABASE_URL", "sqlite://")
+# Pas de dates de challenge par défaut en test (testées à part dans test_default_schedule.py)
+os.environ.setdefault("CHALLENGE_START", "")
+os.environ.setdefault("CHALLENGE_END", "")
 
 import random  # noqa: E402
 
@@ -35,6 +38,8 @@ def _settings():
     os.environ["PEKIN_DISABLE_POLLER"] = "1"
     os.environ["DISCORD_WEBHOOK_URL"] = ""
     os.environ["DATABASE_URL"] = "sqlite://"
+    os.environ["CHALLENGE_START"] = ""
+    os.environ["CHALLENGE_END"] = ""
     yield reload_settings()
 
 

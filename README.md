@@ -142,6 +142,7 @@ Copie `.env.example` en `.env` à la racine du projet et complète-le. Chaque va
 | `ADMIN_PASSWORD` | Mot de passe de l'organisateur (page admin, duos, démarrage). **À changer** (défaut `change-me`). |
 | `DATABASE_URL` | Base SQLite. Défaut : `sqlite:///./data/tracker.db` (fichier dans `data/`). |
 | `GAMES_PER_DAY` | Objectif de parties par jour et par joueur (défaut 10). Modifiable ensuite dans l'admin. |
+| `CHALLENGE_START` / `CHALLENGE_END` | Dates par défaut du challenge, format `jj/mm/aaaa hh:mm`, heure de Paris (défaut : `10/10/2026 09:00` et `12/10/2026 00:00`, minuit dans la nuit du dimanche au lundi). Appliquées tant qu'aucune date n'est enregistrée ; modifiables ensuite dans l'Admin. |
 | `AUTO_TUNNEL` | Windows : `PekinExpress.bat` ouvre aussi le tunnel Cloudflare (défaut `true`). |
 | `TUNNEL` | Type de tunnel : `rapide` (défaut, adresse qui change), `tailscale` (lien fixe gratuit) ou `cloudflare` (lien fixe sur ton domaine). Voir « Lien fixe ». |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Mode `cloudflare` : jeton du tunnel nommé (secret, reste dans `.env`). |

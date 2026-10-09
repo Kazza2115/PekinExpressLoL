@@ -5,13 +5,15 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from datetime import datetime, timezone, tzinfo
 from pathlib import Path
 
 import yaml
 from sqlmodel import Session, col, select
 
 from app.config import get_settings
-from app.db.models import Challenge, Match, MatchParticipant, Player
+from app.db.models import Challenge, ChallengeStatus, Match, MatchParticipant, Player
 from app.db.session import session_scope
 from app.riot import get_api
 from app.services.poller import participant_details
@@ -89,6 +91,47 @@ def _match_parts(session: Session, match_id: str) -> list[dict] | None:
         return None
     parts = [part for part in info.get("participants") or [] if isinstance(part, dict)]
     return parts or None
+
+
+FR_DATETIME_RE = re.compile(r"^\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:\s*(?:à\s*)?(\d{1,2})\s*[:hH]\s*(\d{2})?)?\s*$")
+
+
+def parse_fr_datetime(text: str | None, tz: tzinfo) -> datetime | None:
+    """« 10/10/2026 09:00 » (ou « 10/10/2026 9h », « 12/10/2026 ») dans le fuseau `tz` → datetime UTC.
+
+    None si vide ou invalide.
+    """
+    match = FR_DATETIME_RE.match(text or "")
+    if match is None:
+        return None
+    day, month, year, hour, minute = match.groups()
+    try:
+        local = datetime(int(year), int(month), int(day), int(hour or 0), int(minute or 0), tzinfo=tz)
+    except ValueError:
+        return None
+    return local.astimezone(timezone.utc)
+
+
+def apply_default_schedule(session: Session, *, now: datetime | None = None) -> bool:
+    """Dates par défaut (`CHALLENGE_START` / `CHALLENGE_END`) sur un challenge sans dates, pas encore
+    démarré, si la fin par défaut est à venir. Renvoie True si elles ont été appliquées."""
+    settings = get_settings()
+    challenge = session.exec(select(Challenge).order_by(Challenge.id)).first()
+    if challenge is None or challenge.status not in (ChallengeStatus.REGISTRATION, ChallengeStatus.DRAWN):
+        return False
+    if challenge.start_at is not None or challenge.end_at is not None:
+        return False
+    start = parse_fr_datetime(settings.challenge_start, settings.tz)
+    end = parse_fr_datetime(settings.challenge_end, settings.tz)
+    now = now or datetime.now(timezone.utc)
+    if start is None or (end is not None and (end <= start or end <= now)) or (end is None and start <= now):
+        return False
+    challenge.start_at = start
+    challenge.end_at = end
+    session.add(challenge)
+    session.commit()
+    log.info("Dates du challenge par défaut : début %s, fin %s", settings.challenge_start, settings.challenge_end or "—")
+    return True
 
 
 def ensure_challenge(session: Session | None = None) -> Challenge:

@@ -61,6 +61,10 @@ class Settings:
     github_token: str = ""
     github_repo: str = "Kazza2115/PekinExpressLoL"
     github_branch: str = "claude/quirky-pascal-y84evb"
+    # Dates par défaut du challenge (jj/mm/aaaa hh:mm, fuseau TIMEZONE), appliquées tant qu'aucune
+    # date n'est enregistrée et que la fin est à venir. Vide = pas de date par défaut.
+    challenge_start: str = "10/10/2026 09:00"
+    challenge_end: str = "12/10/2026 00:00"
     # Fuseau résolu une seule fois (`tz` est lu pour chaque joueur à chaque requête de stats)
     _tz: tzinfo | None = field(default=None, init=False, repr=False, compare=False)
     _tz_fallback: bool = field(default=False, init=False, repr=False, compare=False)
@@ -136,6 +140,8 @@ def _build_settings() -> Settings:
         github_token=os.getenv("GITHUB_TOKEN", "").strip(),
         github_repo=os.getenv("GITHUB_REPO", "").strip() or "Kazza2115/PekinExpressLoL",
         github_branch=os.getenv("GITHUB_BRANCH", "").strip() or "claude/quirky-pascal-y84evb",
+        challenge_start=os.getenv("CHALLENGE_START", "10/10/2026 09:00").strip(),
+        challenge_end=os.getenv("CHALLENGE_END", "12/10/2026 00:00").strip(),
     )
 
 

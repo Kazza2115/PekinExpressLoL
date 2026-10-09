@@ -23,6 +23,7 @@ from app.api.serializers import challenge_to_dict, player_public, team_public
 from app.config import get_settings, reload_settings
 from app.db.models import Challenge, ChallengeStatus, Joker, Match, MatchParticipant, Player, Queue, RankSnapshot, Team, utcnow
 from app.db.session import as_utc, get_session
+from app.services.bootstrap import apply_default_schedule, parse_fr_datetime
 from app.events import bus
 from app.riot import get_api, reset_api
 from app.services import notifications
@@ -107,6 +108,9 @@ def parse_datetime(value: str | None, field: str) -> datetime | None:
     raw = value.strip()
     if not raw:
         return None
+    french = parse_fr_datetime(raw, get_settings().tz)
+    if french is not None:
+        return french
     if raw.endswith(("Z", "z")):
         raw = raw[:-1] + "+00:00"
     try:
@@ -415,6 +419,9 @@ async def reset_challenge(
     session.refresh(challenge)
     state.live_games.clear()
     payload = challenge_to_dict(challenge)
+    if apply_default_schedule(session):
+        session.refresh(challenge)
+        payload = challenge_to_dict(challenge)
     bus.publish("challenge_reset", {"challenge": payload, "keep_players": keep_players})
     return {"challenge": payload, "keep_players": keep_players}
 
