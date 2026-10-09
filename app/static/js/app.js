@@ -766,9 +766,12 @@
     const win = d.win === true || d.win === 'true';
     const champ = champOf(d);
     const lpTxt = lp === null || lp === undefined ? '' : ` ${App.formatLp(lp)}`;
-    const quota = d.over_quota ? ` · hors quota${d.day_game_number ? ` (${d.day_game_number}e partie du jour)` : ''}, ne compte pas` : '';
+    const quota = d.outside_window
+      ? ' · hors des heures du challenge, ne compte pas'
+      : (d.over_quota ? ` · hors quota${d.day_game_number ? ` (${d.day_game_number}e partie du jour)` : ''}, ne compte pas` : '');
     const msg = win ? `✅ ${who(d)} gagne${lpTxt}${quota}` : `❌ ${who(d)} perd${lpTxt}${quota}`;
-    App.toast(`${msg}${champ ? ` (${champ})` : ''}`, { type: d.over_quota ? 'warning' : (win ? 'success' : 'error'), timeout: d.over_quota ? 10000 : 6000 });
+    const ignored = d.over_quota || d.outside_window;
+    App.toast(`${msg}${champ ? ` (${champ})` : ''}`, { type: ignored ? 'warning' : (win ? 'success' : 'error'), timeout: ignored ? 10000 : 6000 });
     App.notify(msg, champ ? `Partie enregistrée — ${champ}` : 'Partie enregistrée', `match-${d.match_id || Date.now()}`);
   });
   App.onEvent('draw_done', () => {
@@ -788,6 +791,12 @@
     App.notify('🚀 Le challenge a commencé !', 'Que le meilleur duo gagne.');
   });
   App.onEvent('challenge_finished', () => App.toast('🏁 Le challenge est terminé.', { type: 'info' }));
+  App.onEvent('joker_used', (d) => {
+    const msg = `🃏 ${d.team_name || 'Un duo'} active son joker${d.display_name ? ` (par ${d.display_name})` : ''} : ${d.limit || ''} parties comptées aujourd'hui`;
+    App.toast(msg, { type: 'live', timeout: 10000 });
+    App.notify(msg, 'Seules les parties terminées à partir de maintenant en profitent.', `joker-${d.team_id || ''}`);
+  });
+  App.onEvent('joker_cancelled', () => App.toast('🃏 Un joker a été annulé par l’organisateur.', { type: 'info' }));
 
   /* Après une mise à jour du site, le serveur redémarre : quand la page se reconnecte au flux
      SSE et voit (via `hello`) que la version des fichiers a changé, elle se recharge d'elle-même. */

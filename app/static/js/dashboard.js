@@ -87,8 +87,12 @@
     const c = leaderboard.challenge || {};
     els.name.textContent = c.name || 'Pékin Express LoL';
     els.status.innerHTML = App.statusChip(c.status, c.start_at);
-    if (c.status === 'running' && c.start_at) {
-      const day = Math.floor((Date.now() - Date.parse(c.start_at)) / 86400000) + 1;
+    if (c.status === 'running' && c.end_at && Date.now() >= Date.parse(c.end_at)) {
+      els.day.textContent = 'Fin atteinte · classement en cours de finalisation';
+    } else if (c.status === 'running' && c.start_at) {
+      // Jours du calendrier de Paris (le quota de 10 parties repart à minuit, heure de Paris)
+      const parisDay = (ms) => Date.parse(`${new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date(ms))}T00:00:00Z`);
+      const day = Date.now() >= Date.parse(c.start_at) ? Math.round((parisDay(Date.now()) - parisDay(Date.parse(c.start_at))) / 86400000) + 1 : 0;
       els.day.textContent = day >= 1 ? `Jour ${day} · objectif ${gamesPerDay} games par joueur` : `Objectif ${gamesPerDay} games par jour`;
     } else if (c.status === 'finished') {
       els.day.textContent = c.end_at ? `Terminé ${App.formatDateTime(c.end_at)}` : 'Terminé';
@@ -124,7 +128,7 @@
 
   function playerRowHtml(p, color) {
     const today = p.games_today || 0;
-    const limit = p.games_limit || gamesPerDay;
+    const limit = p.games_limit_today || p.games_limit || gamesPerDay;
     const pct = Math.min(100, Math.round((today / Math.max(1, limit)) * 100));
     const rankColor = p.rank_color || App.rankColor(p.tier);
     return `<div class="team-player">
@@ -149,7 +153,7 @@
     els.teamsGrid.innerHTML = teams.map((t) => {
       const wr = App.formatPct(t.winrate);
       return `<article class="card team-card is-link pos-${t.position}" style="--team-color:${esc(t.color)}" data-href="/duos#duo-${t.team_id}" tabindex="0" role="link" aria-label="${esc(t.name)} : voir les stats du duo">
-        <div class="team-head"><span class="pos-badge pos-${t.position}">${t.position}</span><span class="team-name truncate">${esc(t.name)}</span>${t.live_count ? `<span class="badge-live" title="${t.live_count} en partie"><span class="dot"></span>${t.live_count}</span>` : ''}<span class="team-more" aria-hidden="true" title="Voir le détail du duo">→</span></div>
+        <div class="team-head"><span class="pos-badge pos-${t.position}">${t.position}</span><span class="team-name truncate">${esc(t.name)}</span>${t.live_count ? `<span class="badge-live" title="${t.live_count} en partie"><span class="dot"></span>${t.live_count}</span>` : ''}${t.joker_today ? `<span class="chip chip-gold team-joker" title="Joker actif aujourd'hui : ${gamesPerDay + (t.joker_extra_games || 0)} parties comptées">🃏</span>` : ''}<span class="team-more" aria-hidden="true" title="Voir le détail du duo">→</span></div>
         <div class="team-lp ${App.lpClass(t.lp_net)}">${esc(App.formatLp(t.lp_net).replace(' LP', ''))}<small>LP</small></div>
         <div class="team-record"><span><strong>${t.wins}</strong> V – <strong>${t.losses}</strong> D</span><span>${wr === '—' ? 'Pas de partie' : `<strong>${wr}</strong> winrate`}</span><span><strong>${t.games}</strong> ${t.games > 1 ? 'parties' : 'partie'}</span></div>
         <div class="team-players">${(t.players || []).map((p) => playerRowHtml(p, t.color)).join('')}</div>
@@ -202,7 +206,7 @@
         <td><div class="cell-player">${avatar({ name: p.display_name, src: p.icon_url, color, size: 'sm' })}<a href="/player/${p.player_id}">${esc(p.display_name)}</a>${p.top_champion ? App.champIcon({ name: p.top_champion, src: p.top_champion_icon_url, size: 'sm', title: `Champion favori : ${p.top_champion} · ${p.top_champion_games || 0} ${p.top_champion_games > 1 ? 'parties' : 'partie'}` }) : ''}${team ? `<span class="chip chip-team" style="--team-color:${esc(team.color)}" title="${esc(team.name)}"><span class="swatch"></span>${esc(team.name.replace(/^Duo\s+/i, ''))}</span>` : ''}${p.live ? '<span class="badge-live"><span class="dot"></span>Live</span>' : ''}</div></td>
         <td><span class="cell-rank">${App.rankEmblem(p.rank_crest_url, 'sm', App.tierName(p.tier))}<span class="rank" style="--rank-color:${esc(p.rank_color || App.rankColor(p.tier))}">${esc(p.rank_label || App.formatRank(p.tier, p.rank, p.lp))}</span></span></td>
         <td class="num">${App.lpHtml(p.lp_net)}</td>
-        <td class="num">${p.games || 0}<span class="muted"> · ${p.games_today || 0}/${p.games_limit || gamesPerDay} auj.</span></td>
+        <td class="num">${p.games || 0}<span class="muted"> · ${p.games_today || 0}/${p.games_limit_today || p.games_limit || gamesPerDay} auj.</span></td>
         <td class="num"><span class="lp-pos">${p.wins || 0}</span> – <span class="lp-neg">${p.losses || 0}</span></td>
         <td class="num">${App.formatPct(p.winrate)}</td>
         <td class="num">${p.avg_kda === null || p.avg_kda === undefined ? '—' : Number(p.avg_kda).toFixed(2)}</td>
@@ -364,7 +368,7 @@
           <div class="feed-sub"><span>${esc(m.champion_name || '')}</span>${m.position ? App.posIcon(m.position_icon_url, m.position) : ''}<span class="tnum">${kda}</span><span>${App.formatDuration(m.game_duration)}</span>${m.queue && m.queue !== 'SOLO' ? `<span>${esc(App.queueLabel(m.queue))}</span>` : ''}</div>
           ${hasItems ? `<div class="feed-items">${App.itemRow(m.item_urls, { size: 'sm' })}</div>` : ''}
         </div>
-        <div class="feed-lp">${m.is_remake ? '<span class="chip">Remake</span>' : (m.over_quota ? `<span class="chip chip-red" title="Au-delà des parties autorisées ce jour-là : ne compte pas (${esc(App.formatLp(m.lp_change))})">Hors quota</span>` : App.lpHtml(m.lp_change))}<span class="ago">${esc(ago)}</span></div>
+        <div class="feed-lp">${m.is_remake ? '<span class="chip">Remake</span>' : m.outside_window ? `<span class="chip" title="Partie terminée hors des heures du challenge : ne compte pas (${esc(App.formatLp(m.lp_change))})">Hors délai</span>` : (m.over_quota ? `<span class="chip chip-red" title="Au-delà des parties autorisées ce jour-là : ne compte pas (${esc(App.formatLp(m.lp_change))})">Hors quota</span>` : App.lpHtml(m.lp_change))}<span class="ago">${esc(ago)}</span></div>
       </div>`;
     }).join('');
   }
@@ -443,6 +447,8 @@
     teams_changed: refreshAll,
     player_registered: refreshAll,
     player_linked: refreshAll,
+    joker_used: refreshAll,
+    joker_cancelled: refreshAll,
   });
   document.addEventListener('pekin:connected', () => { if (leaderboard) refreshAll(); });
 

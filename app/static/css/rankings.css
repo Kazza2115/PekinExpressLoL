@@ -267,3 +267,12 @@
 .rk-top-name { font-weight: 600; color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rk-top-main .rank { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rk-top-more { display: inline-block; margin-top: 10px; font-size: 13px; font-weight: 600; }
+
+/* ------------------------------------------------------------------ */
+/* Joker du duo (page Duos)                                             */
+/* ------------------------------------------------------------------ */
+.duo-joker { display: flex; flex-direction: column; gap: 8px; margin: 14px 0 4px; padding: 12px 14px; border-radius: 12px; background: rgba(229, 182, 77, 0.07); border: 1px dashed rgba(229, 182, 77, 0.35); position: relative; z-index: 1; }
+.duo-joker .joker-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.duo-joker .joker-text { font-size: 0.88rem; line-height: 1.4; min-width: 0; flex: 1 1 220px; }
+.duo-joker .btn { white-space: normal; text-align: left; }
+.team-joker { font-size: 0.85rem; }

@@ -261,7 +261,7 @@
 
   function renderTiles() {
     const s = data.stats || {};
-    const limit = s.games_limit || App.gamesPerDay || DASH;
+    const limit = s.games_limit_today || s.games_limit || App.gamesPerDay || DASH;
     els.tiles.innerHTML = [
       tile('Parties', int(s.games || 0), `aujourd'hui ${int(s.games_today || 0)}/${limit}${s.games_over_quota ? ` · ${int(s.games_over_quota)} hors quota` : ''}`),
       tile('V – D', wl(s.wins, s.losses)),
@@ -294,7 +294,7 @@
     const games = isNum(s.games) ? Number(s.games) : 0;
     const perGame = (total) => (games > 0 && isNum(total) ? `${fix(Number(total) / games, 1)} / partie` : '');
     const ofGames = (n) => (games > 0 && isNum(n) ? `${pct((Number(n) / games) * 100)} des parties` : '');
-    const limit = s.games_limit || App.gamesPerDay;
+    const limit = s.games_limit_today || s.games_limit || App.gamesPerDay;
     const deadShare = ratio(s.avg_time_dead, s.avg_game_duration);
 
     els.groups.innerHTML = [

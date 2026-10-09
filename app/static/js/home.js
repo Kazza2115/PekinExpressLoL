@@ -61,7 +61,7 @@
       html += '<span class="help">Réservé à l\'organisateur : lance le suivi des parties.</span>';
     } else if (status === 'running') {
       html += '<div class="btn-row"><a class="btn" href="/duos">🤝 Les duos</a><a class="btn btn-primary btn-lg" href="/dashboard">Voir le classement</a></div>';
-      if (c.start_at) html += `<span class="help">Démarré ${esc(App.formatDateTime(c.start_at))}</span>`;
+      if (c.start_at) html += `<span class="help">${Date.parse(c.start_at) > Date.now() ? 'Démarre' : 'Démarré'} ${esc(App.formatDateTime(c.start_at))}${c.end_at ? ` · fin ${esc(App.formatDateTime(c.end_at))}` : ''}</span>`;
     } else {
       html += '<div class="btn-row"><a class="btn" href="/duos">🤝 Les duos</a><a class="btn btn-primary btn-lg" href="/dashboard">Voir le classement final</a></div>';
     }
@@ -123,7 +123,9 @@
     els.duosHint.innerHTML = {
       registration: 'Composés par l\'organisateur · <a href="/duos">toutes les stats →</a>',
       drawn: 'En attente du départ · <a href="/duos">toutes les stats →</a>',
-      running: 'Le challenge est en cours · <a href="/duos">toutes les stats →</a>',
+      running: (state.challenge && state.challenge.start_at && Date.parse(state.challenge.start_at) > Date.now()
+        ? `Départ ${esc(App.formatDateTime(state.challenge.start_at))}`
+        : 'Le challenge est en cours') + ' · <a href="/duos">toutes les stats →</a>',
     }[status] || 'Classement final disponible · <a href="/duos">toutes les stats →</a>';
     els.duosGrid.innerHTML = teams.map((t) => {
       const players = (t.player_ids || []).map(playerById).filter(Boolean);
@@ -244,7 +246,11 @@
 
   async function startChallenge(btn) {
     try {
-      const res = await App.confirm({ title: 'Démarrer le challenge ?', message: 'Les parties jouées à partir de maintenant compteront pour le classement.', confirmText: 'Démarrer' });
+      const c = state.challenge || {};
+      const fmt = (iso) => new Date(iso).toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+      const from = c.start_at ? (Date.parse(c.start_at) > Date.now() ? `à partir du ${fmt(c.start_at)}` : `depuis le ${fmt(c.start_at)}`) : 'à partir de maintenant';
+      const until = c.end_at ? ` jusqu'au ${fmt(c.end_at)} (fin automatique)` : '';
+      const res = await App.confirm({ title: 'Démarrer le challenge ?', message: `Les parties terminées ${from}${until} compteront pour le classement.`, confirmText: 'Démarrer' });
       if (!res.ok) return;
       App.setLoading(btn, true);
       // adminAction renvoie `undefined` si l'utilisateur annule la modale (api() renvoie null pour un corps vide)

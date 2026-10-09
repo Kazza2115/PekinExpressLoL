@@ -46,6 +46,10 @@
         <div class="field"><label for="ch-start">Début</label><input id="ch-start" name="start_at" type="datetime-local"><div class="help">Seules les parties terminées après comptent. Tu peux cliquer « Démarrer » à l'avance : le suivi commencera à cette heure.</div></div>
         <div class="field"><label for="ch-end">Fin</label><input id="ch-end" name="end_at" type="datetime-local"><div class="help">Fin automatique à cette heure (les parties terminées après ne comptent pas). Vide = jusqu'au clic sur « Terminer ».</div></div>
       </div>
+      <div class="form-row">
+        <div class="field"><label for="ch-jokers">Jokers par duo</label><input id="ch-jokers" name="jokers_per_team" type="number" min="0" max="10"><div class="help">Un duo l'active sur la page Duos, un jour du challenge. 0 = pas de joker.</div></div>
+        <div class="field"><label for="ch-joker-extra">Parties en plus avec le joker</label><input id="ch-joker-extra" name="joker_extra_games" type="number" min="0" max="20"><div class="help">Ce jour-là, pour les deux joueurs (ex. 3 → 13 parties au lieu de 10), seulement pour les parties terminées après l'activation.</div></div>
+      </div>
       <label class="check"><input type="checkbox" name="track_flex" id="ch-flex"> Suivre aussi la file Flex</label>
       <div class="btn-row">
         <button type="submit" class="btn" id="ch-save">Enregistrer</button>

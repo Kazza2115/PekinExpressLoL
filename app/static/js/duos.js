@@ -168,7 +168,7 @@
     const medal = started && pos === 1;
     const wr = App.formatPct(t.winrate);
     const tg = t.together_games || 0;
-    const todayParts = players.map((p) => `${p.games_today || 0}/${p.games_limit || gamesPerDay}`);
+    const todayParts = players.map((p) => `${p.games_today || 0}/${p.games_limit_today || p.games_limit || gamesPerDay}`);
     const windowTxt = (t.window_start || t.window_end)
       ? `Fenêtre${t.window_start ? ` du ${esc(App.formatDateTime(t.window_start))}` : ''}${t.window_end ? ` au ${esc(App.formatDateTime(t.window_end))}` : ''}`
       : '';
@@ -195,6 +195,7 @@
         ${tile('KDA moyen du duo', fmtDec(t.avg_kda, 2))}
         ${tile('Parties ensemble', tg ? `${tg}` : '—', tg ? `${t.together_wins || 0} V – ${t.together_losses || 0} D · ${App.formatPct(t.together_winrate)}` : '')}
       </div>
+      ${jokerHtml(t)}
       <div class="duo-face">
         <div class="face-label">Face-à-face</div>
         <div class="face-head">${facePlayer(a, t)}<div class="face-vs">VS</div>${facePlayer(b, t)}</div>
@@ -263,6 +264,55 @@
     return `<tr><td class="cmp-label">${esc(m.label || m.key || '—')}${hint}</td>${cells}</tr>`;
   }
 
+  /* Joker : +N parties comptées aujourd'hui pour le duo (une fois par challenge). */
+  function jokerHtml(t) {
+    const total = t.jokers_total || 0;
+    if (!total) return '';
+    const extra = t.joker_extra_games || 0;
+    const base = gamesPerDay;
+    const used = t.jokers || [];
+    const today = used.find((j) => j.today);
+    const past = used.filter((j) => !j.today);
+    const who = (j) => (j.player_name ? ` par ${esc(j.player_name)}` : '');
+    const at = (j) => (j.activated_at ? ` à ${esc(App.formatTime(j.activated_at))}` : '');
+    const parts = [];
+    if (today) {
+      parts.push(`<span class="chip chip-gold">🃏 Joker actif aujourd'hui</span><span class="joker-text"><strong>${base + (today.extra_games || extra)} parties</strong> comptées aujourd'hui pour le duo (activé${who(today)}${at(today)}). Seules les parties terminées après l'activation profitent des ${today.extra_games || extra} parties en plus.</span>`);
+    }
+    past.forEach((j) => parts.push(`<span class="chip">🃏 Joker utilisé</span><span class="joker-text muted">le ${esc(j.day_label || j.day)}${who(j)}.</span>`));
+    if (t.can_use_joker) {
+      parts.push(`<button type="button" class="btn btn-sm btn-primary" data-joker="${t.team_id}">🃏 Activer le joker : ${base + extra} parties aujourd'hui</button><span class="joker-text muted">${t.jokers_left > 1 ? `${t.jokers_left} jokers restants` : '1 seul joker pour tout le challenge'} · +${extra} parties pour vous deux, aujourd'hui seulement.</span>`);
+    } else if (!today && (t.jokers_left || 0) > 0) {
+      parts.push(`<span class="chip">🃏 Joker disponible</span><span class="joker-text muted">+${extra} parties dans la journée, à activer pendant le challenge.</span>`);
+    }
+    return `<div class="duo-joker">${parts.map((x) => `<div class="joker-row">${x}</div>`).join('')}</div>`;
+  }
+
+  async function useJoker(teamId, btn) {
+    const t = ((data && data.teams) || []).find((x) => x.team_id === teamId);
+    if (!t) return;
+    const players = (t.players || []).filter(Boolean);
+    const extra = t.joker_extra_games || 0;
+    const options = players.map((p) => `<option value="${p.player_id}">${esc(p.display_name)}</option>`).join('');
+    const res = await App.confirm({
+      title: `Activer le joker de ${t.name} ?`,
+      message: `Vous aurez droit à ${gamesPerDay + extra} parties comptées aujourd'hui au lieu de ${gamesPerDay}, tous les deux. Seules les parties terminées à partir de maintenant profitent des ${extra} parties en plus. Il n'y a qu'un joker pour tout le challenge : il sera annoncé à tout le monde.`,
+      extraHtml: `<div class="field mt-sm"><label for="joker-who">Qui active le joker ?</label><select id="joker-who" name="player_id" class="input">${options}</select></div>`,
+      confirmText: '🃏 Activer le joker',
+    });
+    if (!res.ok) return;
+    App.setLoading(btn, true);
+    try {
+      const r = await api(`/api/teams/${teamId}/joker`, { method: 'POST', body: { player_id: parseInt(res.form.player_id, 10) } });
+      toast(`🃏 Joker activé : ${r.joker.limit} parties comptées aujourd'hui pour ${t.name}.`, { type: 'success', timeout: 8000 });
+      await load();
+    } catch (e) {
+      toast(e.message || 'Joker impossible à activer.', { type: 'error' });
+    } finally {
+      App.setLoading(btn, false);
+    }
+  }
+
   function facePlayer(p, t) {
     if (!p) return '<div class="face-player is-empty">Place libre</div>';
     // Couronne seulement si le MVP a quelque chose à montrer (pas de MVP à 0 partie et 0 LP net)
@@ -303,7 +353,7 @@
   }
   function gamesHtml(p) {
     const today = p.games_today || 0;
-    const lim = p.games_limit || gamesPerDay;
+    const lim = p.games_limit_today || p.games_limit || gamesPerDay;
     const pct = Math.min(100, Math.round((today / Math.max(1, lim)) * 100));
     return `${p.games || 0}<span class="f-sub">aujourd'hui ${today}/${lim}${p.games_today_over_quota ? ` · <span class="lp-neg" title="Parties au-delà du quota : elles ne comptent pas">+${p.games_today_over_quota} hors quota</span>` : ''}</span><div class="progress ${today >= lim ? 'done' : ''}"><span style="width:${pct}%"></span></div>`;
   }
@@ -392,8 +442,14 @@
     challenge_reset: refresh,
     player_registered: refresh,
     player_linked: refresh,
+    joker_used: refresh,
+    joker_cancelled: refresh,
   });
   document.addEventListener('pekin:connected', () => { if (data) refresh(); });
+  els.list.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-joker]');
+    if (btn) useJoker(parseInt(btn.dataset.joker, 10), btn);
+  });
   window.addEventListener('hashchange', () => { targetDone = false; highlightTarget(); });
 
   setInterval(() => { if (!document.hidden) load(); }, 60000);

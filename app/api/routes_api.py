@@ -65,6 +65,7 @@ from app.services.stats import (
     TeamStats,
     build_rank_ladder,
     compare_teams,
+    fr_day_label,
     metric_rankings,
 )
 from app.services.tunnel import public_url
@@ -284,6 +285,24 @@ def health(challenge: Challenge = Depends(get_challenge)) -> dict[str, Any]:
     }
 
 
+def _jokers_public(session: Session, players: list[Player]) -> list[dict[str, Any]]:
+    names = {p.id: p.display_name for p in players}
+    rows = session.exec(select(Joker).order_by(col(Joker.activated_at), col(Joker.id))).all()
+    return [
+        {
+            "id": joker.id,
+            "team_id": joker.team_id,
+            "day": joker.day,
+            "day_label": fr_day_label(joker.day),
+            "activated_at": as_utc(joker.activated_at).isoformat(),  # type: ignore[union-attr]
+            "player_id": joker.player_id,
+            "player_name": names.get(joker.player_id) if joker.player_id is not None else None,
+            "extra_games": joker.extra_games,
+        }
+        for joker in rows
+    ]
+
+
 @router.get("/api/state")
 def get_state(
     session: Session = Depends(get_session), challenge: Challenge = Depends(get_challenge)
@@ -309,6 +328,8 @@ def get_state(
         "site_version": SITE_VERSION,
         # Joueurs créés en mode démo (identifiants inventés) : à supprimer avant de passer en réel
         "demo_players": [p.id for p in players if (p.puuid or "").startswith("demo-")],
+        # Jokers activés (Admin : liste avec annulation)
+        "jokers": _jokers_public(session, players),
     }
 
 

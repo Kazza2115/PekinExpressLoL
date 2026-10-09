@@ -151,19 +151,45 @@
   /* ------------------------------------------------------------------ */
   /* Challenge                                                            */
   /* ------------------------------------------------------------------ */
+  /* Champs du challenge modifiés et pas encore enregistrés : un rechargement (événement en direct)
+     ne doit pas les effacer. Vidé après « Enregistrer » ou « Démarrer ». */
+  const chDirty = new Set();
+  ['name', 'games_per_day', 'start_at', 'end_at', 'track_flex', 'jokers_per_team', 'joker_extra_games'].forEach((name) => {
+    const input = els.chForm.elements[name];
+    if (!input) return;
+    input.addEventListener('input', () => chDirty.add(name));
+    input.addEventListener('change', () => chDirty.add(name));
+  });
+
   function renderChallenge() {
     const c = state.challenge || {};
     els.status.innerHTML = App.statusChip(c.status, c.start_at);
-    const f = els.chForm;
-    if (document.activeElement && f.contains(document.activeElement)) return; // ne pas écraser une saisie en cours
-    f.name.value = c.name || '';
-    f.games_per_day.value = c.games_per_day || App.gamesPerDay;
-    f.start_at.value = toLocalInput(c.start_at);
-    f.end_at.value = toLocalInput(c.end_at);
-    f.track_flex.checked = !!c.track_flex;
     els.btnStart.disabled = !(c.status === 'drawn' || c.status === 'registration');
     els.btnStart.title = c.status === 'registration' ? 'Tous les joueurs actifs et liés doivent être dans un duo complet' : '';
     els.btnFinish.disabled = c.status !== 'running';
+    const f = els.chForm;
+    const set = (name, apply) => { if (!chDirty.has(name) && f.elements[name]) apply(f.elements[name]); };
+    set('name', (i) => { i.value = c.name || ''; });
+    set('games_per_day', (i) => { i.value = c.games_per_day || App.gamesPerDay; });
+    set('start_at', (i) => { i.value = toLocalInput(c.start_at); });
+    set('end_at', (i) => { i.value = toLocalInput(c.end_at); });
+    set('track_flex', (i) => { i.checked = !!c.track_flex; });
+    set('jokers_per_team', (i) => { i.value = c.jokers_per_team ?? 1; });
+    set('joker_extra_games', (i) => { i.value = c.joker_extra_games ?? 3; });
+  }
+
+  /* Champs modifiés autres que les dates (envoyées avec « Démarrer »). */
+  function dirtyChallengeFields() {
+    const f = els.chForm;
+    const body = {};
+    if (chDirty.has('name') && f.name.value.trim()) body.name = f.name.value.trim();
+    if (chDirty.has('games_per_day') && parseInt(f.games_per_day.value, 10)) body.games_per_day = parseInt(f.games_per_day.value, 10);
+    if (chDirty.has('track_flex')) body.track_flex = f.track_flex.checked;
+    ['jokers_per_team', 'joker_extra_games'].forEach((name) => {
+      const value = parseInt(f.elements[name] && f.elements[name].value, 10);
+      if (chDirty.has(name) && !isNaN(value)) body[name] = value;
+    });
+    return body;
   }
 
   els.chForm.addEventListener('submit', async (e) => {
@@ -176,10 +202,17 @@
       end_at: fromLocalInput(f.end_at.value),
       track_flex: f.track_flex.checked,
     };
+    ['jokers_per_team', 'joker_extra_games'].forEach((name) => {
+      const value = parseInt(f.elements[name] && f.elements[name].value, 10);
+      if (!isNaN(value)) body[name] = value;
+    });
     App.setLoading(els.chSave, true);
     try {
       const r = await admin(() => api('/api/admin/challenge', { method: 'PATCH', admin: true, body }));
-      if (r !== undefined) toast('Challenge enregistré.', { type: 'success' });
+      if (r !== undefined) {
+        chDirty.clear();
+        toast(r.reopened ? 'Challenge enregistré : il reprend jusqu\'à la nouvelle fin.' : 'Challenge enregistré.', { type: 'success' });
+      }
       f.name.blur();
       await load();
     } catch (err) {
@@ -192,31 +225,45 @@
   const longDate = (iso) => new Date(iso).toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
   const sameInstant = (a, b) => (a ? Date.parse(a) : null) === (b ? Date.parse(b) : null);
 
+  /* « jusqu'à minuit dans la nuit du dimanche 11 au lundi 12 octobre » pour une fin à 00:00. */
+  function endPhrase(iso) {
+    const d = new Date(iso);
+    if (d.getHours() === 0 && d.getMinutes() === 0) {
+      const before = new Date(d.getTime() - 60000);
+      const day = (x, opts) => x.toLocaleDateString('fr-FR', opts);
+      return `jusqu'à minuit, dans la nuit du ${day(before, { weekday: 'long', day: 'numeric' })} au ${day(d, { weekday: 'long', day: 'numeric', month: 'long' })}`;
+    }
+    return `jusqu'au ${longDate(iso)}`;
+  }
+
   els.btnStart.addEventListener('click', async () => {
-    // Les dates saisies (Début / Fin) sont celles du challenge : enregistrées avant de démarrer
-    const f = els.chForm;
     const c = state.challenge || {};
-    const startAt = fromLocalInput(f.start_at.value);
+    if (!(c.status === 'registration' || c.status === 'drawn')) { await load(); return; } // déjà démarré
+    const f = els.chForm;
+    const startAt = fromLocalInput(f.start_at.value) || new Date().toISOString();
     const endAt = fromLocalInput(f.end_at.value);
-    const dirty = !sameInstant(startAt, c.start_at) || !sameInstant(endAt, c.end_at);
-    const startTxt = !startAt
-      ? 'Le suivi des parties commence maintenant'
-      : (Date.parse(startAt) > Date.now() ? `Les parties compteront à partir du ${longDate(startAt)}` : `Les parties comptent depuis le ${longDate(startAt)}`);
-    const endTxt = endAt ? ` jusqu'au ${longDate(endAt)} (fin automatique)` : ' jusqu\'au clic sur « Terminer »';
+    const future = Date.parse(startAt) > Date.now() + 60000;
+    const startTxt = future ? `Les parties compteront à partir du ${longDate(startAt)}` : `Les parties comptent depuis le ${longDate(startAt)}`;
+    const hours = endAt ? Math.round((Date.parse(endAt) - Date.parse(startAt)) / 3600000) : null;
+    const endTxt = endAt ? ` ${endPhrase(endAt)} (fin automatique, durée ${hours} h)` : ' jusqu\'au clic sur « Terminer »';
+    const warn = endAt && hours !== null && hours < 24 ? ' ⚠️ Moins de 24 h : vérifie la date de fin.' : '';
     const res = await App.confirm({
       title: 'Démarrer le challenge ?',
-      message: `${startTxt}${endTxt}. Les inscriptions et la composition des duos seront figées. Les joueurs seront prévenus.`,
+      message: `${startTxt}${endTxt}.${warn} Les inscriptions et la composition des duos seront figées. Les joueurs seront prévenus.`,
       confirmText: '🚀 Démarrer',
     });
     if (!res.ok) return;
     App.setLoading(els.btnStart, true);
     try {
-      if (dirty) {
-        const saved = await admin(() => api('/api/admin/challenge', { method: 'PATCH', admin: true, body: { start_at: startAt, end_at: endAt } }));
+      const others = dirtyChallengeFields();
+      if (Object.keys(others).length) {
+        const saved = await admin(() => api('/api/admin/challenge', { method: 'PATCH', admin: true, body: others }));
         if (saved === undefined) return;
       }
-      const r = await admin(() => api('/api/admin/challenge/start', { method: 'POST', admin: true, body: {} }));
+      // Les dates partent avec le démarrage : un challenge déjà en cours est refusé sans rien modifier
+      const r = await admin(() => api('/api/admin/challenge/start', { method: 'POST', admin: true, body: { start_at: startAt, end_at: endAt } }));
       if (r !== undefined) {
+        chDirty.clear();
         const started = r.challenge && r.challenge.start_at;
         toast(started && Date.parse(started) > Date.now() ? `Challenge prêt : les parties compteront à partir du ${longDate(started)}.` : 'Challenge démarré !', { type: 'success', timeout: 9000 });
         (r.warnings || []).forEach((w) => toast(`⚠️ ${w}`, { type: 'warning', timeout: 9000 }));
@@ -333,6 +380,7 @@
               <div class="field"><label for="ta-we-${t.id}">Fin</label><input id="ta-we-${t.id}" type="datetime-local" name="window_end" value="${toLocalInput(t.window_end)}" ${dis}></div>
             </div>
           </details>
+          ${jokersOfTeamHtml(t.id)}
           ${readOnly ? '' : `<div class="ta-actions">
             <button type="submit" class="btn btn-sm btn-primary">Enregistrer</button>
             <button type="button" class="btn btn-sm btn-danger" data-delete-team="${t.id}">Supprimer</button>
@@ -343,6 +391,8 @@
     }
 
     renderUnassigned();
+    // Annuler un joker : possible pendant le challenge, quand les duos sont figés
+    $$('[data-cancel-joker]', els.teams).forEach((btn) => btn.addEventListener('click', () => cancelJoker(parseInt(btn.dataset.cancelJoker, 10), btn)));
     if (readOnly) return;
 
     $$('form.team-admin', els.teams).forEach((form) => {
@@ -536,6 +586,31 @@
       <div class="muted small">${status} Il ne change jamais : c'est celui à donner aux joueurs.</div>`;
   }
 
+  function jokersOfTeamHtml(teamId) {
+    const list = (state.jokers || []).filter((j) => j.team_id === teamId);
+    if (!list.length) return '';
+    return `<div class="ta-jokers">${list.map((j) => `<div class="flex wrap" style="gap:8px;align-items:center">
+      <span class="chip chip-gold">🃏 Joker</span>
+      <span class="muted small">${esc(j.day_label || j.day)} à ${esc(App.formatTime(j.activated_at))}${j.player_name ? ` par ${esc(j.player_name)}` : ''} · +${j.extra_games} parties</span>
+      <button type="button" class="btn btn-sm btn-ghost" data-cancel-joker="${j.id}">Annuler</button>
+    </div>`).join('')}</div>`;
+  }
+
+  async function cancelJoker(id, btn) {
+    const res = await App.confirm({ title: 'Annuler ce joker ?', message: 'Le duo récupère son joker ; les parties en plus de ce jour-là ne comptent plus.', confirmText: 'Annuler le joker', danger: true });
+    if (!res.ok) return;
+    App.setLoading(btn, true);
+    try {
+      const r = await admin(() => api(`/api/admin/jokers/${id}`, { method: 'DELETE', admin: true }));
+      if (r !== undefined) toast('Joker annulé.', { type: 'success' });
+      await load();
+    } catch (err) {
+      toast(err.message, { type: 'error' });
+    } finally {
+      App.setLoading(btn, false);
+    }
+  }
+
   function renderPublicUrl() {
     if (!els.sysUrl) return;
     const pub = (state && state.public_url) || null;
@@ -678,6 +753,8 @@
     poll_done: App.debounce(() => { if (!els.panel.hidden) load(); }, 1000),
     draw_done: () => { if (!els.panel.hidden) load(); },
     teams_changed: () => { if (!els.panel.hidden) load(); },
+    joker_used: () => { if (!els.panel.hidden) load(); },
+    joker_cancelled: () => { if (!els.panel.hidden) load(); },
     team_updated: () => { if (!els.panel.hidden) load(); },
     challenge_started: () => { if (!els.panel.hidden) load(); },
     challenge_finished: () => { if (!els.panel.hidden) load(); },

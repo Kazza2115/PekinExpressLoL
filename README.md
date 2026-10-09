@@ -49,10 +49,23 @@ challenge passe tout seul à « Terminé » (inutile de cliquer « Terminer » ;
 la fin, la fin programmée est gardée). Laisse le site tourner **avant le début** (les LP de
 référence sont relevés à cette heure-là) et **jusqu'à 15 min après la fin**.
 
+### Le joker 🃏
+
+Chaque duo a **un joker** pour tout le challenge (réglable dans Admin → Challenge). Un joueur
+du duo l'active sur la page **Duos** (bouton « 🃏 Activer le joker »), pendant le challenge :
+ce jour-là, les deux joueurs ont droit à **13 parties comptées au lieu de 10** (3 de plus,
+réglable). Seules les parties **terminées après l'activation** profitent des 3 parties en
+plus : pas de joker « après coup » sur des parties déjà jouées. L'activation est annoncée à
+tout le monde (pages et Discord). L'organisateur peut l'annuler dans **Admin → Duos** (le duo
+le récupère).
+
 ### Ce qui compte, ce qui ne compte pas
 
 - Seules les parties **Ranked Solo/Duo** comptent (la **Flex** peut être ajoutée en option).
 - Les **remakes** (parties de moins de 5 minutes) sont **exclus** des statistiques.
+- Les LP d'une partie terminée **avant le début ou après la fin** ne comptent pas, même si Riot
+  ne les publie qu'après coup : les compteurs de victoires et défaites de Riot disent combien
+  de parties chaque relevé de rang couvre, et la part des parties hors des heures est retirée.
 - Une partie compte si elle **se termine** entre « Démarrer » et « Terminer » (c'est à la fin
   de la partie que les LP sont attribués). Une partie en cours au moment du clic sur
   « Démarrer » compte donc, et le compteur « 10 games par jour » suit la même règle.
