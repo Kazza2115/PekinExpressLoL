@@ -767,16 +767,28 @@ async def reload_app_settings(request: Request) -> dict[str, Any]:
 
 @router.post("/test-notification")
 async def test_notification() -> dict[str, Any]:
-    """Message de test : exemple de carte de résultat, GIF de victoire et de défaite, mention du rôle."""
+    """Message de test : exemple de carte, GIF de victoire et de défaite, mention du rôle.
+
+    Discord renvoie le message créé (`wait=true`) : on sait alors si la mention du rôle a
+    vraiment été retenue (`role_recognized`), ce que le simple envoi ne dit pas.
+    """
     settings = get_settings()
+    role_id = settings.discord_role_id
     try:
         content, embeds = await notifications.build_test_message(settings=settings)
-        sent = await notifications.send_discord(content, embeds=embeds, settings=settings)
+        result = await notifications.post_discord(content, embeds=embeds, wait=True, settings=settings)
     except Exception:  # noqa: BLE001
         log.warning("Notification Discord de test impossible", exc_info=True)
-        sent = False
+        result = notifications.DiscordSendResult(sent=False, error="erreur inattendue (voir le journal)")
+    recognized = None
+    if result.sent and role_id and result.mention_roles is not None:
+        recognized = role_id in result.mention_roles
     return {
-        "sent": bool(sent),
-        "role_mention": bool(settings.discord_role_id),
+        "sent": bool(result.sent),
+        "error": result.error,
+        "role_mention": bool(role_id),
+        "role_id": role_id or None,
+        "role_id_invalid": settings.discord_role_id_invalid or None,
+        "role_recognized": recognized,
         "klipy": bool(settings.klipy_api_key),
     }

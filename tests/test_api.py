@@ -737,7 +737,15 @@ def test_admin_maintenance(client: TestClient, admin_headers: dict) -> None:
     response = client.post("/api/admin/test-notification", headers=admin_headers)
     assert response.status_code == 200
     # pas de webhook configuré en test (ni rôle à mentionner, ni clé Klipy)
-    assert response.json() == {"sent": False, "role_mention": False, "klipy": False}
+    assert response.json() == {
+        "sent": False,
+        "error": "DISCORD_WEBHOOK_URL est vide",
+        "role_mention": False,
+        "role_id": None,
+        "role_id_invalid": None,
+        "role_recognized": None,
+        "klipy": False,
+    }
 
     response = client.post("/api/admin/reload-settings", headers=admin_headers)
     assert response.status_code == 200

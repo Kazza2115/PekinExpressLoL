@@ -52,7 +52,8 @@ DEFAULT_GIF_SEARCH_WIN: tuple[str, ...] = (
 # Valeurs qui désactivent une liste de GIF (`DISCORD_GIF_… = off`)
 GIF_OFF_VALUES = {"off", "non", "aucun", "none", "0", "-"}
 _GIPHY_PAGE_RE = re.compile(r"^https?://(?:www\.)?giphy\.com/(?:gifs|stickers)/(?:[^/?#]*-)?([A-Za-z0-9]+)/?(?:[?#].*)?$")
-_DIGITS_RE = re.compile(r"\d{5,25}")
+# Identifiant de rôle Discord seul, ou mention de rôle « <@&123…> » (snowflake de 17 à 20 chiffres)
+_ROLE_ID_RE = re.compile(r"\s*(?:<@&)?(\d{15,21})>?\s*")
 
 
 def normalize_gif_url(url: str) -> str | None:
@@ -90,9 +91,22 @@ def _env_terms(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def parse_role_id(raw: str) -> str:
-    """ID du rôle Discord à mentionner : « 1234… » ou « <@&1234…> » → « 1234… » ; sinon vide."""
-    match = _DIGITS_RE.search(raw or "")
-    return match.group(0) if match else ""
+    """ID du rôle Discord à mentionner : « 1234… » ou « <@&1234…> » → « 1234… » ; sinon vide.
+
+    Un lien de salon, une mention de membre (« <@123> ») ou de salon (« <#123> ») est refusé :
+    ses chiffres ne sont pas ceux d'un rôle.
+    """
+    match = _ROLE_ID_RE.fullmatch(raw or "")
+    return match.group(1) if match else ""
+
+
+def _invalid_role_id(raw: str) -> str:
+    """Valeur non vide de DISCORD_ROLE_ID qui n'est pas un identifiant de rôle (sinon vide)."""
+    raw = (raw or "").strip()
+    if raw and not parse_role_id(raw):
+        log.warning("DISCORD_ROLE_ID invalide (%r) : attendu l'identifiant numérique du rôle", raw[:40])
+        return raw[:80]
+    return ""
 
 
 def _env_int(name: str, default: int) -> int:
@@ -131,6 +145,8 @@ class Settings:
     challenge_end: str = "12/10/2026 00:00"
     # Discord : rôle mentionné dans chaque message (ID numérique, vide = aucune mention)
     discord_role_id: str = ""
+    # Valeur de DISCORD_ROLE_ID refusée (lien, mention de membre…) : affichée par le test de l'admin
+    discord_role_id_invalid: str = ""
     # GIF des résultats : catégories cherchées sur Klipy (clé gratuite KLIPY_API_KEY), tirées au
     # hasard ; liens de secours si Klipy est indisponible (ou sans clé)
     klipy_api_key: str = ""
@@ -216,6 +232,7 @@ def _build_settings() -> Settings:
         challenge_start=os.getenv("CHALLENGE_START", "10/10/2026 09:00").strip(),
         challenge_end=os.getenv("CHALLENGE_END", "12/10/2026 00:00").strip(),
         discord_role_id=parse_role_id(os.getenv("DISCORD_ROLE_ID", "")),
+        discord_role_id_invalid=_invalid_role_id(os.getenv("DISCORD_ROLE_ID", "")),
         klipy_api_key=os.getenv("KLIPY_API_KEY", "").strip(),
         gif_search_win=_env_terms("DISCORD_GIF_SEARCH_WIN", DEFAULT_GIF_SEARCH_WIN),
         gif_search_loss=_env_terms("DISCORD_GIF_SEARCH_LOSS", DEFAULT_GIF_SEARCH_LOSS),

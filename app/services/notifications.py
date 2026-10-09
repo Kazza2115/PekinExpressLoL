@@ -94,6 +94,75 @@ def clamp_embed(embed: Mapping[str, Any]) -> dict[str, Any]:
     return clean
 
 
+@dataclass
+class DiscordSendResult:
+    """Résultat détaillé d'un envoi (diagnostic du test de l'admin)."""
+
+    sent: bool
+    status: int | None = None  # code HTTP de Discord (None : pas d'envoi ou réseau KO)
+    error: str | None = None
+    mention_roles: list[str] | None = None  # rôles notifiés selon Discord (`wait=true` seulement)
+
+
+async def post_discord(
+    content: str = "",
+    *,
+    embeds: Sequence[Mapping[str, Any]] | None = None,
+    mention: bool = True,
+    wait: bool = False,
+    settings: Settings | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> DiscordSendResult:
+    """Envoi sur le webhook, avec le détail de la réponse. Jamais d'exception.
+
+    `wait=True` demande à Discord de renvoyer le message créé : `mention_roles` dit alors si la
+    mention du rôle a vraiment été prise en compte (rôle existant et mentionnable).
+    """
+    settings = settings if settings is not None else get_settings()
+    url = (settings.discord_webhook_url or "").strip()
+    if not url:
+        return DiscordSendResult(sent=False, error="DISCORD_WEBHOOK_URL est vide")
+    mention_text = role_mention(settings) if mention else ""
+    if content and mention_text:
+        text = f"{mention_text} {truncate(content, DISCORD_MAX_LENGTH - len(mention_text) - 1)}"
+    else:
+        text = truncate(content) if content else mention_text
+    cards = [clamp_embed(embed) for embed in (embeds or [])[:MAX_EMBEDS]]
+    if not text and not cards:
+        return DiscordSendResult(sent=False, error="message vide")
+    allowed: dict[str, Any] = {"parse": []}
+    if mention_text:
+        allowed["roles"] = [settings.discord_role_id.strip()]
+    payload: dict[str, Any] = {"content": text, "allowed_mentions": allowed}
+    if cards:
+        payload["embeds"] = cards
+    try:
+        # `wait` ajouté aux paramètres déjà présents (ex. `thread_id` d'un webhook de fil)
+        target = httpx.URL(url).copy_merge_params({"wait": "true"}) if wait else url
+        if client is not None:
+            response = await client.post(target, json=payload, timeout=DISCORD_TIMEOUT_S)
+        else:
+            async with httpx.AsyncClient(timeout=DISCORD_TIMEOUT_S) as own_client:
+                response = await own_client.post(target, json=payload)
+    except Exception as exc:  # noqa: BLE001 — réseau, timeout, URL invalide…
+        log.warning("Webhook Discord injoignable : %s", exc)
+        return DiscordSendResult(sent=False, error=f"Discord injoignable ({type(exc).__name__})")
+    if response.status_code >= 400:
+        log.warning(
+            "Webhook Discord : HTTP %s — %s", response.status_code, response.text[:200]
+        )
+        return DiscordSendResult(sent=False, status=response.status_code, error=f"Discord a refusé le message (HTTP {response.status_code})")
+    mention_roles = None
+    if wait:
+        try:
+            body = response.json()
+            roles = body.get("mention_roles") if isinstance(body, dict) else None
+            mention_roles = [str(role) for role in roles] if isinstance(roles, list) else None
+        except ValueError:
+            mention_roles = None
+    return DiscordSendResult(sent=True, status=response.status_code, mention_roles=mention_roles)
+
+
 async def send_discord(
     content: str = "",
     *,
@@ -109,39 +178,8 @@ async def send_discord(
     message, `False` sinon (webhook non configuré, erreur réseau, réponse HTTP ≥ 400). Jamais
     d'exception. `client` permet d'injecter un `httpx.AsyncClient` (tests : `MockTransport`).
     """
-    settings = settings if settings is not None else get_settings()
-    url = (settings.discord_webhook_url or "").strip()
-    if not url:
-        return False
-    mention_text = role_mention(settings) if mention else ""
-    if content and mention_text:
-        text = f"{mention_text} {truncate(content, DISCORD_MAX_LENGTH - len(mention_text) - 1)}"
-    else:
-        text = truncate(content) if content else mention_text
-    cards = [clamp_embed(embed) for embed in (embeds or [])[:MAX_EMBEDS]]
-    if not text and not cards:
-        return False
-    allowed: dict[str, Any] = {"parse": []}
-    if mention_text:
-        allowed["roles"] = [settings.discord_role_id.strip()]
-    payload: dict[str, Any] = {"content": text, "allowed_mentions": allowed}
-    if cards:
-        payload["embeds"] = cards
-    try:
-        if client is not None:
-            response = await client.post(url, json=payload, timeout=DISCORD_TIMEOUT_S)
-        else:
-            async with httpx.AsyncClient(timeout=DISCORD_TIMEOUT_S) as own_client:
-                response = await own_client.post(url, json=payload)
-    except Exception as exc:  # noqa: BLE001 — réseau, timeout, URL invalide…
-        log.warning("Webhook Discord injoignable : %s", exc)
-        return False
-    if response.status_code >= 400:
-        log.warning(
-            "Webhook Discord : HTTP %s — %s", response.status_code, response.text[:200]
-        )
-        return False
-    return True
+    result = await post_discord(content, embeds=embeds, mention=mention, settings=settings, client=client)
+    return result.sent
 
 
 # --------------------------------------------------------------------------- #

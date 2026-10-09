@@ -163,6 +163,10 @@ rem Ecrit un .env complet (identique a .env.example) sans dependre de la copie
 >>".env" echo.
 >>".env" echo # Webhook Discord (optionnel). Vide = desactive.
 >>".env" echo DISCORD_WEBHOOK_URL=
+>>".env" echo # Role mentionne dans chaque message : son identifiant (Discord, mode developpeur, clic droit sur le role, Copier l'identifiant du role).
+>>".env" echo DISCORD_ROLE_ID=
+>>".env" echo # GIF des resultats cherches sur Klipy : cle gratuite sur partner.klipy.com. Vide = pas de GIF.
+>>".env" echo KLIPY_API_KEY=
 >>".env" echo.
 >>".env" echo # Adresse publique du site (utilisee dans les messages Discord)
 >>".env" echo BASE_URL=http://localhost:8000

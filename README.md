@@ -326,9 +326,21 @@ carte de résultat, un GIF de victoire et un GIF de défaite. Le site poste ensu
 - L'annonce du tirage des duos, du démarrage du challenge et des jokers.
 
 **Mention du rôle** (ex. @PekinExpress) : active le mode développeur de Discord (Paramètres →
-Avancés), puis Paramètres du serveur → Rôles → clic droit sur le rôle → « Copier l'identifiant
-du rôle », et mets ce numéro dans `DISCORD_ROLE_ID`. Si la mention ne sonne pas, coche « Permettre
-à tout le monde de @mentionner ce rôle » dans les réglages du rôle.
+Avancés), puis Paramètres du serveur → Rôles → « ⋯ » ou clic droit sur le rôle → « Copier
+l'identifiant du rôle », et mets ce numéro (17 à 20 chiffres) dans `DISCORD_ROLE_ID`. Dans les
+réglages du rôle, active **« Permettre à tout le monde de @mentionner ce rôle »** : un rôle créé
+dans Discord ne l'est pas par défaut, et un webhook ne peut alors faire sonner personne.
+
+**« Tester Discord »** relit `.env`, envoie le message de test et affiche un diagnostic : Discord
+renvoie le message créé, donc le site sait si la mention du rôle a vraiment été retenue. Si elle
+l'est mais que rien ne sonne, c'est un réglage Discord de ton côté :
+
+1. tu dois **avoir le rôle** toi-même (seuls ses membres sont notifiés) ;
+2. Discord ne sonne pas pour le salon **déjà ouvert à l'écran** : teste depuis un autre salon ;
+3. clic droit sur le serveur → Paramètres de notification : « Supprimer toutes les mentions de
+   rôle » doit être décoché, et le serveur ou le salon ne doit pas être en sourdine ;
+4. pas de statut « Ne pas déranger » ; sur téléphone, Discord ne notifie pas tant qu'il est actif
+   sur le PC.
 
 ---
 
@@ -347,7 +359,7 @@ Protégée par le mot de passe `ADMIN_PASSWORD`. Une fois connecté :
 | Joueurs | **Supprimer** | Supprime le joueur, ses photos de rang et ses parties. Définitif. |
 | Système | **Forcer un rafraîchissement** | Lance un cycle d'interrogation Riot immédiatement. |
 | Système | **Recharger .env** | Relit `.env` (nouvelle clé, mode démo…) sans redémarrer. |
-| Système | **Tester Discord** | Envoie un message de test (exemple de carte, GIF de victoire et de défaite, mention du rôle). |
+| Système | **Tester Discord** | Relit `.env` et envoie un message de test (exemple de carte, GIF de victoire et de défaite, mention du rôle), avec un diagnostic de la mention. |
 | En-tête | **Se déconnecter** | Oublie le mot de passe dans ce navigateur. |
 
 La section « Système » affiche aussi l'état du dernier cycle : date, durée, nombre de

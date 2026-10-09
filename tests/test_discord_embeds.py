@@ -169,7 +169,53 @@ def test_clamp_embed_respects_discord_limits():
 def test_role_id_parsing_accepts_raw_id_or_mention():
     assert config.parse_role_id(ROLE_ID) == ROLE_ID
     assert config.parse_role_id(f"<@&{ROLE_ID}>") == ROLE_ID
+    assert config.parse_role_id(f"  {ROLE_ID} ") == ROLE_ID
+    # Ni un nom, ni un lien de salon, ni une mention de membre ou de salon
     assert config.parse_role_id("@PekinExpress") == ""
+    assert config.parse_role_id(f"https://discord.com/channels/{ROLE_ID}/223456789012345678") == ""
+    assert config.parse_role_id(f"<@{ROLE_ID}>") == ""
+    assert config.parse_role_id(f"<#{ROLE_ID}>") == ""
+    assert config._invalid_role_id(f"<@{ROLE_ID}>") == f"<@{ROLE_ID}>"
+    assert config._invalid_role_id(ROLE_ID) == ""
+    assert config._invalid_role_id("") == ""
+
+
+async def test_post_discord_wait_reports_the_roles_discord_mentioned():
+    seen: list[httpx.Request] = []
+    settings = make_settings(discord_role_id=ROLE_ID, discord_webhook_url=WEBHOOK_URL + "?thread_id=99")
+    async with recorder(seen, 200, {"id": "1", "mention_roles": [ROLE_ID]}) as client:
+        result = await notifications.post_discord("Test", wait=True, settings=settings, client=client)
+    assert result.sent is True and result.mention_roles == [ROLE_ID]
+    assert seen[0].url.params["wait"] == "true" and seen[0].url.params["thread_id"] == "99"
+
+    async with recorder([], 200, {"id": "2", "mention_roles": []}) as client:
+        result = await notifications.post_discord("Test", wait=True, settings=settings, client=client)
+    assert result.mention_roles == []
+
+    async with recorder([], 404, {"message": "Unknown Webhook"}) as client:
+        result = await notifications.post_discord("Test", settings=settings, client=client)
+    assert (result.sent, result.status) == (False, 404) and "HTTP 404" in (result.error or "")
+
+
+async def test_admin_test_reports_whether_discord_kept_the_role_mention(monkeypatch: pytest.MonkeyPatch):
+    from app.api import routes_admin
+
+    monkeypatch.setattr(routes_admin, "get_settings", lambda: make_settings(discord_role_id=ROLE_ID))
+    for roles, expected in (([ROLE_ID], True), ([], False)):
+        async def fake_post(content, *, embeds=None, wait=False, settings=None, _roles=roles, **_):
+            assert wait is True and content == notifications.TEST_NOTIFICATION_CONTENT
+            return notifications.DiscordSendResult(sent=True, status=200, mention_roles=_roles)
+
+        monkeypatch.setattr(notifications, "post_discord", fake_post)
+        report = await routes_admin.test_notification()
+        assert report["sent"] is True and report["role_id"] == ROLE_ID
+        assert report["role_recognized"] is expected
+
+    monkeypatch.setattr(
+        routes_admin, "get_settings", lambda: make_settings(discord_role_id_invalid="https://discord.com/channels/1/2")
+    )
+    report = await routes_admin.test_notification()
+    assert report["role_mention"] is False and report["role_id_invalid"] == "https://discord.com/channels/1/2"
 
 
 def test_gif_search_terms_from_env(monkeypatch: pytest.MonkeyPatch):

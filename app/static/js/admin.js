@@ -775,18 +775,47 @@
     }
   });
 
+  /* Diagnostic du test Discord : message envoyé ? mention du rôle retenue par Discord ? GIF ? */
+  function discordReportHtml(r) {
+    const line = (ok, html) => `<li class="diag-line ${ok === true ? 'is-ok' : ok === false ? 'is-ko' : 'is-warn'}"><span class="diag-icon">${ok === true ? '✅' : ok === false ? '❌' : '⚠️'}</span><span>${html}</span></li>`;
+    const items = [];
+    items.push(r.sent ? line(true, 'Message de test envoyé sur Discord.') : line(false, `Rien envoyé : ${esc(r.error || "échec de l'envoi")}.`));
+    if (r.role_id_invalid) {
+      items.push(line(false, `<strong>DISCORD_ROLE_ID</strong> ne contient pas un identifiant de rôle (« ${esc(r.role_id_invalid)} »). Il faut le numéro du rôle seul (17 à 20 chiffres) : Discord → Paramètres du serveur → Rôles → « ⋯ » à côté de PekinExpress → « Copier l'identifiant du rôle ».`));
+    } else if (!r.role_mention) {
+      items.push(line(null, 'Pas de mention : <strong>DISCORD_ROLE_ID</strong> est vide dans .env.'));
+    } else if (r.role_recognized === false) {
+      items.push(line(false, `Discord n'a <strong>pas</strong> retenu la mention du rôle (ID ${esc(r.role_id)}). Soit le rôle n'est pas mentionnable : Paramètres du serveur → Rôles → PekinExpress → « Permettre à tout le monde de @mentionner ce rôle » → Enregistrer. Soit l'identifiant n'est pas celui d'un rôle de ce serveur (le message affiche alors « @rôle-inconnu »).`));
+    } else if (r.role_recognized === true) {
+      items.push(line(true, `Discord a bien reçu la mention du rôle (ID ${esc(r.role_id)}).`));
+    } else if (r.sent) {
+      items.push(line(null, `Mention du rôle envoyée (ID ${esc(r.role_id)}), sans confirmation de Discord.`));
+    }
+    items.push(r.klipy ? line(true, 'GIF Klipy activés.') : line(null, 'Pas de GIF Klipy : <strong>KLIPY_API_KEY</strong> est vide dans .env.'));
+    const checklist = r.sent && r.role_mention && !r.role_id_invalid ? `
+      <p class="muted" style="margin:14px 0 6px">Pas de son malgré la mention ? Vérifie dans Discord :</p>
+      <ol class="diag-check">
+        <li>Le rôle est <strong>mentionnable</strong> : Paramètres du serveur → Rôles → PekinExpress → « Permettre à tout le monde de @mentionner ce rôle ».</li>
+        <li><strong>Tu as le rôle</strong> toi-même (clic sur ton pseudo dans la liste des membres) : seuls ses membres sont notifiés.</li>
+        <li>Tu ne regardais pas déjà ce salon : Discord ne sonne pas pour le salon ouvert à l'écran. Refais le test depuis un autre salon, ou Discord réduit.</li>
+        <li>Clic droit sur le serveur → Paramètres de notification : « Supprimer toutes les mentions de rôle » est <strong>décoché</strong>, et le serveur ou le salon n'est pas en sourdine.</li>
+        <li>Ton statut n'est pas « Ne pas déranger ». Sur téléphone : pas de notification tant que Discord est actif sur le PC.</li>
+      </ol>` : '';
+    return `<ul class="diag-list">${items.join('')}</ul>${checklist}`;
+  }
+
   els.btnDiscord.addEventListener('click', async () => {
     App.setLoading(els.btnDiscord, true);
     try {
+      // Relit .env d'abord : le test utilise toujours les valeurs que tu viens d'enregistrer
+      await admin(() => api('/api/admin/reload-settings', { method: 'POST', admin: true, body: {} }));
       const r = await admin(() => api('/api/admin/test-notification', { method: 'POST', admin: true, body: {} }));
-      if (r !== undefined) {
-        if (r && r.sent) {
-          const notes = [];
-          if (!r.role_mention) notes.push('sans mention : DISCORD_ROLE_ID est vide');
-          if (!r.klipy) notes.push('sans GIF Klipy : KLIPY_API_KEY est vide');
-          toast(`Message de test envoyé sur Discord${notes.length ? ` (${notes.join(' ; ')})` : ' (mention du rôle + GIF)'}.`, { type: notes.length ? 'warning' : 'success' });
-        }
-        else toast('Rien envoyé : DISCORD_WEBHOOK_URL est vide ou l\'envoi a échoué.', { type: 'warning' });
+      if (r !== undefined && r) {
+        App.openModal({
+          title: 'Test Discord',
+          html: discordReportHtml(r),
+          actions: [{ label: 'Fermer', className: 'btn-primary', onClick: ({ close }) => close() }],
+        });
       }
     } catch (err) {
       toast(err.message, { type: 'error' });

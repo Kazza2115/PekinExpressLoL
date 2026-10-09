@@ -907,3 +907,9 @@ a.duo-card:hover .duo-arrow { color: var(--accent); }
 
 .notice-warning { border-color: rgba(229,182,77,.45); background: rgba(229,182,77,.08); }
 .notice-warning .btn { margin-left: 10px; vertical-align: middle; }
+
+/* Diagnostic « Tester Discord » (admin) */
+.diag-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.diag-line { display: flex; gap: 8px; align-items: flex-start; color: var(--text); line-height: 1.45; }
+.diag-line .diag-icon { flex: none; }
+.diag-check { margin: 0; padding-left: 20px; display: grid; gap: 6px; line-height: 1.45; }
