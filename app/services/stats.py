@@ -898,6 +898,10 @@ def excluded_lp(
         if before is None or after is None:
             continue
         low, high = as_utc(previous.captured_at), as_utc(current.captured_at)
+        if end_utc is not None and low >= end_utc:  # type: ignore[operator]
+            # Écart entièrement après la fin (ex. dodge pendant la grace de 10 min) : jamais compté
+            outside_total += after - before
+            continue
         inside = [game for game in games if low < game_end_of(game) <= high]  # type: ignore[operator]
         n_over = sum(1 for game in inside if id(game) in over_keys)
         n_outside = 0

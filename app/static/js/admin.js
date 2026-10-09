@@ -198,10 +198,12 @@
     const body = {
       name: f.name.value.trim() || undefined,
       games_per_day: parseInt(f.games_per_day.value, 10) || undefined,
-      start_at: fromLocalInput(f.start_at.value),
-      end_at: fromLocalInput(f.end_at.value),
       track_flex: f.track_flex.checked,
     };
+    // Dates envoyées seulement si elles ont été modifiées (sinon l'arrondi à la minute du champ
+    // déplacerait un début ou une fin enregistrés à la seconde près)
+    if (chDirty.has('start_at')) body.start_at = fromLocalInput(f.start_at.value);
+    if (chDirty.has('end_at')) body.end_at = fromLocalInput(f.end_at.value);
     ['jokers_per_team', 'joker_extra_games'].forEach((name) => {
       const value = parseInt(f.elements[name] && f.elements[name].value, 10);
       if (!isNaN(value)) body[name] = value;

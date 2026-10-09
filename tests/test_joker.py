@@ -222,3 +222,15 @@ def test_messages() -> None:
     participant = game(END + timedelta(minutes=1), win=True)
     text = format_match_recorded(stats_player(), None, participant, 20, outside_window=True)
     assert "hors des heures du challenge" in text
+
+
+def test_lp_change_after_the_end_without_a_game_does_not_count() -> None:
+    """Dimanche 23h58 : +20 (relevé à 00h01) ; dodge à 00h05 (−5, sans partie) relevé à 00h06."""
+    g1 = game(END - timedelta(minutes=32), win=True, duration=1800)  # fin 23h58 Paris
+    snaps = [
+        counter_snap(START - timedelta(hours=1), 50, 100, 100),
+        counter_snap(END + timedelta(minutes=1), 70, 101, 100),
+        counter_snap(END + timedelta(minutes=6), 65, 101, 100),
+    ]
+    s = stats_for(snaps, [g1])
+    assert s.lp_net == 20 and s.lp_outside_window == -5
