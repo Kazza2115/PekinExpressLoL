@@ -55,3 +55,20 @@ def test_public_url_priority(tmp_path: Path):
     local = tunnel.public_url(make_settings("http://localhost:8000"), tmp_path / "absent.log")
     assert (local.url, local.source) == ("http://localhost:8000", "local")
     assert tunnel.effective_base_url(make_settings("https://pekin.exemple.fr")) == "https://pekin.exemple.fr"
+
+
+def test_tailscale_url_is_detected_and_fixed(tmp_path: Path):
+    log = tmp_path / "tunnel.log"
+    # Écrit par Tunnel.bat (PowerShell Out-File utf8 : avec BOM)
+    log.write_text("\ufeffLien fixe Tailscale : https://pc-de-mike.tail1a2b3c.ts.net\n", encoding="utf-8")
+    url = tunnel.public_url(make_settings("http://localhost:8000"), log)
+    assert (url.url, url.source, url.fixed) == ("https://pc-de-mike.tail1a2b3c.ts.net", "tunnel", True)
+    assert url.to_dict()["fixed"] is True
+
+
+def test_fixed_flag(tmp_path: Path):
+    log = tmp_path / "tunnel.log"
+    log.write_text(LOG, encoding="utf-8")
+    assert tunnel.public_url(make_settings("http://localhost:8000"), log).fixed is False  # trycloudflare : change
+    assert tunnel.public_url(make_settings("https://pekin.exemple.fr"), log).fixed is True  # domaine (BASE_URL)
+    assert tunnel.public_url(make_settings("http://localhost:8000"), tmp_path / "absent.log").fixed is False

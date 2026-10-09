@@ -499,19 +499,22 @@
     const url = (pub && pub.url) || (state && state.base_url) || '';
     const source = pub ? pub.source : 'local';
     let help;
-    if (source === 'tunnel') {
-      help = `Adresse du tunnel Cloudflare détectée automatiquement${pub.detected_at ? ` (${esc(App.timeAgo(pub.detected_at))})` : ''} : c'est celle à partager aux joueurs. Elle change à chaque relance du tunnel. Les messages Discord l'utilisent.`;
+    const fixed = !!(pub && pub.fixed);
+    if (source === 'tunnel' && fixed) {
+      help = 'Lien fixe Tailscale : c\'est celui à partager aux joueurs, il ne change pas d\'un lancement à l\'autre. Les messages Discord l\'utilisent.';
+    } else if (source === 'tunnel') {
+      help = `Adresse du tunnel Cloudflare détectée automatiquement${pub.detected_at ? ` (${esc(App.timeAgo(pub.detected_at))})` : ''} : c'est celle à partager aux joueurs. Elle change à chaque relance du tunnel : pour un lien fixe, mets TUNNEL=tailscale dans .env (voir README, « Lien fixe »). Les messages Discord l'utilisent.`;
     } else if (source === 'env') {
-      help = 'Adresse définie par BASE_URL dans .env : c\'est celle à partager aux joueurs (utilisée dans les messages Discord).';
+      help = 'Lien fixe défini par BASE_URL dans .env : c\'est celui à partager aux joueurs (utilisé dans les messages Discord).';
     } else {
-      help = 'Adresse locale : seul ce PC y accède. Lance Tunnel.bat (ou laisse PekinExpress.bat le faire) pour obtenir une adresse https://….trycloudflare.com à partager ; elle s\'affichera ici automatiquement.';
+      help = 'Adresse locale : seul ce PC y accède. Lance Tunnel.bat (ou laisse PekinExpress.bat le faire) pour obtenir une adresse à partager ; elle s\'affichera ici automatiquement.';
     }
     els.sysUrl.innerHTML = `
       <span class="section-label">Adresse du site</span>
       <div class="sys-url-row">
         <code class="sys-url-value">${esc(url || '—')}</code>
         <button type="button" class="btn btn-sm" id="btn-copy-url">Copier</button>
-        ${source === 'tunnel' ? '<span class="chip chip-success">tunnel actif</span>' : ''}
+        ${source === 'tunnel' ? '<span class="chip chip-success">tunnel actif</span>' : ''}${fixed ? '<span class="chip chip-gold">lien fixe</span>' : (source === 'tunnel' ? '<span class="chip">change à chaque lancement</span>' : '')}
       </div>
       <div class="muted small">${help}</div>`;
     const btn = $('#btn-copy-url');

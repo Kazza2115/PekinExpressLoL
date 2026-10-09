@@ -120,6 +120,8 @@ Copie `.env.example` en `.env` à la racine du projet et complète-le. Chaque va
 | `DATABASE_URL` | Base SQLite. Défaut : `sqlite:///./data/tracker.db` (fichier dans `data/`). |
 | `GAMES_PER_DAY` | Objectif de parties par jour et par joueur (défaut 10). Modifiable ensuite dans l'admin. |
 | `AUTO_TUNNEL` | Windows : `PekinExpress.bat` ouvre aussi le tunnel Cloudflare (défaut `true`). |
+| `TUNNEL` | Type de tunnel : `rapide` (défaut, adresse qui change), `tailscale` (lien fixe gratuit) ou `cloudflare` (lien fixe sur ton domaine). Voir « Lien fixe ». |
+| `CLOUDFLARE_TUNNEL_TOKEN` | Mode `cloudflare` : jeton du tunnel nommé (secret, reste dans `.env`). |
 | `MAX_PLAYERS` | Nombre maximal de joueurs inscrits (défaut 8). Au-delà, l'inscription est refusée. |
 | `TIMEZONE` | Fuseau pour découper les journées (défaut `Europe/Paris`). |
 | `DISCORD_WEBHOOK_URL` | URL d'un webhook Discord pour recevoir les annonces. Vide = désactivé. |
@@ -344,13 +346,48 @@ Copier) ; les messages Discord l'utilisent. Elle change à chaque lancement ; la
 fenêtres ouvertes. Pour ne pas ouvrir le tunnel : `AUTO_TUNNEL=false` dans `.env`. Le HTTPS
 du tunnel permet aussi les notifications navigateur.
 
+#### Lien fixe
+
+Par défaut (`TUNNEL=rapide`), l'adresse `trycloudflare.com` change à chaque lancement. Pour
+garder **toujours le même lien**, deux solutions (choisies par `TUNNEL=` dans `.env`) :
+
+**A. Tailscale Funnel : gratuit, sans nom de domaine** → `https://nom-du-pc.xxxx.ts.net`
+
+1. Installe Tailscale : https://tailscale.com/download/windows, puis connecte-toi (compte
+   Google, Microsoft ou GitHub). Les amis n'ont **rien** à installer.
+2. Dans `.env`, mets `TUNNEL=tailscale`, puis relance `PekinExpress.bat`.
+3. La première fois, la fenêtre du tunnel affiche un lien pour **autoriser Funnel** : ouvre-le
+   et accepte (Tailscale crée alors le certificat HTTPS).
+4. L'adresse fixe s'affiche dans la fenêtre du tunnel et dans **Admin → Système** (« lien
+   fixe »). Elle reste la même tant que le PC garde son nom dans Tailscale (renommable une
+   fois pour toutes dans la console Tailscale, onglet Machines).
+5. Si un message parle de droits d'administrateur : clic droit sur `Tunnel.bat` → « Exécuter
+   en tant qu'administrateur ».
+
+**B. Tunnel Cloudflare nommé : ton propre domaine** → `https://pekin.ton-domaine.fr`
+
+Il faut un nom de domaine géré par Cloudflare (environ 10 € par an, achetable chez
+Cloudflare).
+
+1. Tableau de bord Cloudflare → **Zero Trust → Networks → Tunnels → Create a tunnel**
+   (type Cloudflared), nomme-le, puis copie le **jeton** affiché dans la commande
+   d'installation (la longue suite après `--token`).
+2. Dans l'onglet **Public Hostname** du tunnel : sous-domaine `pekin`, ton domaine, service
+   `HTTP` → `127.0.0.1:8000`.
+3. Dans `.env` : `TUNNEL=cloudflare`, `CLOUDFLARE_TUNNEL_TOKEN=<le jeton>` et
+   `BASE_URL=https://pekin.ton-domaine.fr`. Le jeton est secret : ne le partage pas, il reste
+   dans `.env` (jamais envoyé sur GitHub).
+4. Relance `PekinExpress.bat` : l'adresse est fixe, Admin → Système l'affiche.
+
+ngrok gratuit n'est pas adapté : son forfait est limité à 20 000 requêtes par mois, et les
+pages en font une toutes les 5 s.
+
 À la main (macOS / Linux, ou PowerShell avec le préfixe `.\`) :
 
 ```bash
 cloudflared tunnel --url http://127.0.0.1:8000      # PowerShell : .\cloudflared.exe tunnel --url http://127.0.0.1:8000
 ```
 
-ngrok (`ngrok http 8000`) fonctionne pareil.
 
 ### Mettre à jour le site
 

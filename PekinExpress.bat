@@ -80,7 +80,7 @@ rem dans sa propre fenetre, sauf AUTO_TUNNEL=false dans .env
 findstr /b /i /c:"AUTO_TUNNEL=false" ".env" >nul 2>nul
 if errorlevel 1 (
     if exist "Tunnel.bat" (
-        echo  Ouverture du tunnel Cloudflare dans une autre fenetre ^(AUTO_TUNNEL^) ...
+        echo  Ouverture du tunnel Internet dans une autre fenetre ^(AUTO_TUNNEL, TUNNEL^) ...
         start "Pekin Express LoL - tunnel" cmd /c "Tunnel.bat"
     )
 )
@@ -127,6 +127,11 @@ rem Ecrit un .env complet (identique a .env.example) sans dependre de la copie
 >>".env" echo.
 >>".env" echo # Ouvrir aussi le tunnel Cloudflare au lancement (adresse a partager). false pour desactiver.
 >>".env" echo AUTO_TUNNEL=true
+>>".env" echo.
+>>".env" echo # Type de tunnel : rapide (adresse qui change), tailscale (lien fixe gratuit) ou cloudflare (lien fixe, ton domaine). Voir README.
+>>".env" echo TUNNEL=rapide
+>>".env" echo # Mode cloudflare uniquement : jeton du tunnel. Mets aussi BASE_URL=https://ton-domaine
+>>".env" echo CLOUDFLARE_TUNNEL_TOKEN=
 goto :eof
 
 :fail

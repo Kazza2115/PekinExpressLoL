@@ -1,9 +1,10 @@
 """Adresse publique du site.
 
-`Tunnel.bat` lance cloudflared avec `--logfile data/tunnel.log` : l'adresse
-`https://xxx.trycloudflare.com` attribuée (différente à chaque lancement) y est écrite.
-On la lit ici pour l'afficher dans l'Admin et l'utiliser dans les messages Discord quand
-`BASE_URL` est resté sur une adresse locale.
+`Tunnel.bat` écrit l'adresse du tunnel dans `data/tunnel.log` : `https://xxx.trycloudflare.com`
+(mode rapide, différente à chaque lancement) ou `https://nom-du-pc.xxxx.ts.net` (Tailscale
+Funnel, lien fixe). On la lit ici pour l'afficher dans l'Admin et l'utiliser dans les messages
+Discord quand `BASE_URL` est resté sur une adresse locale. Un tunnel Cloudflare nommé (lien fixe
+sur un domaine) n'écrit pas son adresse : elle vient de `BASE_URL`.
 """
 
 from __future__ import annotations
@@ -16,18 +17,23 @@ from pathlib import Path
 from app.config import PROJECT_ROOT, Settings, get_settings
 
 TUNNEL_LOG = PROJECT_ROOT / "data" / "tunnel.log"
-TUNNEL_URL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
+TUNNEL_URL_RE = re.compile(r"https://(?:[a-z0-9-]+\.trycloudflare\.com|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net)")
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "[::1]")
 
 
 @dataclass
 class PublicUrl:
     url: str
-    source: str  # "env" (BASE_URL), "tunnel" (journal cloudflared) ou "local"
+    source: str  # "env" (BASE_URL), "tunnel" (journal du tunnel) ou "local"
     detected_at: str | None = None  # date du journal du tunnel
 
+    @property
+    def fixed(self) -> bool:
+        """Adresse stable d'un lancement à l'autre (tout sauf le mode rapide trycloudflare.com)."""
+        return self.source != "local" and not self.url.lower().rstrip("/").endswith(".trycloudflare.com")
+
     def to_dict(self) -> dict:
-        return {"url": self.url, "source": self.source, "detected_at": self.detected_at}
+        return {"url": self.url, "source": self.source, "detected_at": self.detected_at, "fixed": self.fixed}
 
 
 def is_local_url(url: str) -> bool:
@@ -36,7 +42,7 @@ def is_local_url(url: str) -> bool:
 
 
 def detect_tunnel_url(log_path: Path = TUNNEL_LOG) -> tuple[str, str] | None:
-    """Dernière adresse trycloudflare.com du journal, avec la date de modification du fichier."""
+    """Dernière adresse de tunnel du journal (trycloudflare.com ou ts.net), avec la date du fichier."""
     try:
         text = log_path.read_text(encoding="utf-8", errors="replace")
         stamp = datetime.fromtimestamp(log_path.stat().st_mtime, tz=timezone.utc)
