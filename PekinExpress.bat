@@ -132,6 +132,9 @@ rem Ecrit un .env complet (identique a .env.example) sans dependre de la copie
 >>".env" echo TUNNEL=rapide
 >>".env" echo # Mode cloudflare uniquement : jeton du tunnel. Mets aussi BASE_URL=https://ton-domaine
 >>".env" echo CLOUDFLARE_TUNNEL_TOKEN=
+>>".env" echo.
+>>".env" echo # Lien fixe gratuit (page GitHub Pages) : jeton GitHub, acces Contents en ecriture au depot. Secret. Voir README.
+>>".env" echo GITHUB_TOKEN=
 goto :eof
 
 :fail

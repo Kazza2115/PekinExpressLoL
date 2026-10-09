@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from app.config import Settings, get_settings
-from app.services.tunnel import effective_base_url
+from app.services.portal import share_url
 from app.db.session import as_utc
 
 if TYPE_CHECKING:
@@ -141,7 +141,7 @@ def format_challenge_started(challenge: Challenge, *, settings: Settings | None 
     if start_at is not None:
         local = as_utc(start_at).astimezone(settings.tz)
         lines.append(f"Début : {local.strftime('%d/%m/%Y %H:%M')}")
-    lines.append(f"Classement : {effective_base_url(settings)}/dashboard")
+    lines.append(f"Classement : {share_url(settings)}/dashboard")
     return "\n".join(lines)
 
 

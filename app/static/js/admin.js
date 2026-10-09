@@ -493,6 +493,26 @@
     return `<div class="tile card card-flat"><div class="tile-label">${esc(label)}</div><div class="tile-value">${value}</div>${sub ? `<div class="tile-sub">${sub}</div>` : ''}</div>`;
   }
 
+  /* Lien fixe GitHub Pages : redirige vers l'adresse actuelle du site, publiée par le serveur. */
+  function portalHtml(portal) {
+    if (!portal || !portal.portal_url) return '';
+    if (!portal.enabled) {
+      return `<div class="muted small mt-sm">Lien fixe gratuit : ajoute <code>GITHUB_TOKEN</code> dans .env et active GitHub Pages (README, « Lien fixe avec Cloudflare »). Ce lien ne changera plus : <code>${esc(portal.portal_url)}</code></div>`;
+    }
+    let status;
+    if (portal.error) status = `<span class="lp-neg">✗ ${esc(portal.error)}</span>`;
+    else if (portal.published_url) status = `Renvoie vers <code>${esc(portal.published_url)}</code>${portal.published_at ? ` (mis à jour ${esc(App.timeAgo(portal.published_at))})` : ''}.`;
+    else status = 'En attente de l\'adresse du tunnel pour la publier…';
+    return `
+      <span class="section-label mt-sm" style="display:block">Lien fixe à partager</span>
+      <div class="sys-url-row">
+        <code class="sys-url-value">${esc(portal.portal_url)}</code>
+        <button type="button" class="btn btn-sm" id="btn-copy-portal" data-url="${esc(portal.portal_url)}">Copier</button>
+        ${portal.published_url && !portal.error ? '<span class="chip chip-gold">lien fixe</span>' : ''}
+      </div>
+      <div class="muted small">${status} Il ne change jamais : c'est celui à donner aux joueurs.</div>`;
+  }
+
   function renderPublicUrl() {
     if (!els.sysUrl) return;
     const pub = (state && state.public_url) || null;
@@ -516,7 +536,12 @@
         <button type="button" class="btn btn-sm" id="btn-copy-url">Copier</button>
         ${source === 'tunnel' ? '<span class="chip chip-success">tunnel actif</span>' : ''}${fixed ? '<span class="chip chip-gold">lien fixe</span>' : (source === 'tunnel' ? '<span class="chip">change à chaque lancement</span>' : '')}
       </div>
-      <div class="muted small">${help}</div>`;
+      <div class="muted small">${help}</div>${portalHtml(state && state.portal)}`;
+    const portalBtn = $('#btn-copy-portal');
+    if (portalBtn) portalBtn.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(portalBtn.dataset.url); toast('Lien fixe copié.', { type: 'success' }); }
+      catch (e) { toast('Copie impossible : sélectionne le lien à la main.', { type: 'error' }); }
+    });
     const btn = $('#btn-copy-url');
     if (btn) btn.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(url); toast('Adresse copiée.', { type: 'success' }); }

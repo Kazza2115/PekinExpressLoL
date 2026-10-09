@@ -122,6 +122,7 @@ Copie `.env.example` en `.env` à la racine du projet et complète-le. Chaque va
 | `AUTO_TUNNEL` | Windows : `PekinExpress.bat` ouvre aussi le tunnel Cloudflare (défaut `true`). |
 | `TUNNEL` | Type de tunnel : `rapide` (défaut, adresse qui change), `tailscale` (lien fixe gratuit) ou `cloudflare` (lien fixe sur ton domaine). Voir « Lien fixe ». |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Mode `cloudflare` : jeton du tunnel nommé (secret, reste dans `.env`). |
+| `GITHUB_TOKEN` | Lien fixe GitHub Pages : jeton GitHub (Contents en écriture sur ce dépôt). Le site y publie son adresse du moment. Vide = désactivé. |
 | `MAX_PLAYERS` | Nombre maximal de joueurs inscrits (défaut 8). Au-delà, l'inscription est refusée. |
 | `TIMEZONE` | Fuseau pour découper les journées (défaut `Europe/Paris`). |
 | `DISCORD_WEBHOOK_URL` | URL d'un webhook Discord pour recevoir les annonces. Vide = désactivé. |
@@ -346,10 +347,37 @@ Copier) ; les messages Discord l'utilisent. Elle change à chaque lancement ; la
 fenêtres ouvertes. Pour ne pas ouvrir le tunnel : `AUTO_TUNNEL=false` dans `.env`. Le HTTPS
 du tunnel permet aussi les notifications navigateur.
 
-#### Lien fixe
+#### Lien fixe avec Cloudflare (gratuit) : page GitHub Pages
 
-Par défaut (`TUNNEL=rapide`), l'adresse `trycloudflare.com` change à chaque lancement. Pour
-garder **toujours le même lien**, deux solutions (choisies par `TUNNEL=` dans `.env`) :
+Le plus simple pour garder le tunnel Cloudflare rapide **et** un lien qui ne change jamais :
+**https://kazza2115.github.io/PekinExpressLoL/**. Cette page renvoie aussitôt vers l'adresse
+Cloudflare du moment ; ensuite tout passe directement par le tunnel, sans ralentissement. À
+chaque lancement, le site publie lui-même sa nouvelle adresse sur GitHub (un petit commit du
+fichier `docs/site.json`). `#/duos`, `#/dashboard`… à la fin du lien ouvrent directement la
+page voulue.
+
+À faire une seule fois :
+
+1. **Activer GitHub Pages** : sur GitHub, dépôt PekinExpressLoL → **Settings → Pages** →
+   *Build and deployment* : *Deploy from a branch*, branche `claude/quirky-pascal-y84evb`,
+   dossier `/docs` → **Save**.
+2. **Créer un jeton GitHub** : photo de profil → **Settings → Developer settings → Personal
+   access tokens → Fine-grained tokens → Generate new token**. *Repository access* : *Only
+   select repositories* → PekinExpressLoL. *Permissions → Repository permissions →
+   Contents* : **Read and write**. Choisis une expiration après la fin du challenge.
+3. Colle le jeton dans `.env` après `GITHUB_TOKEN=` (il ne quitte jamais ton PC, n'est jamais
+   envoyé sur GitHub ni affiché par le site ; ne le colle nulle part ailleurs).
+4. Relance `PekinExpress.bat` (avec `TUNNEL=rapide`, la valeur par défaut). Une minute après
+   l'ouverture du tunnel, **Admin → Système** affiche « Lien fixe à partager » avec l'adresse
+   vers laquelle il renvoie. Les messages Discord utilisent aussi ce lien fixe.
+
+Si le PC est éteint, la page affiche le dernier lien publié, qui ne répond plus : relance
+simplement le site.
+
+#### Autres liens fixes
+
+Sans la page GitHub Pages ci-dessus, l'adresse `trycloudflare.com` change à chaque lancement.
+Deux autres solutions donnent directement une adresse fixe (choisies par `TUNNEL=` dans `.env`) :
 
 **A. Tailscale Funnel : gratuit, sans nom de domaine** → `https://nom-du-pc.xxxx.ts.net`
 

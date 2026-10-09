@@ -56,6 +56,11 @@ class Settings:
     base_url: str
     # Détection des parties en cours (Spectator seul) entre deux cycles complets ; >= poll = désactivée
     live_poll_seconds: int = 30
+    # Lien fixe GitHub Pages : jeton (accès Contents en écriture au dépôt), dépôt et branche
+    # où publier l'adresse actuelle du site (docs/site.json). Jeton vide = désactivé.
+    github_token: str = ""
+    github_repo: str = "Kazza2115/PekinExpressLoL"
+    github_branch: str = "claude/quirky-pascal-y84evb"
     # Fuseau résolu une seule fois (`tz` est lu pour chaque joueur à chaque requête de stats)
     _tz: tzinfo | None = field(default=None, init=False, repr=False, compare=False)
     _tz_fallback: bool = field(default=False, init=False, repr=False, compare=False)
@@ -128,6 +133,9 @@ def _build_settings() -> Settings:
         base_url=(os.getenv("BASE_URL", "http://localhost:8000").strip() or "http://localhost:8000").rstrip("/"),
         # Minimum 10 s : 8 joueurs × 1 requête toutes les 10 s reste sous la limite d'une clé de dev
         live_poll_seconds=max(10, _env_int("LIVE_POLL_SECONDS", 30)),
+        github_token=os.getenv("GITHUB_TOKEN", "").strip(),
+        github_repo=os.getenv("GITHUB_REPO", "").strip() or "Kazza2115/PekinExpressLoL",
+        github_branch=os.getenv("GITHUB_BRANCH", "").strip() or "claude/quirky-pascal-y84evb",
     )
 
 

@@ -23,6 +23,7 @@ from app.events import bus
 from app.riot import get_api
 from app.services.bootstrap import backfill_match_details, ensure_challenge, load_players_yaml
 from app.services.poller import Poller
+from app.services.portal import run_portal_sync
 from app.state import state
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -50,8 +51,11 @@ async def lifespan(app: FastAPI):
     app.state.riot_api = api
     # PEKIN_DISABLE_POLLER=1 (tests) : pas de tâche de fond
     task: asyncio.Task | None = None
+    portal_task: asyncio.Task | None = None
     if os.getenv("PEKIN_DISABLE_POLLER", "") not in {"1", "true"}:
         task = asyncio.create_task(poller.run_forever(), name="poller")
+        # Lien fixe GitHub Pages : publie l'adresse du tunnel dès qu'elle change (si GITHUB_TOKEN)
+        portal_task = asyncio.create_task(run_portal_sync(), name="portal")
     if settings.admin_password_is_default:
         log.warning(
             "ADMIN_PASSWORD n'est pas défini : le mot de passe organisateur est « %s ». "
@@ -66,10 +70,12 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        if task is not None:
-            task.cancel()
+        for background in (task, portal_task):
+            if background is None:
+                continue
+            background.cancel()
             try:
-                await task
+                await background
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
         await api.aclose()

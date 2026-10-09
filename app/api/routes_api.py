@@ -53,6 +53,7 @@ from app.riot.base import RiotAPI
 from app.services.registration import link_player, parse_riot_id, register_player
 from app.services.stats import PlayerStats, TeamStats, build_rank_ladder, compare_teams, metric_rankings
 from app.services.tunnel import public_url
+from app.services.portal import portal_page_url, portal_state
 from app.state import state
 from app.version import ASSET_VERSION, SITE_VERSION
 
@@ -282,6 +283,8 @@ def get_state(
         "poll_interval_seconds": get_settings().poll_interval_seconds,
         "base_url": get_settings().base_url,
         "public_url": public_url().to_dict(),
+        # Lien fixe GitHub Pages (jamais le jeton) : voir app/services/portal.py
+        "portal": {**portal_state.to_dict(), "portal_url": portal_page_url(get_settings().github_repo), "enabled": bool(get_settings().github_token)},
         "asset_version": ASSET_VERSION,
         "site_version": SITE_VERSION,
         # Joueurs créés en mode démo (identifiants inventés) : à supprimer avant de passer en réel
