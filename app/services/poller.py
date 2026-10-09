@@ -32,6 +32,7 @@ from app.db.models import (
     QUEUE_TYPES,
     REMAKE_MAX_DURATION_S,
     Challenge,
+    Joker,
     ChallengeStatus,
     Match,
     MatchParticipant,
@@ -63,6 +64,8 @@ log = logging.getLogger(__name__)
 RANKED_QUEUE_IDS = frozenset(QUEUE_IDS.values())
 # Fin automatique : 15 min après la fin programmée (les derniers LP arrivent 1 à 3 min après la partie)
 AUTO_FINISH_DELAY = timedelta(minutes=15)
+# Parties encore enregistrées après la fin (Match-V5 en retard), pour retirer correctement leurs LP
+LATE_MATCHES_AFTER_END = timedelta(minutes=30)
 # Tiers sans division : `rank` stocké à None (cf. models.RankSnapshot)
 APEX_TIERS = frozenset({"MASTER", "GRANDMASTER", "CHALLENGER"})
 # Une partie terminée depuis plus longtemps n'est plus annoncée sur Discord
@@ -765,8 +768,9 @@ class Poller:
         report: PollReport,
         ctx: _CycleContext,
     ) -> None:
-        # Les parties ne sont stockées que pendant le challenge (`running`)
-        if challenge is None or challenge.status != ChallengeStatus.RUNNING:
+        # Les parties ne sont stockées que pendant le challenge (`running`), et encore 30 min après
+        # sa fin (Match-V5 publie parfois une partie quelques minutes après la fin réelle)
+        if not self._stores_matches(challenge):
             return
         start_at = as_utc(challenge.start_at)
         if start_at is None:
@@ -781,7 +785,7 @@ class Poller:
         # Le statut peut avoir changé pendant le cycle (reset / fin) : on relit la base
         # avant d'écrire, pour ne pas réinsérer des parties juste purgées.
         session.expire(challenge)
-        if challenge.status != ChallengeStatus.RUNNING:
+        if not self._stores_matches(challenge):
             return
 
         recorded: list[tuple[Player, MatchParticipant]] = []
@@ -805,8 +809,12 @@ class Poller:
             backfill_lp_changes(session, touched_player)
 
         for participant_player, participant in recorded:
-            day_number, over_quota = self._quota_position(session, participant_player, participant, challenge, ctx)
-            self._publish_match(participant_player, participant, day_number=day_number, over_quota=over_quota)
+            day_number, over_quota, outside = self._quota_position(
+                session, participant_player, participant, challenge, ctx
+            )
+            self._publish_match(
+                participant_player, participant, day_number=day_number, over_quota=over_quota, outside_window=outside
+            )
             if participant.is_remake or ctx.now - _game_end(participant) > NOTIFY_MAX_AGE:
                 continue
             team = self._team_of(participant_player, ctx)
@@ -818,8 +826,22 @@ class Poller:
                     participant.lp_change,
                     over_quota=over_quota,
                     day_number=day_number,
+                    outside_window=outside,
                 )
             )
+
+    @staticmethod
+    def _stores_matches(challenge: Challenge | None) -> bool:
+        if challenge is None:
+            return False
+        if challenge.status == ChallengeStatus.RUNNING:
+            return True
+        end = as_utc(challenge.end_at)
+        return (
+            challenge.status == ChallengeStatus.FINISHED
+            and end is not None
+            and _utcnow() <= end + LATE_MATCHES_AFTER_END
+        )
 
     def _quota_position(
         self,
@@ -828,19 +850,20 @@ class Poller:
         participant: MatchParticipant,
         challenge: Challenge | None,
         ctx: _CycleContext,
-    ) -> tuple[int | None, bool]:
-        """(numéro de la partie dans la journée du joueur, hors quota ?) — même règle que les stats.
+    ) -> tuple[int | None, bool, bool]:
+        """(numéro de la partie dans la journée, hors quota ?, hors fenêtre ?) — même règle que les stats.
 
-        None / False pour un remake ou une partie hors de la fenêtre du duo.
+        Joker du duo pris en compte. Remake : (None, False, False). Partie terminée avant le début
+        ou après la fin du duo : (None, False, True).
         """
         if participant.is_remake or challenge is None:
-            return None, False
+            return None, False, False
         team = self._team_of(player, ctx)
         start = as_utc(team.window_start if team is not None and team.window_start else challenge.start_at)
         end = as_utc(team.window_end if team is not None and team.window_end else challenge.end_at)
         ended = _game_end(participant)
         if (start is not None and ended < start) or (end is not None and ended > end):
-            return None, False
+            return None, False, True
         tz = self.settings.tz
         games = [
             mp
@@ -853,11 +876,17 @@ class Poller:
             ).all()
             if (start is None or _game_end(mp) >= start) and (end is None or _game_end(mp) <= end)
         ]
-        _counted, over = split_daily_quota(games, tz, int(challenge.games_per_day or 0))
+        jokers: dict = {}
+        if team is not None and team.id is not None:
+            for joker in session.exec(select(Joker).where(Joker.team_id == team.id)).all():
+                activated = as_utc(joker.activated_at)
+                if activated is not None:
+                    jokers[joker.day] = (activated, int(joker.extra_games))
+        _counted, over = split_daily_quota(games, tz, int(challenge.games_per_day or 0), jokers)
         day = day_key(ended, tz)
         same_day = sorted((mp for mp in games if day_key(_game_end(mp), tz) == day), key=_game_end)
         number = next((i for i, mp in enumerate(same_day, start=1) if mp.match_id == participant.match_id), None)
-        return number, any(mp.match_id == participant.match_id for mp in over)
+        return number, any(mp.match_id == participant.match_id for mp in over), False
 
     async def _fetch_match_ids(
         self, session: Session, player: Player, queue_id: int, start_time: int
@@ -984,6 +1013,7 @@ class Poller:
         *,
         day_number: int | None = None,
         over_quota: bool = False,
+        outside_window: bool = False,
     ) -> None:
         self.bus.publish(
             "match_recorded",
@@ -1008,6 +1038,7 @@ class Poller:
                 # Quota quotidien : numéro de la partie dans la journée, et si elle ne compte pas
                 "day_game_number": day_number,
                 "over_quota": over_quota,
+                "outside_window": outside_window,
             },
         )
 

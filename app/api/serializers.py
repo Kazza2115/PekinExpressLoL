@@ -97,6 +97,8 @@ def challenge_to_dict(challenge: Challenge) -> dict[str, Any]:
         "end_at": iso(challenge.end_at),
         "games_per_day": challenge.games_per_day,
         "track_flex": challenge.track_flex,
+        "jokers_per_team": challenge.jokers_per_team,
+        "joker_extra_games": challenge.joker_extra_games,
     }
 
 

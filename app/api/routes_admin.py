@@ -21,7 +21,7 @@ from sqlmodel import Session, col, select
 from app.api.deps import get_challenge, require_admin
 from app.api.serializers import challenge_to_dict, player_public, team_public
 from app.config import get_settings, reload_settings
-from app.db.models import Challenge, ChallengeStatus, Match, MatchParticipant, Player, Queue, RankSnapshot, Team, utcnow
+from app.db.models import Challenge, ChallengeStatus, Joker, Match, MatchParticipant, Player, Queue, RankSnapshot, Team, utcnow
 from app.db.session import as_utc, get_session
 from app.events import bus
 from app.riot import get_api, reset_api
@@ -49,7 +49,8 @@ TEAM_SIZE = 2
 
 
 class StartIn(BaseModel):
-    start_at: str | None = None  # ISO 8601 ; défaut : maintenant
+    start_at: str | None = None  # ISO 8601 ; absent : début programmé, sinon maintenant
+    end_at: str | None = None  # ISO 8601 ; absent : fin programmée ; null : pas de fin
 
 
 class ResetIn(BaseModel):
@@ -62,6 +63,8 @@ class ChallengePatch(BaseModel):
     start_at: str | None = None  # "" ou null → efface
     end_at: str | None = None
     track_flex: bool | None = None
+    jokers_per_team: int | None = Field(default=None, ge=0, le=10)
+    joker_extra_games: int | None = Field(default=None, ge=0, le=20)
 
 
 class TeamCreate(BaseModel):
@@ -305,6 +308,9 @@ async def start_challenge(
     planned = challenge.status in (ChallengeStatus.REGISTRATION, ChallengeStatus.DRAWN)
     planned_start = as_utc(challenge.start_at) if planned else None
     planned_end = as_utc(challenge.end_at) if planned else None
+    fields = body.model_fields_set if body is not None else set()
+    if "end_at" in fields:
+        planned_end = as_utc(parse_datetime(body.end_at, "end_at"))  # type: ignore[union-attr]
     start_at = (
         as_utc(parse_datetime(body.start_at if body is not None else None, "start_at"))
         or planned_start
@@ -397,6 +403,7 @@ async def reset_challenge(
         player.team_id = None
         session.add(player)
     session.flush()
+    session.execute(delete(Joker))
     session.execute(delete(Team))
     if not keep_players:
         session.execute(delete(Player))
@@ -429,15 +436,30 @@ async def patch_challenge(
             raise _bad_request("Le nombre de parties par jour doit être au moins 1.")
         challenge.games_per_day = body.games_per_day
     if "start_at" in fields:
-        challenge.start_at = parse_datetime(body.start_at, "start_at")
+        new_start = parse_datetime(body.start_at, "start_at")
+        if new_start is None and challenge.status in (ChallengeStatus.RUNNING, ChallengeStatus.FINISHED):
+            raise _bad_request("Impossible d'effacer le début d'un challenge démarré.")
+        challenge.start_at = new_start
+    reopened = False
     if "end_at" in fields:
-        challenge.end_at = parse_datetime(body.end_at, "end_at")
+        new_end = parse_datetime(body.end_at, "end_at")
+        challenge.end_at = new_end
+        # Fin repoussée dans le futur après une fin (automatique ou par erreur) : le challenge reprend
+        if challenge.status == ChallengeStatus.FINISHED and new_end is not None and as_utc(new_end) > utcnow():
+            challenge.status = ChallengeStatus.RUNNING
+            reopened = True
     if "track_flex" in fields and body.track_flex is not None:
         challenge.track_flex = body.track_flex
+    if "jokers_per_team" in fields and body.jokers_per_team is not None:
+        challenge.jokers_per_team = body.jokers_per_team
+    if "joker_extra_games" in fields and body.joker_extra_games is not None:
+        challenge.joker_extra_games = body.joker_extra_games
     session.add(challenge)
     session.commit()
     session.refresh(challenge)
-    return {"challenge": challenge_to_dict(challenge)}
+    if reopened:
+        bus.publish("challenge_started", {"challenge": challenge_to_dict(challenge), "reopened": True})
+    return {"challenge": challenge_to_dict(challenge), "reopened": reopened}
 
 
 # ---------------------------------------------------------------------------
@@ -519,10 +541,25 @@ async def delete_team(
         if member.id is not None:
             released.append(member.id)
     session.flush()
+    for joker in session.exec(select(Joker).where(Joker.team_id == team_id)).all():
+        session.delete(joker)
     session.delete(team)
     session.commit()
     bus.publish("teams_changed", {"action": "deleted", "team_id": team_id, "player_ids": released})
     return {"ok": True, "deleted_id": team_id, "player_ids": released}
+
+
+@router.delete("/jokers/{joker_id}")
+async def cancel_joker(joker_id: EntityId, session: Session = Depends(get_session)) -> dict[str, Any]:
+    """Annule un joker (activé par erreur ou par quelqu'un d'autre) : le duo le récupère."""
+    joker = session.get(Joker, joker_id)
+    if joker is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Joker introuvable.")
+    team_id = joker.team_id
+    session.delete(joker)
+    session.commit()
+    bus.publish("joker_cancelled", {"joker_id": joker_id, "team_id": team_id})
+    return {"ok": True, "joker_id": joker_id, "team_id": team_id}
 
 
 @router.patch("/players/{player_id}")
@@ -578,6 +615,9 @@ def _delete_player_rows(session: Session, player: Player) -> None:
     """Supprime un joueur, ses photos de rang, ses participations et les parties orphelines (sans commit)."""
     session.execute(delete(MatchParticipant).where(col(MatchParticipant.player_id) == player.id))
     session.execute(delete(RankSnapshot).where(col(RankSnapshot.player_id) == player.id))
+    for joker in session.exec(select(Joker).where(Joker.player_id == player.id)).all():
+        joker.player_id = None  # le joker reste au duo, sans auteur
+        session.add(joker)
     # Parties qui ne concernent plus aucun joueur du challenge
     session.execute(delete(Match).where(~col(Match.match_id).in_(select(MatchParticipant.match_id))))
     _drop_live_game(player)
@@ -622,6 +662,8 @@ async def delete_demo_players(
         for team_id in sorted(touched):
             team = session.get(Team, team_id)
             if team is not None and not _team_player_ids(session, team_id):
+                for joker in session.exec(select(Joker).where(Joker.team_id == team_id)).all():
+                    session.delete(joker)
                 session.delete(team)
                 removed_team_ids.append(team_id)
         session.flush()

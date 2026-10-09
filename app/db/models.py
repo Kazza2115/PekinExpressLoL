@@ -48,6 +48,10 @@ class Challenge(SQLModel, table=True):
     end_at: datetime | None = None  # fin (clic "Terminer") ou None
     games_per_day: int = 10
     track_flex: bool = False
+    # Joker : chaque duo peut, `jokers_per_team` fois, s'accorder `joker_extra_games` parties
+    # comptées en plus dans la journée (parties terminées après l'activation)
+    jokers_per_team: int = 1
+    joker_extra_games: int = 3
     created_at: datetime = Field(default_factory=utcnow)
 
 
@@ -171,6 +175,18 @@ class MatchParticipant(SQLModel, table=True):
     surrendered: bool | None = None  # gameEndedInSurrender (vrai pour les 10 joueurs de la partie)
     damage_share: float | None = None  # part des dégâts aux champions de son équipe (%, 1 décimale)
     gold_share: float | None = None  # part de l'or de son équipe (%, 1 décimale)
+
+
+class Joker(SQLModel, table=True):
+    """Joker activé par un duo : `extra_games` parties comptées en plus pour ses deux joueurs le
+    jour `day` (fuseau du challenge), uniquement pour les parties terminées après `activated_at`."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    team_id: int = Field(foreign_key="team.id", index=True)
+    day: str  # "YYYY-MM-DD"
+    activated_at: datetime = Field(default_factory=utcnow)
+    player_id: int | None = Field(default=None, foreign_key="player.id")  # qui l'a activé
+    extra_games: int = 3
 
 
 def game_end_of(row: Match | MatchParticipant) -> datetime:

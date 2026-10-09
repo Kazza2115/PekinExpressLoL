@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
-from app.db.models import Challenge, ChallengeStatus, Player, Team
+from app.db.models import Challenge, ChallengeStatus, Joker, Player, Team
 from app.events import bus
 
 # Noms / couleurs des duos dans l'ordre de tirage
@@ -91,6 +91,8 @@ def perform_draw(session: Session, *, rng: random.Random | None = None) -> DrawR
             session.add(player)
     session.flush()
     for old_team in session.exec(select(Team)).all():
+        for joker in session.exec(select(Joker).where(Joker.team_id == old_team.id)).all():
+            session.delete(joker)
         session.delete(old_team)
     session.flush()
 

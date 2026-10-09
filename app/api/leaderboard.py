@@ -16,6 +16,7 @@ from app.config import get_settings
 from app.db.models import (
     Challenge,
     ChallengeStatus,
+    Joker,
     MatchParticipant,
     Player,
     Queue,
@@ -27,10 +28,13 @@ from app.db.models import (
 from app.db.session import as_utc
 from app.riot import ddragon
 from app.services.stats import (
+    Jokers,
     PlayerStats,
     TeamStats,
     compute_player_stats,
     compute_team_stats,
+    day_key,
+    fr_day_label,
     partner_record,
     rank_teams,
     sort_players,
@@ -130,6 +134,75 @@ def together_record(
     return games, wins, losses
 
 
+def load_jokers(session: Session, team_ids: list[int]) -> dict[int, list[Joker]]:
+    """Jokers activés, par duo (ordre d'activation)."""
+    if not team_ids:
+        return {}
+    rows = session.exec(
+        select(Joker).where(col(Joker.team_id).in_(team_ids)).order_by(col(Joker.activated_at), col(Joker.id))
+    ).all()
+    by_team: dict[int, list[Joker]] = defaultdict(list)
+    for joker in rows:
+        by_team[joker.team_id].append(joker)
+    return dict(by_team)
+
+
+def jokers_by_day(jokers: list[Joker]) -> Jokers:
+    """Jokers d'un duo → {journée : (activé à (UTC), parties en plus)} pour `split_daily_quota`."""
+    days: Jokers = {}
+    for joker in jokers:
+        activated = as_utc(joker.activated_at)
+        assert activated is not None
+        if joker.day in days:  # deux jokers le même jour : les parties en plus s'additionnent
+            first, extra = days[joker.day]
+            days[joker.day] = (min(first, activated), extra + int(joker.extra_games))
+        else:
+            days[joker.day] = (activated, int(joker.extra_games))
+    return days
+
+
+def joker_summary(
+    challenge: Challenge, team: Team, jokers: list[Joker], players: dict[int, str], now: datetime
+) -> dict:
+    """État du joker d'un duo pour l'interface : combien il en reste, s'il est actif aujourd'hui,
+    s'il peut être activé maintenant (challenge en cours, dans la fenêtre du duo)."""
+    tz = get_settings().tz
+    today = day_key(now, tz)
+    total = max(0, int(challenge.jokers_per_team or 0))
+    used = len(jokers)
+    start, end = team_window(challenge, team)
+    now_utc = as_utc(now)
+    in_window = (
+        challenge.status == ChallengeStatus.RUNNING
+        and start is not None
+        and now_utc is not None
+        and start <= now_utc
+        and (end is None or now_utc < end)
+    )
+    active_today = any(joker.day == today for joker in jokers)
+    return {
+        "jokers_total": total,
+        "jokers_used": used,
+        "jokers_left": max(0, total - used),
+        "joker_today": active_today,
+        "joker_extra_games": int(challenge.joker_extra_games or 0),
+        "can_use_joker": bool(in_window and used < total and not active_today and challenge.joker_extra_games),
+        "jokers": [
+            {
+                "id": joker.id,
+                "day": joker.day,
+                "day_label": fr_day_label(joker.day),
+                "activated_at": as_utc(joker.activated_at).isoformat(),  # type: ignore[union-attr]
+                "player_id": joker.player_id,
+                "player_name": players.get(joker.player_id) if joker.player_id is not None else None,
+                "extra_games": joker.extra_games,
+                "today": joker.day == today,
+            }
+            for joker in jokers
+        ],
+    }
+
+
 def _player_stats(
     player: Player,
     challenge: Challenge,
@@ -137,6 +210,7 @@ def _player_stats(
     snapshots: list[RankSnapshot],
     participants: list[MatchParticipant],
     now: datetime,
+    jokers: list[Joker] | None = None,
 ) -> PlayerStats:
     window_start, window_end = team_window(challenge, team)
     return compute_player_stats(
@@ -150,6 +224,7 @@ def _player_stats(
         now=now,
         live=state.live_games.get(player.id),
         ddragon_version=ddragon.CURRENT_VERSION,
+        jokers=jokers_by_day(jokers or []),
     )
 
 
@@ -175,13 +250,20 @@ def compute_single_player_stats(
     partner = mates[0] if len(mates) == 1 and player.active else None
     ids = [player.id] + ([partner.id] if partner is not None else [])
     snapshots_by, participants_by = load_history(session, [pid for pid in ids if pid is not None])
+    team_jokers = load_jokers(session, [team.id]).get(team.id, []) if team is not None and team.id is not None else []
     stats = _player_stats(
-        player, challenge, team, snapshots_by.get(player.id, []), participants_by.get(player.id, []), now
+        player, challenge, team, snapshots_by.get(player.id, []), participants_by.get(player.id, []), now, team_jokers
     )
     if partner is not None and partner.id is not None:
         window_start, window_end = team_window(challenge, team)
         partner_stats = _player_stats(
-            partner, challenge, team, snapshots_by.get(partner.id, []), participants_by.get(partner.id, []), now
+            partner,
+            challenge,
+            team,
+            snapshots_by.get(partner.id, []),
+            participants_by.get(partner.id, []),
+            now,
+            team_jokers,
         )
         stats.partner = partner_record(
             stats,
@@ -212,14 +294,22 @@ def build_leaderboard(
     teams = session.exec(select(Team).order_by(col(Team.slot), col(Team.id))).all()
     teams_by_id = {team.id: team for team in teams}
     snapshots_by, participants_by = load_history(session, [p.id for p in players if p.id is not None])
+    jokers_by_team = load_jokers(session, [team.id for team in teams if team.id is not None])
 
     stats_by_player: dict[int, PlayerStats] = {}
     for player in players:
         assert player.id is not None
         team = teams_by_id.get(player.team_id) if player.team_id is not None else None
         stats_by_player[player.id] = _player_stats(
-            player, challenge, team, snapshots_by.get(player.id, []), participants_by.get(player.id, []), now
+            player,
+            challenge,
+            team,
+            snapshots_by.get(player.id, []),
+            participants_by.get(player.id, []),
+            now,
+            jokers_by_team.get(team.id, []) if team is not None and team.id is not None else None,
         )
+    names = {p.id: p.display_name for p in session.exec(select(Player)).all() if p.id is not None}
 
     team_stats: list[TeamStats] = []
     for team in teams:
@@ -242,7 +332,10 @@ def build_leaderboard(
                     icon_url=mate.icon_url,
                     together=together,
                 )
-        team_stats.append(compute_team_stats(team, members, together=together))
+        stats = compute_team_stats(team, members, together=together)
+        for key, value in joker_summary(challenge, team, jokers_by_team.get(team.id or 0, []), names, now).items():
+            setattr(stats, key, value)
+        team_stats.append(stats)
     ranked_teams = rank_teams(team_stats)
     ranked_players = sort_players(list(stats_by_player.values()), key=sort)
     return ranked_teams, ranked_players

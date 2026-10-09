@@ -383,6 +383,12 @@ class PlayerStats:
     lp_net_all_games: int = 0  # LP nets si toutes les parties comptaient (information)
     lp_over_quota_approx: bool = False  # partage au prorata quand un relevé couvre 2 parties
     over_quota_match_ids: list[str] = field(default_factory=list)
+    # LP de parties jouées avant le début ou après la fin, vus dans les relevés des bords (retirés)
+    lp_outside_window: int = 0
+    # Joker du duo : limite du jour (10, ou 13 avec le joker) et jours où il a servi
+    games_limit_today: int = 0
+    joker_today: bool = False
+    joker_days: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Types JSON uniquement (les dates sont déjà des chaînes ISO‑8601)."""
@@ -812,23 +818,107 @@ def partner_record(
     }
 
 
+# Jokers d'un joueur : journée "YYYY-MM-DD" → (activé à (UTC), parties en plus)
+Jokers = dict[str, tuple[datetime, int]]
+
+
 def split_daily_quota(
-    games: list[MatchParticipant], tz: tzinfo, limit: int
+    games: list[MatchParticipant], tz: tzinfo, limit: int, jokers: Jokers | None = None
 ) -> tuple[list[MatchParticipant], list[MatchParticipant]]:
     """Sépare les parties comptées des parties « hors quota ».
 
     `games` : parties de la fenêtre (une file, hors remakes). Par journée (fuseau `tz`, date de
     fin de partie, comme le compteur « aujourd'hui x/10 »), seules les `limit` premières parties
     terminées comptent ; les suivantes ne comptent pas. `limit` ≤ 0 : pas de quota.
+
+    Joker du duo ce jour-là (`jokers[jour] = (activé à, n)`) : n parties de plus peuvent compter,
+    mais seulement parmi celles terminées **après** l'activation (pas de joker « après coup » sur
+    des parties déjà jouées).
     """
     counted: list[MatchParticipant] = []
     over: list[MatchParticipant] = []
-    per_day: dict[str, int] = {}
+    counted_per_day: dict[str, int] = {}
+    extra_used: dict[str, int] = {}
     for game in sorted(games, key=game_end_of):
-        key = day_key(game_end_of(game), tz)
-        per_day[key] = per_day.get(key, 0) + 1
-        (counted if limit <= 0 or per_day[key] <= limit else over).append(game)
+        ended = game_end_of(game)
+        key = day_key(ended, tz)
+        if limit <= 0 or counted_per_day.get(key, 0) < limit:
+            counted.append(game)
+            counted_per_day[key] = counted_per_day.get(key, 0) + 1
+            continue
+        joker = (jokers or {}).get(key)
+        if joker is not None and ended >= as_utc(joker[0]) and extra_used.get(key, 0) < joker[1]:  # type: ignore[operator]
+            counted.append(game)
+            counted_per_day[key] = counted_per_day.get(key, 0) + 1
+            extra_used[key] = extra_used.get(key, 0) + 1
+            continue
+        over.append(game)
     return counted, over
+
+
+def _games_played(previous: RankSnapshot, current: RankSnapshot) -> int | None:
+    """Parties classées jouées entre deux relevés, d'après les compteurs victoires + défaites de Riot."""
+    if None in (previous.wins, previous.losses, current.wins, current.losses):
+        return None
+    return (current.wins + current.losses) - (previous.wins + previous.losses)
+
+
+def excluded_lp(
+    snapshots: list[RankSnapshot],
+    games: list[MatchParticipant],
+    over: list[MatchParticipant],
+    *,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> tuple[int, int, bool]:
+    """LP à retirer des LP nets : (LP des parties hors quota, LP des parties hors fenêtre, approx).
+
+    `snapshots` : relevés de la file, chronologiques, du relevé de référence au relevé de fin
+    inclus. L'écart entre deux relevés consécutifs revient aux parties terminées entre les deux
+    (`games` : parties de la fenêtre ; `over` : celles hors quota).
+
+    Aux bords de la fenêtre (intervalle qui contient le début, ou qui finit après la fin), des
+    parties jouées avant le début ou après la fin peuvent tomber dans le même écart : les compteurs
+    victoires + défaites de Riot disent combien de parties ont été jouées ; celles qui ne sont pas
+    des parties de la fenêtre sont hors fenêtre, et leur part de l'écart est retirée.
+
+    Un écart partagé entre parties comptées et non comptées est réparti au prorata du nombre de
+    parties : `approx=True`.
+    """
+    if len(snapshots) < 2:
+        return 0, 0, False
+    over_keys = {id(game) for game in over}
+    start_utc, end_utc = as_utc(start), as_utc(end)
+    over_total = 0
+    outside_total = 0
+    approx = False
+    for previous, current in zip(snapshots, snapshots[1:]):
+        before = _snapshot_absolute_lp(previous)
+        after = _snapshot_absolute_lp(current)
+        if before is None or after is None:
+            continue
+        low, high = as_utc(previous.captured_at), as_utc(current.captured_at)
+        inside = [game for game in games if low < game_end_of(game) <= high]  # type: ignore[operator]
+        n_over = sum(1 for game in inside if id(game) in over_keys)
+        n_outside = 0
+        at_edge = (start_utc is not None and low < start_utc) or (end_utc is not None and high > end_utc)  # type: ignore[operator]
+        if at_edge:
+            played = _games_played(previous, current)
+            if played is not None and played > len(inside):
+                n_outside = played - len(inside)
+        n_total = len(inside) + n_outside
+        if n_total == 0 or n_over + n_outside == 0:
+            continue
+        delta = after - before
+        if n_over + n_outside == n_total:
+            share_over = round(delta * n_over / n_total)
+            over_total += share_over
+            outside_total += delta - share_over
+        else:
+            over_total += round(delta * n_over / n_total)
+            outside_total += round(delta * n_outside / n_total)
+            approx = True
+    return over_total, outside_total, approx
 
 
 def over_quota_lp(
@@ -879,6 +969,7 @@ def compute_player_stats(
     live: LiveGameState | None = None,
     queue: Queue = Queue.SOLO,
     ddragon_version: str | None = None,
+    jokers: Jokers | None = None,
 ) -> PlayerStats:
     """Stats d'un joueur sur sa fenêtre, pour la file `queue` uniquement.
 
@@ -947,18 +1038,23 @@ def compute_player_stats(
     # Quota quotidien : seules les `games_limit` premières parties terminées de chaque journée
     # comptent. Les LP des autres sont retirés des LP nets (attribués relevé par relevé).
     all_games_in_window = games_in_window
-    games_in_window, games_over = split_daily_quota(all_games_in_window, tz, int(games_limit))
+    games_in_window, games_over = split_daily_quota(all_games_in_window, tz, int(games_limit), jokers)
     lp_net_all_games = lp_net
     lp_over = 0
+    lp_outside = 0
     lp_over_approx = False
-    if games_over and baseline is not None and end_snapshot is not None and end_abs is not None and baseline_abs is not None:
+    if baseline is not None and end_snapshot is not None and end_abs is not None and baseline_abs is not None:
         start_index = next(i for i, snap in enumerate(queue_snapshots) if snap is baseline)
         end_index = next(i for i, snap in enumerate(queue_snapshots) if snap is end_snapshot)
         if end_index > start_index:
-            lp_over, lp_over_approx = over_quota_lp(
-                queue_snapshots[start_index : end_index + 1], all_games_in_window, games_over
+            lp_over, lp_outside, lp_over_approx = excluded_lp(
+                queue_snapshots[start_index : end_index + 1],
+                all_games_in_window,
+                games_over,
+                start=start_utc,
+                end=end_utc,
             )
-    lp_net = lp_net_all_games - lp_over
+    lp_net = lp_net_all_games - lp_over - lp_outside
     over_per_day: dict[str, int] = {}
     for p in games_over:
         key = day_key(game_end_of(p), tz)
@@ -1047,6 +1143,12 @@ def compute_player_stats(
     profile = game_profile(games_in_window, tz=tz, games_limit=games_limit, version=version)
     for entry in profile.get("by_day") or []:
         entry["over_quota"] = over_per_day.get(entry["day"], 0)
+        joker_of_day = (jokers or {}).get(entry["day"])
+        entry["joker"] = joker_of_day is not None
+        if joker_of_day is not None:
+            entry["limit"] = int(games_limit) + int(joker_of_day[1])
+    today_key = day_key(now_utc, tz)
+    joker_today = (jokers or {}).get(today_key)
 
     return PlayerStats(
         player_id=int(player.id or 0),
@@ -1105,6 +1207,10 @@ def compute_player_stats(
         lp_net_all_games=lp_net_all_games,
         lp_over_quota_approx=lp_over_approx,
         over_quota_match_ids=[p.match_id for p in games_over],
+        lp_outside_window=lp_outside,
+        games_limit_today=int(games_limit) + (int(joker_today[1]) if joker_today is not None else 0),
+        joker_today=joker_today is not None,
+        joker_days=sorted((jokers or {}).keys()),
     )
 
 
@@ -1229,6 +1335,14 @@ class TeamStats:
     # Parties au-delà du quota quotidien (non comptées) et leurs LP
     games_over_quota: int = 0
     lp_over_quota: int = 0
+    # Joker (rempli par `app.api.leaderboard.joker_summary`)
+    jokers_total: int = 0
+    jokers_used: int = 0
+    jokers_left: int = 0
+    joker_today: bool = False
+    joker_extra_games: int = 0
+    can_use_joker: bool = False
+    jokers: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)

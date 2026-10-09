@@ -107,6 +107,7 @@ def format_match_recorded(
     *,
     over_quota: bool = False,
     day_number: int | None = None,
+    outside_window: bool = False,
 ) -> str:
     """« ✅ **Mike** (Duo Rouge) gagne avec **Ahri** · 7/2/9 · +21 LP ».
 
@@ -123,7 +124,9 @@ def format_match_recorded(
     queue = getattr(participant.queue, "value", participant.queue)
     if queue == "FLEX":
         parts.append("Flex")
-    if over_quota:
+    if outside_window:
+        parts.append("⏱ hors des heures du challenge (ne compte pas)")
+    elif over_quota:
         rank = f"{day_number}e partie du jour, " if day_number else ""
         parts.append(f"⛔ hors quota ({rank}ne compte pas)")
     return " · ".join(parts)
@@ -171,3 +174,12 @@ def format_draw_done(teams: list[dict], players_by_id: Mapping[int, Any]) -> str
         ]
         lines.append(f"• **{team.get('name', 'Duo')}** : {' & '.join(names)}")
     return "\n".join(lines)
+
+
+def format_joker_used(team_name: str, player_name: str | None, extra_games: int, limit: int) -> str:
+    """« 🃏 **Duo Rouge** active son joker (par Mike) : 13 parties comptées aujourd'hui au lieu de 10 »."""
+    by = f" (par {player_name})" if player_name else ""
+    return (
+        f"🃏 **{team_name}** active son joker{by} : **{limit + extra_games} parties** comptées aujourd'hui"
+        f" au lieu de {limit}, pour les parties terminées à partir de maintenant."
+    )

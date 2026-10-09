@@ -23,7 +23,13 @@ from pydantic import BaseModel
 from sqlmodel import Session, col, select
 
 from app.api.deps import check_admin_password, get_challenge
-from app.api.leaderboard import SORT_KEYS, build_leaderboard, compute_single_player_stats, team_window
+from app.api.leaderboard import (
+    SORT_KEYS,
+    build_leaderboard,
+    compute_single_player_stats,
+    load_jokers,
+    team_window,
+)
 from app.api.serializers import (
     challenge_to_dict,
     enum_value,
@@ -38,6 +44,7 @@ from app.config import get_settings
 from app.db.models import (
     Challenge,
     ChallengeStatus,
+    Joker,
     MatchParticipant,
     Player,
     Queue,
@@ -50,8 +57,16 @@ from app.db.session import as_utc, get_session, session_scope
 from app.events import bus
 from app.riot import ddragon, get_api
 from app.riot.base import RiotAPI
+from app.services import notifications
 from app.services.registration import link_player, parse_riot_id, register_player
-from app.services.stats import PlayerStats, TeamStats, build_rank_ladder, compare_teams, metric_rankings
+from app.services.stats import (
+    WINDOW_END_GRACE,
+    PlayerStats,
+    TeamStats,
+    build_rank_ladder,
+    compare_teams,
+    metric_rankings,
+)
 from app.services.tunnel import public_url
 from app.services.portal import portal_page_url, portal_state
 from app.state import state
@@ -89,6 +104,10 @@ PlayerId = Annotated[int, Path(ge=1, le=2**31 - 1)]
 class RegisterIn(BaseModel):
     display_name: str
     riot_id: str | None = None
+
+
+class JokerIn(BaseModel):
+    player_id: int  # joueur du duo qui active le joker
 
 
 class LinkIn(BaseModel):
@@ -202,7 +221,8 @@ def _window_points(
         baseline = before[-1] if before else None
         inside = [s for s in solo if as_utc(s.captured_at) > start]  # type: ignore[operator]
     if end is not None:
-        inside = [s for s in inside if as_utc(s.captured_at) <= end]  # type: ignore[operator]
+        # Même borne que les LP nets : les résultats Riot arrivent quelques minutes après la fin
+        inside = [s for s in inside if as_utc(s.captured_at) <= end + WINDOW_END_GRACE]  # type: ignore[operator]
     points = ([baseline] if baseline is not None else []) + inside
     return [lp_point(s) for s in points]
 
@@ -452,6 +472,7 @@ def get_feed(
     limit = max(1, min(FEED_MAX_LIMIT, limit))
     _teams, player_stats = build_leaderboard(session, challenge)
     over_quota_ids = {(p.player_id, match_id) for p in player_stats for match_id in p.over_quota_match_ids}
+    windows: dict[int | None, tuple[datetime | None, datetime | None]] = {}
     participants = session.exec(
         select(MatchParticipant)
         .where(col(MatchParticipant.is_remake).is_(False))
@@ -477,10 +498,27 @@ def get_feed(
                 "team_color": team.color if team is not None else None,
                 "ago_s": max(0, int((now - ended_at).total_seconds())),
                 "over_quota": (participant.player_id, participant.match_id) in over_quota_ids,
+                "outside_window": _outside_window(challenge, team, ended_at, windows),
             }
         )
         items.append(row)
     return {"items": items}
+
+
+def _outside_window(
+    challenge: Challenge,
+    team: Team | None,
+    ended_at: datetime,
+    cache: dict[int | None, tuple[datetime | None, datetime | None]],
+) -> bool:
+    """Partie terminée avant le début ou après la fin du challenge (ou de la fenêtre du duo)."""
+    if challenge.status not in (ChallengeStatus.RUNNING, ChallengeStatus.FINISHED):
+        return False
+    key = team.id if team is not None else None
+    if key not in cache:
+        cache[key] = team_window(challenge, team)
+    start, end = cache[key]
+    return (start is not None and ended_at < start) or (end is not None and ended_at > end)
 
 
 @router.get("/api/live")
@@ -651,6 +689,68 @@ async def link_player_account(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return {"player": _player_public_fresh(session, player)}
+
+
+@router.post("/api/teams/{team_id}/joker", status_code=status.HTTP_201_CREATED)
+async def use_joker(
+    body: JokerIn,
+    request: Request,
+    team_id: PlayerId,
+    session: Session = Depends(get_session),
+    challenge: Challenge = Depends(get_challenge),
+) -> dict[str, Any]:
+    """Un joueur active le joker de son duo : parties en plus aujourd'hui pour les deux joueurs.
+
+    Seules les parties terminées après l'activation peuvent en profiter. Refusé hors du challenge
+    (avant le début, après la fin), s'il ne reste plus de joker, ou s'il est déjà actif aujourd'hui.
+    """
+    _check_write_rate(request)
+    team = session.get(Team, team_id)
+    if team is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Duo introuvable.")
+    player = session.get(Player, body.player_id)
+    if player is None or player.team_id != team.id or not player.active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Seul un joueur de ce duo peut activer son joker.")
+    if challenge.status != ChallengeStatus.RUNNING:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Le joker ne s'active que pendant le challenge.")
+    if not challenge.jokers_per_team or not challenge.joker_extra_games:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pas de joker dans ce challenge.")
+    now = utcnow()
+    start, end = team_window(challenge, team)
+    if start is None or now < start:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Le challenge n'a pas encore commencé : le joker s'active pendant le challenge.")
+    if end is not None and now >= end:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Le challenge est fini pour ce duo.")
+    jokers = load_jokers(session, [team.id]).get(team.id, [])  # type: ignore[list-item]
+    today = now.astimezone(get_settings().tz).strftime("%Y-%m-%d")
+    if any(joker.day == today for joker in jokers):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Le joker de ce duo est déjà actif aujourd'hui.")
+    if len(jokers) >= challenge.jokers_per_team:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ce duo a déjà utilisé son joker.")
+    joker = Joker(team_id=team.id, day=today, activated_at=now, player_id=player.id, extra_games=challenge.joker_extra_games)
+    session.add(joker)
+    session.commit()
+    session.refresh(joker)
+    limit = int(challenge.games_per_day)
+    payload = {
+        "joker_id": joker.id,
+        "team_id": team.id,
+        "team_name": team.name,
+        "player_id": player.id,
+        "display_name": player.display_name,
+        "day": today,
+        "extra_games": joker.extra_games,
+        "limit": limit + joker.extra_games,
+        "activated_at": as_utc(joker.activated_at).isoformat(),  # type: ignore[union-attr]
+    }
+    bus.publish("joker_used", payload)
+    try:
+        await notifications.send_discord(
+            notifications.format_joker_used(team.name, player.display_name, joker.extra_games, limit)
+        )
+    except Exception:  # noqa: BLE001 — Discord n'est jamais bloquant
+        log.warning("Annonce Discord du joker impossible", exc_info=True)
+    return {"joker": payload}
 
 
 @router.post("/api/demo/fill")
