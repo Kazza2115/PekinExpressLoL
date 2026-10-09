@@ -7,7 +7,7 @@ Les parties sont renvoyées au format brut Match-V5 (dict) dans les deux cas.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -70,6 +70,8 @@ class ActiveGameDTO:
     game_mode: str  # "CLASSIC"…
     champion_id: int
     champion_name: str | None = None  # résolu via Data Dragon si None
+    # puuid → championId de tous les joueurs de la partie (duo dans la même partie) ; vide si inconnu
+    champions_by_puuid: dict[str, int] = field(default_factory=dict)
 
 
 class RiotAPI(Protocol):

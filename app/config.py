@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import timezone, tzinfo
 from pathlib import Path
@@ -29,6 +30,69 @@ def _env_bool(name: str, default: bool | None = None) -> bool | None:
     if raw.strip() == "":
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+# GIF Discord : catégories cherchées sur Klipy (une tirée au hasard à chaque résultat)
+DEFAULT_GIF_SEARCH_LOSS: tuple[str, ...] = (
+    "Monkey",
+    "Goofy Dog",
+    "Charlie Kirk",
+    "Goofy Patrick",
+    "Spongebob cursed",
+    "Indian Goofy",
+)
+DEFAULT_GIF_SEARCH_WIN: tuple[str, ...] = (
+    "Chad",
+    "Lightskin",
+    "Extreme lightskin",
+    "Handsome spongebob",
+    "Happy Netanyahu",
+    "Goofy Drake",
+)
+# Valeurs qui désactivent une liste de GIF (`DISCORD_GIF_… = off`)
+GIF_OFF_VALUES = {"off", "non", "aucun", "none", "0", "-"}
+_GIPHY_PAGE_RE = re.compile(r"^https?://(?:www\.)?giphy\.com/(?:gifs|stickers)/(?:[^/?#]*-)?([A-Za-z0-9]+)/?(?:[?#].*)?$")
+_DIGITS_RE = re.compile(r"\d{5,25}")
+
+
+def normalize_gif_url(url: str) -> str | None:
+    """Lien de GIF utilisable dans un message Discord, ou None.
+
+    Une page GIPHY (« giphy.com/gifs/nom-ID ») devient le lien direct du GIF ; les autres liens
+    (media.giphy.com, media.tenor.com, …/image.gif) sont gardés tels quels.
+    """
+    url = url.strip().strip("<>")
+    if not re.match(r"^https?://", url):
+        return None
+    page = _GIPHY_PAGE_RE.match(url)
+    if page:
+        return f"https://media.giphy.com/media/{page.group(1)}/giphy.gif"
+    return url
+
+
+def _env_gifs(name: str) -> tuple[str, ...]:
+    """Liens de GIF (séparés par des espaces, virgules ou points-virgules) ; vide ou `off` → aucun."""
+    raw = os.getenv(name, "").strip()
+    if not raw or raw.lower() in GIF_OFF_VALUES:
+        return ()
+    urls = (normalize_gif_url(part) for part in re.split(r"[\s,;]+", raw) if part)
+    return tuple(url for url in urls if url)
+
+
+def _env_terms(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    """Catégories de recherche (séparées par des virgules ou points-virgules) ; vide → défaut, `off` → aucune."""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    if raw.lower() in GIF_OFF_VALUES:
+        return ()
+    return tuple(term.strip() for term in re.split(r"[,;\n]+", raw) if term.strip())
+
+
+def parse_role_id(raw: str) -> str:
+    """ID du rôle Discord à mentionner : « 1234… » ou « <@&1234…> » → « 1234… » ; sinon vide."""
+    match = _DIGITS_RE.search(raw or "")
+    return match.group(0) if match else ""
 
 
 def _env_int(name: str, default: int) -> int:
@@ -65,6 +129,15 @@ class Settings:
     # date n'est enregistrée et que la fin est à venir. Vide = pas de date par défaut.
     challenge_start: str = "10/10/2026 09:00"
     challenge_end: str = "12/10/2026 00:00"
+    # Discord : rôle mentionné dans chaque message (ID numérique, vide = aucune mention)
+    discord_role_id: str = ""
+    # GIF des résultats : catégories cherchées sur Klipy (clé gratuite KLIPY_API_KEY), tirées au
+    # hasard ; liens de secours si Klipy est indisponible (ou sans clé)
+    klipy_api_key: str = ""
+    gif_search_win: tuple[str, ...] = DEFAULT_GIF_SEARCH_WIN
+    gif_search_loss: tuple[str, ...] = DEFAULT_GIF_SEARCH_LOSS
+    gif_fallback_win: tuple[str, ...] = ()
+    gif_fallback_loss: tuple[str, ...] = ()
     # Fuseau résolu une seule fois (`tz` est lu pour chaque joueur à chaque requête de stats)
     _tz: tzinfo | None = field(default=None, init=False, repr=False, compare=False)
     _tz_fallback: bool = field(default=False, init=False, repr=False, compare=False)
@@ -142,6 +215,12 @@ def _build_settings() -> Settings:
         github_branch=os.getenv("GITHUB_BRANCH", "").strip() or "claude/quirky-pascal-y84evb",
         challenge_start=os.getenv("CHALLENGE_START", "10/10/2026 09:00").strip(),
         challenge_end=os.getenv("CHALLENGE_END", "12/10/2026 00:00").strip(),
+        discord_role_id=parse_role_id(os.getenv("DISCORD_ROLE_ID", "")),
+        klipy_api_key=os.getenv("KLIPY_API_KEY", "").strip(),
+        gif_search_win=_env_terms("DISCORD_GIF_SEARCH_WIN", DEFAULT_GIF_SEARCH_WIN),
+        gif_search_loss=_env_terms("DISCORD_GIF_SEARCH_LOSS", DEFAULT_GIF_SEARCH_LOSS),
+        gif_fallback_win=_env_gifs("DISCORD_GIF_WIN"),
+        gif_fallback_loss=_env_gifs("DISCORD_GIF_LOSS"),
     )
 
 

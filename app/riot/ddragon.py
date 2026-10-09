@@ -72,6 +72,39 @@ def champion_image_name(champion_name: str) -> str:
     return _STRIP_RE.sub("", name)
 
 
+# Identifiant image Data Dragon → nom affiché, quand ils diffèrent (le reste est identique)
+_DISPLAY_NAMES: dict[str, str] = {
+    "MonkeyKing": "Wukong",
+    "Kaisa": "Kai'Sa",
+    "Khazix": "Kha'Zix",
+    "Chogath": "Cho'Gath",
+    "Velkoz": "Vel'Koz",
+    "RekSai": "Rek'Sai",
+    "KogMaw": "Kog'Maw",
+    "Belveth": "Bel'Veth",
+    "KSante": "K'Sante",
+    "Leblanc": "LeBlanc",
+    "Nunu": "Nunu & Willump",
+    "Renata": "Renata Glasc",
+    "DrMundo": "Dr. Mundo",
+    "JarvanIV": "Jarvan IV",
+    "LeeSin": "Lee Sin",
+    "MasterYi": "Master Yi",
+    "MissFortune": "Miss Fortune",
+    "TahmKench": "Tahm Kench",
+    "TwistedFate": "Twisted Fate",
+    "XinZhao": "Xin Zhao",
+    "AurelionSol": "Aurelion Sol",
+    "FiddleSticks": "Fiddlesticks",
+}
+
+
+def champion_display_name(champion_name: str | None) -> str:
+    """`championName` Match-V5 / identifiant image → nom affiché ("MonkeyKing" → "Wukong")."""
+    name = (champion_name or "").strip()
+    return _DISPLAY_NAMES.get(name, name)
+
+
 def profile_icon_url(version: str, icon_id: int | None) -> str | None:
     if icon_id is None:
         return None

@@ -134,11 +134,11 @@ def game_start_from_ms(value: Any) -> datetime:
 
 def parse_active_game(data: dict[str, Any], puuid: str) -> ActiveGameDTO:
     """Spectator-V5 : champion du participant dont le `puuid` correspond (0 si absent)."""
-    champion_id = 0
+    champions: dict[str, int] = {}
     for participant in data.get("participants") or []:
-        if isinstance(participant, dict) and participant.get("puuid") == puuid:
-            champion_id = _opt_int(participant.get("championId")) or 0
-            break
+        if isinstance(participant, dict) and participant.get("puuid"):
+            champions[str(participant["puuid"])] = _opt_int(participant.get("championId")) or 0
+    champion_id = champions.get(puuid, 0)
     return ActiveGameDTO(
         game_id=int(data.get("gameId") or 0),
         game_start=game_start_from_ms(data.get("gameStartTime")),
@@ -146,4 +146,5 @@ def parse_active_game(data: dict[str, Any], puuid: str) -> ActiveGameDTO:
         game_mode=str(data.get("gameMode") or ""),
         champion_id=champion_id,
         champion_name=None,
+        champions_by_puuid=champions,
     )

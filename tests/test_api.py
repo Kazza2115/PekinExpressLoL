@@ -736,7 +736,8 @@ def test_demo_fill(client: TestClient) -> None:
 def test_admin_maintenance(client: TestClient, admin_headers: dict) -> None:
     response = client.post("/api/admin/test-notification", headers=admin_headers)
     assert response.status_code == 200
-    assert response.json() == {"sent": False}  # pas de webhook configuré en test
+    # pas de webhook configuré en test (ni rôle à mentionner, ni clé Klipy)
+    assert response.json() == {"sent": False, "role_mention": False, "klipy": False}
 
     response = client.post("/api/admin/reload-settings", headers=admin_headers)
     assert response.status_code == 200

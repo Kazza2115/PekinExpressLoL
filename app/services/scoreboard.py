@@ -72,6 +72,12 @@ def _score(kda: float, kp: float | None, damage_share: float | None) -> float:
     return round(kda + (kp or 0) / 20 + (damage_share or 0) / 10, 2)
 
 
+def _pings(part: dict[str, Any]) -> int | None:
+    """Total des pings (`allInPings`, `dangerPings`, `onMyWayPings`…) ; None si Riot n'en donne aucun."""
+    values = [v for k, v in part.items() if k.endswith("Pings") and isinstance(v, int) and not isinstance(v, bool)]
+    return sum(values) if values else None
+
+
 def build_scoreboard(match: Match, players_by_puuid: dict[str, Player]) -> dict[str, Any]:
     """Tableau des scores complet d'une partie ; lève `ScoreboardError` si le JSON manque."""
     try:
@@ -156,6 +162,7 @@ def build_scoreboard(match: Match, players_by_puuid: dict[str, Player]) -> dict[
             "largest_multi_kill": multi,
             "multi_kill_label": {2: "Double", 3: "Triple", 4: "Quadra", 5: "Penta"}.get(min(multi, 5)) if multi >= 2 else None,
             "first_blood": bool(part.get("firstBloodKill")),
+            "pings": _pings(part),
             "score": _score(kda, kp, share),
             "badge": None,
         }
@@ -220,4 +227,56 @@ def build_scoreboard(match: Match, players_by_puuid: dict[str, Player]) -> dict[
         "remake": remake,
         "gold_diff": team_gold[100] - team_gold[200],
         "teams": teams,
+    }
+
+
+# Chance d'équipe : KDA moyen des 4 coéquipiers rapporté à celui des 5 adversaires (le score MVP,
+# fait de la participation aux kills de son propre camp, ne se compare pas d'une équipe à l'autre)
+TEAM_LUCK_LEVELS = [(1.3, "Très bonne"), (1.1, "Bonne"), (0.9, "Moyenne"), (0.75, "Mauvaise")]
+TEAM_LUCK_WORST = "Très mauvaise"
+
+
+def team_luck(allies: list[float], enemies: list[float]) -> str | None:
+    """« Très bonne » … « Très mauvaise » selon le niveau des coéquipiers face aux adversaires."""
+    if not allies or not enemies:
+        return None
+    ally_mean = sum(allies) / len(allies)
+    enemy_mean = sum(enemies) / len(enemies)
+    if enemy_mean <= 0:
+        return TEAM_LUCK_LEVELS[0][1] if ally_mean > 0 else TEAM_LUCK_LEVELS[2][1]
+    ratio = ally_mean / enemy_mean
+    return next((label for threshold, label in TEAM_LUCK_LEVELS if ratio >= threshold), TEAM_LUCK_WORST)
+
+
+def player_highlights(match: Match, player: Player) -> dict[str, Any] | None:
+    """Résumé d'un joueur du challenge dans une partie (messages Discord) ; None si indisponible.
+
+    Ligne du tableau des scores (KDA, dégâts, CS, vision, pings, écart d'or, MVP/ACE…) complétée
+    par les valeurs par minute, sa place au score parmi les 10 joueurs et la chance d'équipe.
+    """
+    if not player.puuid or player.id is None:
+        return None
+    try:
+        board = build_scoreboard(match, {player.puuid: player})
+    except ScoreboardError:
+        return None
+    rows = [(team, row) for team in board["teams"] for row in team["players"]]
+    mine = next(((team, row) for team, row in rows if row["player_id"] == player.id), None)
+    if mine is None:
+        return None
+    team, row = mine
+    minutes = board["duration_s"] / 60 if board["duration_s"] > 0 else 0
+    scores = sorted((other["score"] for _, other in rows), reverse=True)
+    return {
+        **row,
+        "duration_s": board["duration_s"],
+        "win": team["win"],
+        "damage_per_min": round(row["damage"] / minutes) if minutes else None,
+        "vision_per_min": round(row["vision_score"] / minutes, 2) if minutes else None,
+        "place": scores.index(row["score"]) + 1,
+        "players_count": len(rows),
+        "team_luck": team_luck(
+            [other["kda"] for other in team["players"] if other is not row],
+            [other["kda"] for other_team, other in rows if other_team is not team],
+        ),
     }

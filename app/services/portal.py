@@ -236,3 +236,17 @@ def share_url(settings: Settings | None = None) -> str:
     if settings.github_token and portal_state.published_url and portal_state.error is None:
         return portal_page_url(settings.github_repo).rstrip("/")
     return public_url(settings).url
+
+
+def share_link(path: str = "/", settings: Settings | None = None) -> str:
+    """Lien vers une page du site pour les messages Discord (« /player/3#match-EUW1_1 »).
+
+    Via le lien fixe GitHub Pages, la page est passée après « #/ » (le portail redirige vers cette
+    page du site) : « …github.io/PekinExpressLoL/dashboard » n'existe pas sur GitHub Pages.
+    """
+    settings = settings or get_settings()
+    path = "/" + (path or "").lstrip("/")
+    base = share_url(settings)
+    if settings.github_token and portal_state.published_url and portal_state.error is None:
+        return f"{base}/" if path == "/" else f"{base}/#{path}"
+    return base if path == "/" else f"{base}{path}"

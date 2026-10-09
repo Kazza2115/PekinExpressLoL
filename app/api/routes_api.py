@@ -782,7 +782,8 @@ async def use_joker(
     bus.publish("joker_used", payload)
     try:
         await notifications.send_discord(
-            notifications.format_joker_used(team.name, player.display_name, joker.extra_games, limit)
+            notifications.format_joker_used(team.name, player.display_name, joker.extra_games, limit),
+            embeds=[notifications.joker_embed(team.name, player.display_name, joker.extra_games, limit)],
         )
     except Exception:  # noqa: BLE001 — Discord n'est jamais bloquant
         log.warning("Annonce Discord du joker impossible", exc_info=True)

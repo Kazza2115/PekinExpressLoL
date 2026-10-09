@@ -150,6 +150,10 @@ Copie `.env.example` en `.env` à la racine du projet et complète-le. Chaque va
 | `MAX_PLAYERS` | Nombre maximal de joueurs inscrits (défaut 8). Au-delà, l'inscription est refusée. |
 | `TIMEZONE` | Fuseau pour découper les journées (défaut `Europe/Paris`). |
 | `DISCORD_WEBHOOK_URL` | URL d'un webhook Discord pour recevoir les annonces. Vide = désactivé. |
+| `DISCORD_ROLE_ID` | Identifiant du rôle à mentionner dans chaque message (ex. @PekinExpress). Vide = pas de mention. |
+| `KLIPY_API_KEY` | Clé gratuite Klipy pour les GIF des résultats. Vide = pas de GIF (sauf liens de secours). |
+| `DISCORD_GIF_SEARCH_LOSS` / `DISCORD_GIF_SEARCH_WIN` | Catégories Klipy (séparées par des virgules) ; une est tirée au hasard à chaque défaite / victoire. Vide = catégories par défaut, `off` = aucun GIF. |
+| `DISCORD_GIF_LOSS` / `DISCORD_GIF_WIN` | Liens de GIF de secours si Klipy ne répond pas (séparés par des espaces). |
 | `BASE_URL` | Adresse publique du site pour les messages Discord. Inutile avec le tunnel Cloudflare (adresse détectée automatiquement) ; à renseigner seulement si tu as ta propre adresse. |
 
 ### 3. Appliquer la configuration
@@ -303,12 +307,28 @@ l'encourager (ou le troller).
 ### Sur Discord
 
 Renseigne `DISCORD_WEBHOOK_URL` (dans Discord : réglages du salon → Intégrations → Webhooks
-→ copier l'URL) et clique sur **« Tester Discord »** dans l'admin. Le site poste ensuite :
+→ copier l'URL) et clique sur **« Tester Discord »** dans l'admin : il envoie un exemple de
+carte de résultat, un GIF de victoire et un GIF de défaite. Le site poste ensuite :
 
-- 🔴 **Mike** (Duo Rouge) vient de lancer une partie — **Ahri** *(uniquement les parties classées)* ;
-- ✅ **Mike** (Duo Rouge) gagne avec **Ahri** · 7/2/9 · +21 LP *(ou ❌ … perd …, hors
-  remakes)* ;
-- 🚀 l'annonce du démarrage du challenge, avec l'objectif et le lien vers le classement.
+- **Fin de partie** : une carte façon tracker — Riot ID et icône du joueur, portrait du
+  champion, « Mike a gagné 19 LP (Solo/Duo) », rang actuel, puis KDA, durée, score (MVP/ACE ou
+  place sur 10), CS/min, pings, dégâts (et par minute), vision/min, chance d'équipe (niveau des
+  coéquipiers face aux adversaires), participation, écart d'or avec l'adversaire de voie, n° de
+  la partie du jour, et les liens « Tableau des scores » (ouvre la partie sur le site), dpm.lol
+  et op.gg. Liseré vert pour une victoire, rouge pour une défaite ; « hors quota » et « hors des
+  heures du challenge » sont signalés. Si les deux joueurs d'un duo étaient dans la même
+  partie, un seul message regroupe leurs deux cartes (« 🎉 Duo Rouge gagne en duo · +40 LP »).
+- **GIF** : à chaque résultat, une catégorie est tirée au hasard (`DISCORD_GIF_SEARCH_WIN` ou
+  `DISCORD_GIF_SEARCH_LOSS`) et un GIF au hasard est pris parmi les résultats Klipy. Il faut une
+  clé Klipy gratuite (`KLIPY_API_KEY`, sur https://partner.klipy.com) ; sans elle, pas de GIF.
+- **Début de partie** (parties classées) : 🔴 qui joue, quel champion, son rang ; un seul
+  message si le duo lance la partie ensemble.
+- L'annonce du tirage des duos, du démarrage du challenge et des jokers.
+
+**Mention du rôle** (ex. @PekinExpress) : active le mode développeur de Discord (Paramètres →
+Avancés), puis Paramètres du serveur → Rôles → clic droit sur le rôle → « Copier l'identifiant
+du rôle », et mets ce numéro dans `DISCORD_ROLE_ID`. Si la mention ne sonne pas, coche « Permettre
+à tout le monde de @mentionner ce rôle » dans les réglages du rôle.
 
 ---
 
@@ -327,7 +347,7 @@ Protégée par le mot de passe `ADMIN_PASSWORD`. Une fois connecté :
 | Joueurs | **Supprimer** | Supprime le joueur, ses photos de rang et ses parties. Définitif. |
 | Système | **Forcer un rafraîchissement** | Lance un cycle d'interrogation Riot immédiatement. |
 | Système | **Recharger .env** | Relit `.env` (nouvelle clé, mode démo…) sans redémarrer. |
-| Système | **Tester Discord** | Envoie un message de test sur le webhook. |
+| Système | **Tester Discord** | Envoie un message de test (exemple de carte, GIF de victoire et de défaite, mention du rôle). |
 | En-tête | **Se déconnecter** | Oublie le mot de passe dans ce navigateur. |
 
 La section « Système » affiche aussi l'état du dernier cycle : date, durée, nombre de

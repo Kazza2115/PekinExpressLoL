@@ -780,7 +780,12 @@
     try {
       const r = await admin(() => api('/api/admin/test-notification', { method: 'POST', admin: true, body: {} }));
       if (r !== undefined) {
-        if (r && r.sent) toast('Message de test envoyé sur Discord.', { type: 'success' });
+        if (r && r.sent) {
+          const notes = [];
+          if (!r.role_mention) notes.push('sans mention : DISCORD_ROLE_ID est vide');
+          if (!r.klipy) notes.push('sans GIF Klipy : KLIPY_API_KEY est vide');
+          toast(`Message de test envoyé sur Discord${notes.length ? ` (${notes.join(' ; ')})` : ' (mention du rôle + GIF)'}.`, { type: notes.length ? 'warning' : 'success' });
+        }
         else toast('Rien envoyé : DISCORD_WEBHOOK_URL est vide ou l\'envoi a échoué.', { type: 'warning' });
       }
     } catch (err) {

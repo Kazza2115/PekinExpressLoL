@@ -54,8 +54,17 @@ from app.riot.base import (
     RiotUnauthorized,
     RiotUnreachable,
 )
-from app.services.notifications import format_live_start, format_match_recorded, send_discord
-from app.services.stats import absolute_lp, day_key, split_daily_quota
+from app.services import gifs
+from app.services.notifications import (
+    LiveNotice,
+    MatchNotice,
+    build_live_message,
+    build_match_message,
+    group_match_notices,
+    send_discord,
+)
+from app.services.scoreboard import player_highlights
+from app.services.stats import absolute_lp, day_key, format_rank, split_daily_quota
 from app.state import AppState, LiveGameState, PollReport
 
 log = logging.getLogger(__name__)
@@ -358,6 +367,8 @@ class Poller:
         self._settings = settings
         self._lock = asyncio.Lock()
         self._inflight: asyncio.Task[PollReport] | None = None
+        # (game_id, player_id) déjà annoncés dans le message de leur duo (début de partie)
+        self._live_announced: set[tuple[int, int]] = set()
 
     @property
     def settings(self) -> Settings:
@@ -808,6 +819,8 @@ class Poller:
         for touched_player in touched.values():
             backfill_lp_changes(session, touched_player)
 
+        notices: list[MatchNotice] = []
+        discord = self._discord_enabled()
         for participant_player, participant in recorded:
             day_number, over_quota, outside = self._quota_position(
                 session, participant_player, participant, challenge, ctx
@@ -815,20 +828,82 @@ class Poller:
             self._publish_match(
                 participant_player, participant, day_number=day_number, over_quota=over_quota, outside_window=outside
             )
-            if participant.is_remake or ctx.now - _game_end(participant) > NOTIFY_MAX_AGE:
+            if not discord or participant.is_remake or ctx.now - _game_end(participant) > NOTIFY_MAX_AGE:
                 continue
-            team = self._team_of(participant_player, ctx)
-            await self._notify(
-                format_match_recorded(
+            notices.append(
+                self._match_notice(
+                    session,
                     participant_player,
-                    team,
                     participant,
-                    participant.lp_change,
-                    over_quota=over_quota,
+                    challenge,
+                    ctx,
                     day_number=day_number,
+                    over_quota=over_quota,
                     outside_window=outside,
                 )
             )
+        # Un message par joueur, ou un seul pour les deux joueurs d'un duo dans la même partie
+        for group in group_match_notices(notices):
+            choice = await gifs.find_gif(bool(group[0].participant.win), settings=self.settings)
+            content, embeds = build_match_message(group, gif=choice.url if choice else None, settings=self.settings)
+            await self._notify(content, embeds)
+
+    def _match_notice(
+        self,
+        session: Session,
+        player: Player,
+        participant: MatchParticipant,
+        challenge: Challenge | None,
+        ctx: _CycleContext,
+        *,
+        day_number: int | None,
+        over_quota: bool,
+        outside_window: bool,
+    ) -> MatchNotice:
+        """Tout ce qu'il faut pour annoncer une partie : rang actuel, stats du match, quota du jour."""
+        snapshot = last_snapshot(session, player.id, _queue_of(participant.queue)) if player.id is not None else None
+        highlights = None
+        match = session.get(Match, participant.match_id)
+        if match is not None:
+            try:
+                highlights = player_highlights(match, player)
+            except Exception:  # noqa: BLE001 — la carte Discord se contente alors des stats de base
+                log.debug("Statistiques de %s indisponibles pour Discord", participant.match_id, exc_info=True)
+        return MatchNotice(
+            player=player,
+            team=self._team_of(player, ctx),
+            participant=participant,
+            lp_change=participant.lp_change,
+            rank_label=format_rank(snapshot.tier, snapshot.rank, snapshot.lp) if snapshot is not None else None,
+            highlights=highlights,
+            day_number=day_number,
+            day_limit=self._day_limit(session, player, participant, challenge, ctx) if day_number else None,
+            over_quota=over_quota,
+            outside_window=outside_window,
+        )
+
+    def _day_limit(
+        self,
+        session: Session,
+        player: Player,
+        participant: MatchParticipant,
+        challenge: Challenge | None,
+        ctx: _CycleContext,
+    ) -> int | None:
+        """Parties comptées le jour de la partie : quota quotidien + joker du duo activé avant sa fin."""
+        if challenge is None:
+            return None
+        limit = int(challenge.games_per_day or 0)
+        team = self._team_of(player, ctx)
+        if team is None or team.id is None:
+            return limit
+        ended = _game_end(participant)
+        day = day_key(ended, self.settings.tz)
+        for joker in session.exec(select(Joker).where(Joker.team_id == team.id, Joker.day == day)).all():
+            activated = as_utc(joker.activated_at)
+            if activated is not None and activated <= ended:
+                limit += int(joker.extra_games)
+        return limit
 
     @staticmethod
     def _stores_matches(challenge: Challenge | None) -> bool:
@@ -1104,8 +1179,48 @@ class Poller:
                 "ranked": ranked,
             },
         )
-        if ranked:
-            await self._notify(format_live_start(player, self._team_of(player, ctx), champion_name))
+        if ranked and self._discord_enabled():
+            await self._notify_live(session, player, game, champion_name, ctx)
+
+    async def _notify_live(
+        self, session: Session, player: Player, game: Any, champion_name: str, ctx: _CycleContext
+    ) -> None:
+        """Annonce Discord d'un début de partie classée ; un seul message si le duo joue ensemble."""
+        key = (int(game.game_id), int(player.id or 0))
+        if key in self._live_announced:
+            self._live_announced.discard(key)  # déjà annoncé avec son coéquipier
+            return
+        team = self._team_of(player, ctx)
+        entries = [self._live_notice(session, player, team, champion_name, game.queue_id)]
+        champions = getattr(game, "champions_by_puuid", None) or {}
+        if team is not None and champions:
+            for mate in ctx.players_by_puuid.values():
+                if mate.id == player.id or mate.team_id != player.team_id or mate.puuid not in champions:
+                    continue
+                current = self.state.live_games.get(mate.id) if mate.id is not None else None
+                if current is not None and current.game_id == game.game_id:
+                    continue  # coéquipier déjà annoncé (cycle précédent)
+                mate_champion = await self._champion_name(champions[mate.puuid])
+                entries.append(self._live_notice(session, mate, team, mate_champion, game.queue_id))
+                if len(self._live_announced) > 200:
+                    self._live_announced.clear()
+                self._live_announced.add((int(game.game_id), int(mate.id or 0)))
+        content, embeds = build_live_message(entries, settings=self.settings, now=ctx.now)
+        await self._notify(content, embeds)
+
+    @staticmethod
+    def _live_notice(
+        session: Session, player: Player, team: Team | None, champion_name: str, queue_id: int | None
+    ) -> LiveNotice:
+        queue = QUEUE_BY_ID.get(int(queue_id or 0), Queue.SOLO)
+        snapshot = last_snapshot(session, player.id, queue) if player.id is not None else None
+        return LiveNotice(
+            player=player,
+            team=team,
+            champion_name=champion_name,
+            queue_id=queue_id,
+            rank_label=format_rank(snapshot.tier, snapshot.rank, snapshot.lp) if snapshot is not None else None,
+        )
 
     @staticmethod
     async def _champion_name(champion_id: int) -> str:
@@ -1135,9 +1250,13 @@ class Poller:
 
     # ------------------------------------------------------------------ Discord
 
-    async def _notify(self, content: str) -> None:
+    def _discord_enabled(self) -> bool:
+        """Webhook configuré : sinon inutile de préparer les messages (requêtes, GIF)."""
+        return bool((self.settings.discord_webhook_url or "").strip())
+
+    async def _notify(self, content: str, embeds: list[dict[str, Any]] | None = None) -> None:
         """Envoi Discord sans jamais propager d'erreur (no-op si webhook non configuré)."""
         try:
-            await send_discord(content, settings=self._settings)
+            await send_discord(content, embeds=embeds, settings=self._settings)
         except Exception as exc:  # noqa: BLE001 — déjà géré dans send_discord, ceinture et bretelles
             log.warning("Notification Discord impossible : %s", exc)

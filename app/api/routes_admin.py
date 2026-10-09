@@ -26,7 +26,7 @@ from app.db.session import as_utc, get_session
 from app.services.bootstrap import apply_default_schedule, parse_fr_datetime
 from app.events import bus
 from app.riot import get_api, reset_api
-from app.services import notifications
+from app.services import gifs, notifications
 from app.services.draw import perform_draw, team_identity
 from app.state import state
 
@@ -39,7 +39,6 @@ NO_TEAMS_DETAIL = "Aucun duo : compose-les dans Admin → Duos."
 TEAMS_LOCKED_DETAIL = "Les duos ne peuvent plus changer pendant le challenge."
 TEAM_NOT_FOUND_DETAIL = "Duo introuvable."
 PLAYER_NOT_FOUND_DETAIL = "Joueur introuvable."
-TEST_NOTIFICATION_CONTENT = "🔔 Test de notification — Pékin Express LoL : le webhook Discord fonctionne."
 # Taille d'un duo
 TEAM_SIZE = 2
 
@@ -282,7 +281,10 @@ async def draw(session: Session = Depends(get_session)) -> dict[str, Any]:
     # Annonce des duos sur Discord (optionnel, jamais bloquant)
     try:
         players_by_id = {p.id: p for p in session.exec(select(Player)).all()}
-        await notifications.send_discord(notifications.format_draw_done(payload["teams"], players_by_id))
+        await notifications.send_discord(
+            notifications.headline(notifications.format_draw_done(payload["teams"], players_by_id)),
+            embeds=[notifications.draw_embed(payload["teams"], players_by_id)],
+        )
     except Exception:  # noqa: BLE001
         log.warning("Annonce Discord du tirage impossible", exc_info=True)
     return payload
@@ -351,9 +353,10 @@ async def start_challenge(
 
     # Discord (optionnel) : jamais bloquant
     try:
-        formatter = getattr(notifications, "format_challenge_started", None)
-        content = formatter(challenge) if callable(formatter) else f"🚀 **{challenge.name}** : le challenge démarre !"
-        await notifications.send_discord(content)
+        await notifications.send_discord(
+            notifications.headline(notifications.format_challenge_started(challenge)),
+            embeds=[notifications.challenge_started_embed(challenge)],
+        )
     except Exception:  # noqa: BLE001
         log.warning("Notification Discord de démarrage impossible", exc_info=True)
 
@@ -741,6 +744,7 @@ async def reload_app_settings(request: Request) -> dict[str, Any]:
     """Relit `.env` (nouvelle clé Riot, mode démo…) et remplace le client Riot."""
     before = get_settings()
     settings = reload_settings()
+    gifs.reset_cache()  # nouvelle clé Klipy ou nouvelles catégories : on recherche à nouveau
     old_api = getattr(request.app.state, "riot_api", None)
     # Le client Riot n'est remplacé que si le mode change (démo ↔ réel) : en démo, le
     # recréer repartirait d'un monde simulé neuf (rangs initiaux, LP nets remis à zéro) ;
@@ -763,9 +767,16 @@ async def reload_app_settings(request: Request) -> dict[str, Any]:
 
 @router.post("/test-notification")
 async def test_notification() -> dict[str, Any]:
+    """Message de test : exemple de carte de résultat, GIF de victoire et de défaite, mention du rôle."""
+    settings = get_settings()
     try:
-        sent = await notifications.send_discord(TEST_NOTIFICATION_CONTENT)
+        content, embeds = await notifications.build_test_message(settings=settings)
+        sent = await notifications.send_discord(content, embeds=embeds, settings=settings)
     except Exception:  # noqa: BLE001
         log.warning("Notification Discord de test impossible", exc_info=True)
         sent = False
-    return {"sent": bool(sent)}
+    return {
+        "sent": bool(sent),
+        "role_mention": bool(settings.discord_role_id),
+        "klipy": bool(settings.klipy_api_key),
+    }

@@ -752,7 +752,12 @@
     if (!hashDone && /^#match-/.test(location.hash || '')) {
       hashDone = true;
       const target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
-      if (target) target.scrollIntoView({ block: 'center' });
+      if (target) {
+        target.scrollIntoView({ block: 'center' });
+        // Lien « Tableau des scores » des messages Discord : le tableau s'ouvre directement
+        const id = decodeURIComponent(location.hash.slice('#match-'.length));
+        if (id) openDetails.add(id);
+      }
     }
     openDetails.forEach((id) => {
       const btn = els.matches.querySelector(`[data-detail="${CSS.escape(id)}"]`);
