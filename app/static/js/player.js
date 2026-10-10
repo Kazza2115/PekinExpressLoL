@@ -687,7 +687,7 @@
         ? '<span class="pf-tag is-ff-win" title="L\'équipe adverse a abandonné : victoire, pas comptée comme abandon">🏳️ Abandon adverse</span>'
         : '<span class="pf-tag is-ff" title="Son équipe a abandonné (/ff)">🏳️ Abandon</span>');
     }
-    if (m.lp_bonus > 0 && !m.over_quota) tags.push(`<span class="pf-tag is-double-lp" title="Riot a doublé les LP de cette victoire (Aegis of Valor, autofill)${m.double_lp_manual ? ' · confirmé par l\'organisateur' : ''} : la moitié est retirée des LP nets">⚡ Double LP · ${int(m.lp_bonus)} LP retirés</span>`);
+    if (m.lp_bonus > 0 && !m.over_quota && !m.outside_window) tags.push(`<span class="pf-tag is-double-lp" title="Riot a doublé les LP de cette victoire (Aegis of Valor, autofill)${m.double_lp_manual ? ' · confirmé par l\'organisateur' : ''} : la moitié est retirée des LP nets">⚡ Double LP · ${int(m.lp_bonus)} LP retirés</span>`);
     if (m.over_quota) tags.push('<span class="pf-tag is-ff" title="Au-delà des parties autorisées ce jour-là : ni LP ni stats">⛔ Hors quota, ne compte pas</span>');
     const facts = [];
     if (isNum(m.damage_share)) facts.push(`<span class="pf-m-fact" title="Part des dégâts de l'équipe">${miniBar(m.damage_share, 'is-red')}${pct(m.damage_share)} dégâts</span>`);

@@ -59,6 +59,8 @@ from app.services import gifs
 from app.services.announce import announce_placements, announce_start_if_due
 from app.services.double_lp import assess_double_lp, lp_bonus
 from app.services.notifications import (
+    MAX_EMBEDS,
+    DoubleLpNotice,
     LiveNotice,
     MatchNotice,
     build_double_lp_message,
@@ -84,8 +86,6 @@ APEX_TIERS = frozenset({"MASTER", "GRANDMASTER", "CHALLENGER"})
 # Une partie terminée depuis plus longtemps n'est plus annoncée sur Discord
 # (évite le spam si le challenge démarre avec une date de début dans le passé)
 NOTIFY_MAX_AGE = timedelta(minutes=30)
-# Double LP repéré après coup : annoncé jusqu'à 12 h après la partie
-DOUBLE_LP_NOTIFY_MAX_AGE = timedelta(hours=12)
 # Icône et niveau d'invocateur relus au plus tous les 15 min (1 requête Summoner-V4 par joueur)
 SUMMONER_REFRESH_INTERVAL_S = 15 * 60
 # Préfixe des puuid inventés par le client démo (app/riot/demo.py)
@@ -868,8 +868,18 @@ class Poller:
         for touched_player in touched.values():
             backfill_lp_changes(session, touched_player)
             doubled.extend((touched_player, game, usual) for game, usual in assess_double_lp(session, touched_player))
-        for doubled_player, game, _usual in doubled:
+        # Seules les victoires qui comptent (dans la fenêtre, dans le quota) perdent leur bonus
+        counted_doubles: list[DoubleLpNotice] = []
+        for doubled_player, game, usual in doubled:
+            _number, over_quota, outside = self._quota_position(session, doubled_player, game, challenge, ctx)
+            if over_quota or outside:
+                continue
             self._publish_double_lp(doubled_player, game)
+            counted_doubles.append(
+                DoubleLpNotice(
+                    player=doubled_player, team=self._team_of(doubled_player, ctx), participant=game, usual_gain=usual
+                )
+            )
 
         notices: list[MatchNotice] = []
         discord = self._discord_enabled()
@@ -900,10 +910,15 @@ class Poller:
             content, embeds = build_match_message(group, gif=choice.url if choice else None, settings=self.settings)
             await self._notify(content, embeds)
             # Le double LP figure sur la carte du résultat : pas de second message
-            self._mark_double_lp_announced(session, [n.participant for n in group if lp_bonus(n.participant)])
-        # Double LP repéré après l'annonce du résultat (LP connus plus tard) : message à part
-        for doubled_player, game, usual in doubled:
-            await self._announce_double_lp(session, doubled_player, game, usual, challenge, ctx)
+            self._mark_double_lp_announced(
+                session,
+                [n.participant for n in group if lp_bonus(n.participant) and not (n.over_quota or n.outside_window)],
+            )
+        # Double LP repéré après l'annonce du résultat (LP connus plus tard, ou jugé quand le joueur a
+        # eu assez de victoires pour comparer) : un message récapitulatif, quel que soit l'âge de la partie
+        await self._announce_double_lps(
+            session, [n for n in counted_doubles if n.participant.double_lp_announced_at is None]
+        )
 
     def _publish_double_lp(self, player: Player, participant: MatchParticipant) -> None:
         self.bus.publish(
@@ -928,28 +943,15 @@ class Poller:
             session.add(participant)
         session.commit()
 
-    async def _announce_double_lp(
-        self,
-        session: Session,
-        player: Player,
-        participant: MatchParticipant,
-        usual: float | None,
-        challenge: Challenge | None,
-        ctx: _CycleContext,
-    ) -> None:
-        """Message Discord d'un double LP repéré après coup (une fois ; parties qui comptent seulement)."""
-        if participant.double_lp_announced_at is not None or not self._discord_enabled():
+    async def _announce_double_lps(self, session: Session, notices: list[DoubleLpNotice]) -> None:
+        """Message Discord des double LP repérés après coup (une fois chacun, 10 par message au plus)."""
+        if not notices or not self._discord_enabled():
             return
-        if ctx.now - _game_end(participant) > DOUBLE_LP_NOTIFY_MAX_AGE:
-            return  # vieille partie (site redémarré après une coupure) : pas de rappel tardif
-        _number, over_quota, outside = self._quota_position(session, player, participant, challenge, ctx)
-        if over_quota or outside:
-            return  # ses LP ne comptent déjà pas
-        content, embeds = build_double_lp_message(
-            player, self._team_of(player, ctx), participant, usual_gain=usual, settings=self.settings
-        )
-        await self._notify(content, embeds)
-        self._mark_double_lp_announced(session, [participant])
+        for index in range(0, len(notices), MAX_EMBEDS):
+            chunk = notices[index : index + MAX_EMBEDS]
+            content, embeds = build_double_lp_message(chunk, settings=self.settings)
+            await self._notify(content, embeds)
+            self._mark_double_lp_announced(session, [n.participant for n in chunk])
 
     def _match_notice(
         self,

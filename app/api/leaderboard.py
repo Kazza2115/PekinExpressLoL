@@ -313,6 +313,20 @@ def compute_single_player_stats(
     return stats
 
 
+def counts_for_challenge(session: Session, challenge: Challenge, player: Player, participant: MatchParticipant) -> bool:
+    """La partie compte pour le challenge : file Solo/Duo, terminée dans la fenêtre du duo et dans
+    le quota du jour (joker compris)."""
+    if participant.is_remake or participant.queue not in (Queue.SOLO, Queue.SOLO.value):
+        return False
+    team = session.get(Team, player.team_id) if player.team_id is not None else None
+    start, end = team_window(challenge, team)
+    ended = game_end_of(participant)
+    if (start is not None and ended < start) or (end is not None and ended > end):
+        return False
+    stats = compute_single_player_stats(session, challenge, player, team)
+    return participant.match_id not in set(stats.over_quota_match_ids)
+
+
 def build_leaderboard(
     session: Session,
     challenge: Challenge,

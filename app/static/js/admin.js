@@ -653,7 +653,8 @@
       try {
         const r = await admin(() => api(`/api/admin/double-lp/${id}`, { method: 'PATCH', admin: true, body: { double_lp: value } }));
         if (r === undefined) { input.checked = !value; return; }
-        toast(value ? `Double LP : ${r.lp_bonus} LP retirés des LP nets.` : 'Victoire normale : tous ses LP comptent.', { type: 'success', timeout: 4000 });
+        const said = r.discord ? ' Annoncé sur Discord.' : '';
+        toast(value ? `Double LP : ${r.lp_bonus} LP retirés des LP nets (si la partie compte).${said}` : `Victoire normale : tous ses LP comptent.${said}`, { type: 'success', timeout: 5000 });
         await loadDoubleLp();
       } catch (err) {
         input.checked = !value;

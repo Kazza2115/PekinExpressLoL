@@ -568,42 +568,85 @@ def build_match_message(
     return content, embeds
 
 
-def build_double_lp_message(
-    player: Player,
-    team: Team | None,
-    participant: MatchParticipant,
-    *,
-    usual_gain: float | None = None,
-    settings: Settings | None = None,
-) -> tuple[str, list[dict[str, Any]]]:
-    """(texte, carte) d'un double LP repéré après coup (LP connus après l'annonce du résultat)."""
+@dataclass
+class DoubleLpNotice:
+    """Une victoire à double LP qui compte pour le challenge (bonus retiré des LP nets)."""
+
+    player: Player
+    team: Team | None
+    participant: MatchParticipant
+    usual_gain: float | None = None  # gain habituel retenu par la détection (None : décision de l'Admin)
+
+
+def double_lp_embed(notice: DoubleLpNotice, *, confirmed: bool = False, settings: Settings | None = None) -> dict[str, Any]:
+    """Carte d'un double LP : gain, gain habituel, LP retirés."""
     settings = settings if settings is not None else get_settings()
-    bonus = lp_bonus(participant)
-    gain = int(participant.lp_change or 0)
-    usual = f", le double de son gain habituel (≈ {round(usual_gain)} LP)" if usual_gain else ""
-    link = share_link(f"/player/{player.id}#match-{participant.match_id}", settings)
-    content = f"⚡ Double LP repéré pour **{player.display_name}** : {bonus} LP bonus retirés de ses LP nets"
+    part = notice.participant
+    bonus = lp_bonus(part)
+    gain = int(part.lp_change or 0)
+    usual = f" (son gain habituel : ≈ {round(notice.usual_gain)} LP)" if notice.usual_gain else ""
+    origin = "Confirmé par l'organisateur. " if confirmed else ""
     embed: dict[str, Any] = {
-        "author": _author(player, settings),
-        "title": f"⚡ Double LP pour {player.display_name}",
-        "url": link,
+        "author": _author(notice.player, settings),
+        "title": f"⚡ Double LP pour {notice.player.display_name}",
+        "url": share_link(f"/player/{notice.player.id}#match-{part.match_id}", settings),
         "description": "\n".join(
             [
-                f"Victoire avec **{champion_label(participant.champion_name)}** : **+{gain} LP**{usual}.",
-                "Riot double parfois les LP d'une victoire (« Aegis of Valor », en autofill). Pour que le"
-                f" challenge reste équitable, **{bonus} LP bonus sont retirés** de ses LP nets ;"
+                f"Victoire avec **{champion_label(part.champion_name)}** : **+{gain} LP**{usual}.",
+                f"{origin}Riot double parfois les LP d'une victoire (« Aegis of Valor », en autofill). Pour que"
+                f" le challenge reste équitable, **{bonus} LP bonus sont retirés** de ses LP nets ;"
                 f" les {gain - bonus} autres comptent.",
             ]
         ),
         "color": COLOR_INFO,
-        "footer": _footer(team),
+        "footer": _footer(notice.team),
     }
-    thumbnail = _champion_thumbnail(participant.champion_name)
+    thumbnail = _champion_thumbnail(part.champion_name)
     if thumbnail:
         embed["thumbnail"] = thumbnail
-    timestamp = _iso(participant.game_end) or _iso(participant.game_start)
+    timestamp = _iso(part.game_end) or _iso(part.game_start)
     if timestamp:
         embed["timestamp"] = timestamp
+    return embed
+
+
+def build_double_lp_message(
+    notices: Sequence[DoubleLpNotice], *, confirmed: bool = False, settings: Settings | None = None
+) -> tuple[str, list[dict[str, Any]]]:
+    """(texte, cartes) de double LP repérés après l'annonce du résultat, ou confirmés dans l'Admin.
+
+    Plusieurs détections du même cycle partent dans un seul message (au plus `MAX_EMBEDS` cartes).
+    """
+    settings = settings if settings is not None else get_settings()
+    notices = list(notices)[:MAX_EMBEDS]
+    bonus = sum(lp_bonus(n.participant) for n in notices)
+    if len(notices) == 1:
+        who = notices[0].player.display_name
+        verb = "confirmé par l'organisateur" if confirmed else "repéré"
+        content = f"⚡ Double LP {verb} pour **{who}** : {bonus} LP bonus retirés de ses LP nets"
+    else:
+        names = ", ".join(dict.fromkeys(n.player.display_name for n in notices))
+        content = f"⚡ {len(notices)} double LP repérés ({names}) : {bonus} LP bonus retirés des LP nets"
+    return content, [double_lp_embed(n, confirmed=confirmed, settings=settings) for n in notices]
+
+
+def build_double_lp_cancel_message(
+    player: Player, team: Team | None, participant: MatchParticipant, restored: int, *, settings: Settings | None = None
+) -> tuple[str, list[dict[str, Any]]]:
+    """(texte, carte) quand l'organisateur annule un double LP déjà annoncé : les LP sont rendus."""
+    settings = settings if settings is not None else get_settings()
+    content = f"↩️ Double LP annulé pour **{player.display_name}** : les {restored} LP lui sont rendus"
+    embed: dict[str, Any] = {
+        "author": _author(player, settings),
+        "title": f"↩️ Pas de double LP pour {player.display_name}",
+        "url": share_link(f"/player/{player.id}#match-{participant.match_id}", settings),
+        "description": (
+            f"Victoire avec **{champion_label(participant.champion_name)}** : **+{int(participant.lp_change or 0)} LP**."
+            f" L'organisateur a vérifié : c'était une victoire normale, les {restored} LP retirés comptent à nouveau."
+        ),
+        "color": COLOR_INFO,
+        "footer": _footer(team),
+    }
     return content, [embed]
 
 

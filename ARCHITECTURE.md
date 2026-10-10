@@ -23,11 +23,13 @@ httpx, Jinja2, JS vanilla, CSS maison (pas de Tailwind), Chart.js vendored.
   perdante a abandonné (`stats.surrendered_by_us` / `surrendered_by_them` → `surrenders` /
   `surrender_wins`, parties jouées ensemble comptées une fois pour le duo).
 - Double LP (Aegis of Valor, `services/double_lp.py`) : après `backfill_lp_changes`, le poller
-  juge chaque victoire aux LP connus (`assess_double_lp` : gain ≥ 1,6 × médiane des autres
-  victoires et ≥ 30 LP, ou ≥ 40 LP sans référence) → `MatchParticipant.double_lp`. `lp_bonus`
-  (moitié du gain) est retiré de `lp_net` pour les parties comptées ; annonce Discord sur la carte
-  du résultat, ou message à part si les LP arrivent après (`double_lp_announced_at`). L'Admin
-  corrige (`double_lp_manual`, `GET/PATCH /api/admin/double-lp`).
+  juge chaque victoire Solo/Duo aux LP connus (`assess_double_lp` : gain ≥ 1,6 × la médiane des
+  6 victoires de référence les plus proches, au moins 3, et ≥ 30 LP ; sinon `None`, rejugée plus
+  tard ; victoires dont les relevés encadrent plusieurs parties Riot exclues) →
+  `MatchParticipant.double_lp`. `lp_bonus` (moitié du gain) est retiré de `lp_net` pour les
+  parties comptées ; annonce Discord sur la carte du résultat, sinon récapitulatif à part
+  (`double_lp_announced_at`). L'Admin corrige (`double_lp_manual`, `GET/PATCH
+  /api/admin/double-lp`) et sa décision est annoncée (confirmation ou LP rendus).
 - « Avertir les joueurs quand un duo lance une partie » : événement `live_start` → SSE
   (toast + Notification navigateur) + webhook Discord optionnel.
 

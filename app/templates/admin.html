@@ -86,7 +86,7 @@
 
   <section class="card admin-section" id="double-lp">
     <div class="section-head"><span class="section-label">Double LP (Aegis of Valor)</span><span class="muted" id="double-lp-count"></span></div>
-    <p class="help">Riot double parfois les LP d'une victoire (joueur en autofill). L'API Riot ne le signale pas : le site repère une victoire qui rapporte au moins 1,6 fois le gain habituel du joueur, retire la moitié du gain de ses LP nets et l'annonce sur Discord. Corrige ici une détection fausse ou manquée : ta décision n'est plus revue.</p>
+    <p class="help">Riot double parfois les LP d'une victoire (joueur en autofill). L'API Riot ne le signale pas : le site repère une victoire Solo/Duo qui rapporte au moins 1,6 fois le gain habituel du joueur (médiane de ses victoires les plus proches, il en faut 3), retire la moitié du gain de ses LP nets et l'annonce sur Discord. Corrige ici une détection fausse ou manquée : ta décision est annoncée sur Discord et n'est plus revue.</p>
     <div class="table-wrap card-flat">
       <table class="table">
         <thead><tr><th>Joueur</th><th>Victoire</th><th class="num">LP gagnés</th><th class="num">Gain habituel</th><th>Double LP</th></tr></thead>
