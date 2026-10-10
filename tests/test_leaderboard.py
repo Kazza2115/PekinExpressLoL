@@ -137,7 +137,10 @@ def test_build_leaderboard_fills_together_record(session: Session):
     assert len(teams) == 1
     duo = teams[0]
     assert (duo.together_games, duo.together_wins, duo.together_losses, duo.together_winrate) == (1, 1, 0, 100.0)
-    assert duo.games == 5  # Mike 3 (M1, M2, M4) + Léa 2 (M1, M2) dans la fenêtre
+    # Parties du duo : M1 jouée ensemble compte une fois ; M2 (l'un contre l'autre) et M4 (Mike
+    # avec Sam) comptent chacune pour le joueur concerné → 4 parties, 3 victoires, 1 défaite
+    assert (duo.games, duo.wins, duo.losses, duo.winrate) == (4, 3, 1, 75.0)
+    assert sum(p.games for p in duo.players) == 5  # les fiches joueurs, elles, comptent chacune leurs parties
     assert duo.mvp_player_id in (mike.id, lea.id)
     assert duo.avg_kda is not None
     assert {p.player_id for p in players} == {mike.id, lea.id, sam.id}
@@ -193,3 +196,16 @@ def test_single_player_stats_fill_partner(session: Session):
     session.add(lea)
     session.commit()
     assert compute_single_player_stats(session, challenge, mike, team, now=now).partner is None
+
+
+def test_a_win_played_together_is_one_duo_win(session: Session):
+    """Le duo joue ensemble : une victoire = 1 victoire du duo (pas 2), une défaite = 1 défaite."""
+    challenge, team, mike, lea, sam = _seed(session)
+    now = datetime.now(timezone.utc)
+    _match(session, "D1", now - timedelta(hours=1), [(mike.id, 100, True), (lea.id, 100, True)])
+    _match(session, "D2", now - timedelta(minutes=30), [(mike.id, 200, False), (lea.id, 200, False)])
+    teams, players = build_leaderboard(session, challenge, now=now)
+    duo = teams[0]
+    assert (duo.games, duo.wins, duo.losses, duo.winrate) == (2, 1, 1, 50.0)
+    by_id = {p.player_id: p for p in players}
+    assert (by_id[mike.id].wins, by_id[lea.id].wins) == (1, 1)  # chaque joueur garde sa victoire

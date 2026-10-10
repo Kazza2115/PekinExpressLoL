@@ -230,7 +230,8 @@ Le démarrage est refusé tant qu'un joueur inscrit n'est pas dans un duo comple
 Pendant le challenge, la page classement affiche :
 
 - le **podium des duos** avec leurs LP nets, victoires/défaites, winrate et le compteur
-  « aujourd'hui x/10 » de chaque joueur ;
+  « aujourd'hui x/10 » de chaque joueur. Une partie jouée ensemble compte **une** victoire (ou
+  défaite) pour le duo, pas une par joueur ; les LP, eux, s'additionnent (chacun gagne les siens) ;
 - le **tableau des joueurs**, triable par LP nets, parties, winrate ou KDA ;
 - le **graphe d'évolution des LP** (une courbe par joueur, à la couleur de son duo) ;
 - le **feed des dernières parties** (champion, KDA, durée, LP gagnés/perdus) ;

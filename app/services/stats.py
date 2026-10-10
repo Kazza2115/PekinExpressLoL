@@ -1395,13 +1395,16 @@ def compute_team_stats(
     """Agrège les stats des joueurs d'un duo ; `position` = 0 (rempli par `rank_teams`).
 
     `together` = (parties, victoires, défaites) jouées ensemble (calculé par
-    `app.api.leaderboard.together_record`).
+    `app.api.leaderboard.together_record`). Victoires, défaites et parties sont celles du *duo* :
+    une partie jouée ensemble (même partie, même côté) compte une fois, pas une par joueur. Les LP
+    restent la somme des deux joueurs (chacun gagne ou perd les siens sur la partie).
     """
-    wins = sum(p.wins for p in players)
-    losses = sum(p.losses for p in players)
-    games = sum(p.games for p in players)
-    lp_net = sum(p.lp_net for p in players)
     together_games, together_wins, together_losses = (int(v) for v in together)
+    player_games = sum(p.games for p in players)
+    wins = max(0, sum(p.wins for p in players) - together_wins)
+    losses = max(0, sum(p.losses for p in players) - together_losses)
+    games = max(0, player_games - together_games)
+    lp_net = sum(p.lp_net for p in players)
     mvp_id = team_mvp(players)
     mvp = next((p for p in players if p.player_id == mvp_id), None) if mvp_id is not None else None
     ranked = [p for p in players if p.absolute_lp is not None]
@@ -1459,7 +1462,8 @@ def compute_team_stats(
         turret_kills=sums("turret_kills"),
         objectives_stolen=sums("objectives_stolen"),
         surrenders=sums("surrenders"),
-        avg_game_duration=round(total_time / games) if total_time is not None and games else None,
+        # Temps de jeu cumulé des deux joueurs : la durée moyenne se rapporte donc aux parties jouées
+        avg_game_duration=round(total_time / player_games) if total_time is not None and player_games else None,
         total_time_played=total_time,
         avg_damage_share=_mean_or_none([p.avg_damage_share for p in players], 1),
         avg_gold_per_min=_mean_or_none([p.avg_gold_per_min for p in players], 1),
