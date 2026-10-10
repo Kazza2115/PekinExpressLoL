@@ -56,6 +56,7 @@ from app.riot.base import (
     RiotUnreachable,
 )
 from app.services import gifs
+from app.services.announce import announce_start_if_due
 from app.services.notifications import (
     LiveNotice,
     MatchNotice,
@@ -460,12 +461,14 @@ class Poller:
                         }
                     )
             self.state.last_live_check = _utcnow()
-            return {
-                "skipped": False,
-                "checked_at": self.state.last_live_check.isoformat(),
-                "players": results,
-                "errors": list(report.errors),
-            }
+        # Toutes les ~30 s : l'annonce « c'est parti » part à l'heure du début, à 30 s près
+        await announce_start_if_due(settings=self.settings)
+        return {
+            "skipped": False,
+            "checked_at": self.state.last_live_check.isoformat(),
+            "players": results,
+            "errors": list(report.errors),
+        }
 
     async def poll_once(self) -> PollReport:
         """Exécute un cycle complet. Si un cycle est déjà en cours, attend son rapport."""
@@ -526,6 +529,7 @@ class Poller:
             self._auto_finish()
         except Exception:  # noqa: BLE001 — jamais bloquant
             log.exception("Fin automatique du challenge en échec")
+        await announce_start_if_due(settings=self.settings)  # « c'est parti » à l'heure du début
         if report.errors:
             log.info("Cycle terminé avec %d erreur(s) en %.2fs", len(report.errors), report.duration_s)
         else:

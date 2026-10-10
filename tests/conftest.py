@@ -39,6 +39,7 @@ def _settings():
     os.environ["DISCORD_WEBHOOK_URL"] = ""
     os.environ["DISCORD_ROLE_ID"] = ""
     os.environ["KLIPY_API_KEY"] = ""
+    os.environ["DISCORD_GIF_START"] = "off"  # pas d'appel réseau vers Klipy pendant les tests
     os.environ["DATABASE_URL"] = "sqlite://"
     os.environ["CHALLENGE_START"] = ""
     os.environ["CHALLENGE_END"] = ""

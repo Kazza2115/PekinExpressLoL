@@ -344,6 +344,11 @@ carte de résultat, un GIF de victoire et un GIF de défaite. Le site poste ensu
   clé Klipy gratuite (`KLIPY_API_KEY`, sur https://partner.klipy.com) ; sans elle, pas de GIF.
 - **Début de partie** (parties classées) : 🔴 qui joue, quel champion, son rang ; un seul
   message si le duo lance la partie ensemble.
+- **« C'est parti ! »** à l'heure du début du challenge (ex. samedi 9h) : rôle mentionné, objectif,
+  duos, date de fin, lien du classement et le GIF `DISCORD_GIF_START` (une page Klipy suffit). Le site
+  vérifie toutes les 30 s ; s'il était éteint à 9h, l'annonce part à son démarrage (jusqu'à 3 h de
+  retard). Le challenge doit avoir été **démarré** (Admin → « 🚀 Démarrer », le début programmé est
+  gardé).
 - L'annonce du tirage des duos, du démarrage du challenge et des jokers.
 
 **Mention du rôle** (ex. @PekinExpress) : active le mode développeur de Discord (Paramètres →

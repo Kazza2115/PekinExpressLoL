@@ -59,7 +59,7 @@ def make_settings(**overrides: Any) -> Settings:
         discord_webhook_url=WEBHOOK_URL,
         base_url="http://localhost:8000",
     )
-    return replace(settings, **overrides)
+    return replace(settings, **{"gif_start": "", **overrides})
 
 
 def recorder(seen: list[httpx.Request], status_code: int = 204, body: Any = None) -> httpx.AsyncClient:
@@ -394,15 +394,18 @@ def test_extract_gif_urls_prefers_medium_and_skips_ads():
 
 async def test_test_message_previews_a_win_and_a_loss_gif():
     seen: list[httpx.Request] = []
-    settings = make_settings(klipy_api_key="cle")
+    settings = make_settings(klipy_api_key="cle", gif_start=config.DEFAULT_START_GIF)
     async with recorder(seen, 200, klipy_body("https://static.klipy.com/a.gif")) as client:
         content, embeds = await notifications.build_test_message(settings=settings, client=client)
     assert content == notifications.TEST_NOTIFICATION_CONTENT
     assert embeds[0]["title"].startswith("Exemple — ")
-    assert [e["image"]["url"] for e in embeds[1:]] == ["https://static.klipy.com/a.gif"] * 2
+    # GIF de victoire, de défaite, puis celui de l'annonce du début (page Klipy → GIF via l'API)
+    assert [e["image"]["url"] for e in embeds[1:]] == ["https://static.klipy.com/a.gif"] * 3
     assert "catégorie Klipy" in embeds[1]["title"]
-    _, without_key = await notifications.build_test_message(settings=make_settings())
-    assert "KLIPY_API_KEY" in without_key[1]["description"]
+    assert embeds[3]["title"] == "GIF de l'annonce du début"
+    assert any(r.url.path == "/api/v1/cle/gifs/items" and r.url.params["slugs"] == "sponge-bob-bob-esponja" for r in seen)
+    _, without_key = await notifications.build_test_message(settings=make_settings(gif_start=""))
+    assert "KLIPY_API_KEY" in without_key[1]["description"] and len(without_key) == 3
 
 
 # --------------------------------------------------------------------------- #

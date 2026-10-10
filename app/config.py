@@ -49,6 +49,8 @@ DEFAULT_GIF_SEARCH_WIN: tuple[str, ...] = (
     "Happy Netanyahu",
     "Goofy Drake",
 )
+# GIF de l'annonce du début du challenge (page Klipy ou lien direct d'image)
+DEFAULT_START_GIF = "https://klipy.com/gifs/sponge-bob-bob-esponja"
 # Valeurs qui désactivent une liste de GIF (`DISCORD_GIF_… = off`)
 GIF_OFF_VALUES = {"off", "non", "aucun", "none", "0", "-"}
 _GIPHY_PAGE_RE = re.compile(r"^https?://(?:www\.)?giphy\.com/(?:gifs|stickers)/(?:[^/?#]*-)?([A-Za-z0-9]+)/?(?:[?#].*)?$")
@@ -88,6 +90,14 @@ def _env_terms(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     if raw.lower() in GIF_OFF_VALUES:
         return ()
     return tuple(term.strip() for term in re.split(r"[,;\n]+", raw) if term.strip())
+
+
+def _env_start_gif() -> str:
+    """GIF de l'annonce du début : DISCORD_GIF_START (vide → celui par défaut, `off` → aucun)."""
+    raw = os.getenv("DISCORD_GIF_START", "").strip()
+    if not raw:
+        return DEFAULT_START_GIF
+    return "" if raw.lower() in GIF_OFF_VALUES else raw
 
 
 def parse_role_id(raw: str) -> str:
@@ -154,6 +164,7 @@ class Settings:
     gif_search_loss: tuple[str, ...] = DEFAULT_GIF_SEARCH_LOSS
     gif_fallback_win: tuple[str, ...] = ()
     gif_fallback_loss: tuple[str, ...] = ()
+    gif_start: str = DEFAULT_START_GIF  # annonce « c'est parti » à l'heure du début ; vide = sans GIF
     # Fuseau résolu une seule fois (`tz` est lu pour chaque joueur à chaque requête de stats)
     _tz: tzinfo | None = field(default=None, init=False, repr=False, compare=False)
     _tz_fallback: bool = field(default=False, init=False, repr=False, compare=False)
@@ -238,6 +249,7 @@ def _build_settings() -> Settings:
         gif_search_loss=_env_terms("DISCORD_GIF_SEARCH_LOSS", DEFAULT_GIF_SEARCH_LOSS),
         gif_fallback_win=_env_gifs("DISCORD_GIF_WIN"),
         gif_fallback_loss=_env_gifs("DISCORD_GIF_LOSS"),
+        gif_start=_env_start_gif(),
     )
 
 

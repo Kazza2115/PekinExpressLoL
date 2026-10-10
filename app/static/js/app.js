@@ -1317,6 +1317,10 @@
     App.notify('🚀 Le challenge a commencé !', 'Que le meilleur duo gagne.');
   });
   App.onEvent('challenge_finished', () => App.toast('🏁 Le challenge est terminé.', { type: 'info' }));
+  App.onEvent('challenge_begins', () => {
+    App.toast('🚀 C’est parti : le challenge commence ! Bonne chance à tous les duos.', { type: 'success', timeout: 12000 });
+    App.notify('🚀 C’est parti !', 'Le challenge commence : bonne chance à tous les duos.', 'challenge-begins');
+  });
   App.onEvent('joker_used', (d) => {
     const msg = `🃏 ${d.team_name || 'Un duo'} active son joker${d.display_name ? ` (par ${d.display_name})` : ''} : ${d.limit || ''} parties comptées aujourd'hui`;
     App.toast(msg, { type: 'live', timeout: 10000 });

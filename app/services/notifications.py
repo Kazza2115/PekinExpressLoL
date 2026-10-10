@@ -666,6 +666,52 @@ def joker_embed(team_name: str, player_name: str | None, extra_games: int, limit
     }
 
 
+def build_start_announcement(
+    name: str,
+    games_per_day: int,
+    end_at: datetime | None,
+    teams: Sequence[tuple[str, Sequence[str]]],
+    *,
+    gif: str | None = None,
+    gif_page: str | None = None,
+    settings: Settings | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Annonce « c'est parti » à l'heure du début : objectif, duos, fin, lien du classement, GIF.
+
+    `gif_page` : page du GIF à mettre en lien quand son image directe est introuvable (Discord
+    l'affiche alors lui-même sous le message).
+    """
+    settings = settings if settings is not None else get_settings()
+    link = share_link("/dashboard", settings)
+    content = f"🚀 **{name}** : c'est parti, le challenge commence maintenant ! Bonne chance à tous les duos 🍀"
+    if gif_page and not gif:
+        content += f"\n{gif_page}"
+    lines = [
+        f"**{games_per_day} parties par jour** et par joueur (au-delà, elles ne comptent pas).",
+        "Le duo qui gagne le plus de LP l'emporte.",
+    ]
+    end = as_utc(end_at)
+    if end is not None:
+        lines.append(f"Fin : **{end.astimezone(settings.tz).strftime('%d/%m/%Y à %H:%M')}**")
+    fields = [
+        {"name": team_name, "value": " & ".join(players) or "—", "inline": True}
+        for team_name, players in teams
+    ]
+    fields.append({"name": "Classement", "value": f"[🏆 Suivre le challenge en direct]({link})", "inline": False})
+    embed: dict[str, Any] = {
+        "title": f"🚀 C'est parti pour le {name} !",
+        "url": link,
+        "description": "\n".join(lines),
+        "color": COLOR_INFO,
+        "fields": fields,
+        "footer": {"text": FOOTER_TEXT},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if gif:
+        embed["image"] = {"url": gif}
+    return content, [embed]
+
+
 TEST_NOTIFICATION_CONTENT = "🔔 Test de notification — Pékin Express LoL : le webhook Discord fonctionne."
 
 
@@ -731,4 +777,17 @@ async def build_test_message(
         embeds.append(
             {"title": f"GIF de {label} ({source})", "color": COLOR_WIN if win else COLOR_LOSS, "image": {"url": choice.url}}
         )
+    # GIF de l'annonce du début du challenge (lien choisi par l'organisateur)
+    if settings.gif_start:
+        start_gif = await gifs.resolve_gif(settings.gif_start, settings=settings, client=client)
+        if start_gif:
+            embeds.append({"title": "GIF de l'annonce du début", "color": COLOR_INFO, "image": {"url": start_gif}})
+        else:
+            embeds.append(
+                {
+                    "title": "GIF de l'annonce du début : lien direct introuvable",
+                    "description": f"Le message du début contiendra le lien {settings.gif_start} (Discord affiche le GIF dessous).",
+                    "color": COLOR_INFO,
+                }
+            )
     return TEST_NOTIFICATION_CONTENT, embeds

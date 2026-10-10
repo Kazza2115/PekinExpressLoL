@@ -27,6 +27,7 @@ from app.services.bootstrap import apply_default_schedule, parse_fr_datetime
 from app.events import bus
 from app.riot import get_api, reset_api
 from app.services import gifs, notifications
+from app.services.announce import announce_start_if_due
 from app.services.draw import perform_draw, team_identity
 from app.state import state
 
@@ -351,12 +352,16 @@ async def start_challenge(
             log.exception("Échec du cycle de démarrage")
             poll_errors = [type(exc).__name__]
 
-    # Discord (optionnel) : jamais bloquant
+    # Discord (optionnel) : jamais bloquant. Début déjà atteint : l'annonce « c'est parti » (GIF,
+    # duos) part tout de suite ; début programmé : « tout est prêt », puis l'annonce à l'heure dite.
     try:
-        await notifications.send_discord(
-            notifications.headline(notifications.format_challenge_started(challenge)),
-            embeds=[notifications.challenge_started_embed(challenge)],
-        )
+        if as_utc(challenge.start_at) is not None and as_utc(challenge.start_at) <= utcnow():  # type: ignore[operator]
+            await announce_start_if_due(settings=settings)
+        else:
+            await notifications.send_discord(
+                notifications.headline(notifications.format_challenge_started(challenge)),
+                embeds=[notifications.challenge_started_embed(challenge)],
+            )
     except Exception:  # noqa: BLE001
         log.warning("Notification Discord de démarrage impossible", exc_info=True)
 
@@ -417,6 +422,7 @@ async def reset_challenge(
     challenge.status = ChallengeStatus.REGISTRATION
     challenge.start_at = None
     challenge.end_at = None
+    challenge.start_announced_at = None
     session.add(challenge)
     session.commit()
     session.refresh(challenge)

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -51,6 +52,7 @@ def reset_cache() -> None:
     """Vide le cache des recherches (tests, rechargement de `.env`)."""
     global _failed_at
     _cache.clear()
+    _resolved.clear()
     _failed_at = None
 
 
@@ -149,3 +151,95 @@ async def find_gif(
     if fallback:
         return GifChoice(url=rng.choice(list(fallback)))
     return None
+
+
+# --------------------------------------------------------------------------- #
+# GIF choisi par l'organisateur (annonce du début) : page Klipy → lien direct du GIF
+# --------------------------------------------------------------------------- #
+
+KLIPY_ITEMS_URL = "https://api.klipy.com/api/v1/{key}/gifs/items"
+_KLIPY_PAGE_RE = re.compile(
+    r"^https?://(?:www\.)?klipy\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?(?:gifs|stickers|clips|memes)/([A-Za-z0-9_-]+)/?(?:[?#].*)?$",
+    re.IGNORECASE,
+)
+_META_RE = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
+_META_KEY_RE = re.compile(r"""(?:property|name)\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+_META_CONTENT_RE = re.compile(r"""content\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+_IMAGE_META_KEYS = ("og:image", "og:image:url", "og:image:secure_url", "twitter:image", "twitter:image:src")
+_resolved: dict[str, str] = {}
+
+
+def klipy_slug(url: str) -> str | None:
+    """« https://klipy.com/gifs/sponge-bob-bob-esponja » → « sponge-bob-bob-esponja » ; None sinon."""
+    match = _KLIPY_PAGE_RE.match((url or "").strip())
+    return match.group(1) if match else None
+
+
+def image_from_html(html: str) -> str | None:
+    """Image annoncée par une page (balises og:image / twitter:image), GIF animé de préférence."""
+    found: list[str] = []
+    for tag in _META_RE.findall(html or ""):
+        key = _META_KEY_RE.search(tag)
+        content = _META_CONTENT_RE.search(tag)
+        if key and content and key.group(1).lower() in _IMAGE_META_KEYS:
+            value = content.group(1).replace("&amp;", "&").strip()
+            if value.startswith("https://"):
+                found.append(value)
+    for ext in (".gif", ".webp"):
+        animated = next((u for u in found if u.lower().split("?", 1)[0].endswith(ext)), None)
+        if animated:
+            return animated
+    return found[0] if found else None
+
+
+async def _get(url: str, client: httpx.AsyncClient | None, **kwargs: Any) -> httpx.Response | None:
+    try:
+        if client is not None:
+            return await client.get(url, timeout=KLIPY_TIMEOUT_S, follow_redirects=True, **kwargs)
+        async with httpx.AsyncClient(timeout=KLIPY_TIMEOUT_S, follow_redirects=True) as own_client:
+            return await own_client.get(url, **kwargs)
+    except Exception as exc:  # noqa: BLE001 — jamais bloquant ; pas d'URL dans le log (clé possible)
+        log.warning("GIF : %s injoignable (%s)", url.split("/api/v1/")[0], type(exc).__name__)
+        return None
+
+
+async def resolve_gif(
+    url: str | None, *, settings: Settings | None = None, client: httpx.AsyncClient | None = None
+) -> str | None:
+    """Lien direct d'un GIF donné par l'organisateur : page Klipy (via l'API si KLIPY_API_KEY, sinon
+    l'image annoncée par la page), page GIPHY, ou lien d'image tel quel. None si introuvable."""
+    settings = settings if settings is not None else get_settings()
+    raw = (url or "").strip()
+    if not raw:
+        return None
+    if raw in _resolved:
+        return _resolved[raw]
+    from app.config import normalize_gif_url  # import local : évite d'alourdir l'en-tête
+
+    normalized = normalize_gif_url(raw)
+    if normalized is None:
+        return None
+    slug = klipy_slug(normalized)
+    if slug is None:
+        return normalized  # lien direct (ou page GIPHY déjà convertie)
+    result: str | None = None
+    key = (settings.klipy_api_key or "").strip()
+    if key:
+        response = await _get(
+            KLIPY_ITEMS_URL.format(key=quote(key, safe="")), client, params={"slugs": slug, "customer_id": KLIPY_CUSTOMER_ID}
+        )
+        if response is not None and response.status_code < 400:
+            try:
+                urls = extract_gif_urls(response.json())
+            except ValueError:
+                urls = []
+            result = urls[0] if urls else None
+    if result is None:
+        response = await _get(normalized, client, headers={"User-Agent": "Mozilla/5.0 (PekinExpressLoL)"})
+        if response is not None and response.status_code < 400:
+            result = image_from_html(response.text)
+    if result:
+        _resolved[raw] = result
+    else:
+        log.info("GIF %s : lien direct introuvable (la page sera mise en lien)", raw)
+    return result
