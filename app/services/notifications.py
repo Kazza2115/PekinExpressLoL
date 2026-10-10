@@ -436,7 +436,11 @@ def match_embed(notice: MatchNotice, *, settings: Settings | None = None) -> dic
     lines = []
     if notice.rank_label:
         lines.append(f"**{notice.rank_label}**")
-    lines.append(f"{'✅ Victoire' if win else '❌ Défaite'} avec **{champion_label(part.champion_name)}**")
+    # Abandon marqué pour les deux équipes par Riot : seule l'équipe perdante a abandonné
+    result = ("✅ Victoire" if win else "❌ Défaite") + (
+        (" par abandon adverse 🏳️" if win else " par abandon 🏳️") if part.surrendered and not part.is_remake else ""
+    )
+    lines.append(f"{result} avec **{champion_label(part.champion_name)}**")
     multi = int(h.get("largest_multi_kill") or 0)
     if multi >= 3:
         lines.append(f"🔥 **{MULTI_KILL_LABELS[min(multi, 5)]} !**")

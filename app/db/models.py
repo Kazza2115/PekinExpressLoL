@@ -6,8 +6,10 @@ journée (10 games/jour) se fait côté stats avec le fuseau `Settings.timezone`
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Any
 
 from sqlmodel import Field, SQLModel
 
@@ -36,6 +38,22 @@ QUEUE_BY_TYPE = {v: k for k, v in QUEUE_TYPES.items()}
 
 # Une partie plus courte que ça est un remake → exclue des stats
 REMAKE_MAX_DURATION_S = 5 * 60
+# Riot marque les remakes (`gameEndedInEarlySurrender`) : cru jusqu'à 15 min, l'heure du premier
+# abandon possible d'une vraie partie (un remake voté tard dépasse parfois les 5 min)
+REMAKE_FLAG_MAX_DURATION_S = 15 * 60
+
+
+def is_remake_game(duration_s: int, participants: Iterable[Any] = ()) -> bool:
+    """Remake (« partie annulée ») : très courte, ou marquée comme telle par Riot avant 15 min.
+
+    `participants` : les 10 participants Match-V5 (dict). Un remake ne compte ni dans les stats,
+    ni dans les parties du jour, ni dans les LP.
+    """
+    if duration_s < REMAKE_MAX_DURATION_S:
+        return True
+    return duration_s < REMAKE_FLAG_MAX_DURATION_S and any(
+        isinstance(part, dict) and part.get("gameEndedInEarlySurrender") is True for part in participants
+    )
 
 
 class Challenge(SQLModel, table=True):

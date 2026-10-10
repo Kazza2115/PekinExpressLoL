@@ -38,6 +38,8 @@ from app.services.stats import (
     partner_record,
     rank_teams,
     sort_players,
+    surrendered_by_them,
+    surrendered_by_us,
 )
 from app.state import state
 
@@ -86,7 +88,7 @@ def load_history(
     return snapshots_by, participants_by
 
 
-def together_record(
+def together_games(
     participants_a: list[MatchParticipant],
     participants_b: list[MatchParticipant],
     window_start: datetime | None,
@@ -94,8 +96,8 @@ def together_record(
     *,
     queue: Queue | None = Queue.SOLO,
     exclude_match_ids: set[str] | None = None,
-) -> tuple[int, int, int]:
-    """(parties, victoires, défaites) jouées *ensemble* par deux joueurs.
+) -> list[MatchParticipant]:
+    """Participations du joueur A aux parties jouées *ensemble* avec le joueur B.
 
     Une partie compte si les deux y étaient, du même côté (`team_side` égal et connu),
     hors remake, et si elle se termine dans la fenêtre (`game_end_of`). Comme les stats
@@ -112,7 +114,7 @@ def together_record(
         return queue is None or p.queue == queue
 
     sides_a = {p.match_id: p for p in participants_a if eligible(p)}
-    games = wins = losses = 0
+    shared: list[MatchParticipant] = []
     seen: set[str] = set()
     for part_b in participants_b:
         if not eligible(part_b) or part_b.match_id in seen or part_b.match_id in excluded:
@@ -126,12 +128,42 @@ def together_record(
         if end_utc is not None and ended_at > end_utc:
             continue
         seen.add(part_b.match_id)
-        games += 1
-        if part_a.win:
-            wins += 1
-        else:
-            losses += 1
-    return games, wins, losses
+        shared.append(part_a)
+    return shared
+
+
+def together_record(
+    participants_a: list[MatchParticipant],
+    participants_b: list[MatchParticipant],
+    window_start: datetime | None,
+    window_end: datetime | None,
+    *,
+    queue: Queue | None = Queue.SOLO,
+    exclude_match_ids: set[str] | None = None,
+) -> tuple[int, int, int]:
+    """(parties, victoires, défaites) jouées *ensemble* par deux joueurs (voir `together_games`)."""
+    shared = together_games(
+        participants_a, participants_b, window_start, window_end, queue=queue, exclude_match_ids=exclude_match_ids
+    )
+    wins = sum(1 for part in shared if part.win)
+    return len(shared), wins, len(shared) - wins
+
+
+def together_surrenders(
+    participants_a: list[MatchParticipant],
+    participants_b: list[MatchParticipant],
+    window_start: datetime | None,
+    window_end: datetime | None,
+    *,
+    queue: Queue | None = Queue.SOLO,
+    exclude_match_ids: set[str] | None = None,
+) -> tuple[int, int]:
+    """(défaites, victoires) par abandon parmi les parties jouées ensemble : le duo ne les compte
+    qu'une fois (les deux joueurs portent chacun l'abandon dans leurs stats)."""
+    shared = together_games(
+        participants_a, participants_b, window_start, window_end, queue=queue, exclude_match_ids=exclude_match_ids
+    )
+    return sum(1 for part in shared if surrendered_by_us(part)), sum(1 for part in shared if surrendered_by_them(part))
 
 
 def load_jokers(session: Session, team_ids: list[int]) -> dict[int, list[Joker]]:
@@ -315,15 +347,18 @@ def build_leaderboard(
     for team in teams:
         members = [stats_by_player[p.id] for p in players if p.team_id == team.id and p.id in stats_by_player]
         together = (0, 0, 0)
+        surrendered_together = (0, 0)
         if len(members) == 2:
             window_start, window_end = team_window(challenge, team)
-            together = together_record(
+            pair = (
                 participants_by.get(members[0].player_id, []),
                 participants_by.get(members[1].player_id, []),
                 window_start,
                 window_end,
-                exclude_match_ids=set(members[0].over_quota_match_ids) | set(members[1].over_quota_match_ids),
             )
+            excluded = set(members[0].over_quota_match_ids) | set(members[1].over_quota_match_ids)
+            together = together_record(*pair, exclude_match_ids=excluded)
+            surrendered_together = together_surrenders(*pair, exclude_match_ids=excluded)
             for me, mate in ((members[0], members[1]), (members[1], members[0])):
                 me.partner = partner_record(
                     me,
@@ -332,7 +367,7 @@ def build_leaderboard(
                     icon_url=mate.icon_url,
                     together=together,
                 )
-        stats = compute_team_stats(team, members, together=together)
+        stats = compute_team_stats(team, members, together=together, together_surrenders=surrendered_together)
         for key, value in joker_summary(challenge, team, jokers_by_team.get(team.id or 0, []), names, now).items():
             setattr(stats, key, value)
         team_stats.append(stats)

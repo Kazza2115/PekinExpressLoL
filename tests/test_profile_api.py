@@ -21,7 +21,7 @@ PLAYER_PROFILE_KEYS = {
     "avg_damage_taken", "avg_heal", "avg_cc_time", "avg_time_dead", "avg_wards_placed", "avg_wards_killed",
     "avg_control_wards", "double_kills", "triple_kills", "quadra_kills", "penta_kills", "multikills",
     "first_bloods", "largest_killing_spree", "largest_multi_kill", "turret_kills", "dragon_kills", "baron_kills",
-    "objectives_stolen", "surrenders", "avg_game_duration", "total_time_played", "longest_game_s",
+    "objectives_stolen", "surrenders", "surrender_wins", "avg_game_duration", "total_time_played", "longest_game_s",
     "shortest_game_s", "lp_per_game", "lp_known_games", "avg_lp_win", "avg_lp_loss", "best_lp_gain",
     "worst_lp_loss", "games_blue", "wins_blue", "winrate_blue", "games_red", "wins_red", "winrate_red",
     "by_position", "by_duration", "by_day", "by_hour", "records", "season_wins", "season_losses",
@@ -32,7 +32,7 @@ TEAM_PROFILE_KEYS = {
     "avg_absolute_lp", "rank_label", "rank_color", "top_player_id", "top_player_rank_label", "kills", "deaths",
     "assists", "avg_kill_participation", "lp_per_game", "best_win_streak", "multikills", "penta_kills",
     "first_bloods", "dragon_kills", "baron_kills", "turret_kills", "objectives_stolen", "surrenders",
-    "avg_game_duration", "total_time_played", "avg_damage_share", "avg_gold_per_min", "avg_wards_placed",
+    "surrender_wins", "avg_game_duration", "total_time_played", "avg_damage_share", "avg_gold_per_min", "avg_wards_placed",
     "season_wins", "season_losses", "season_winrate",
 }
 PARTNER_KEYS = {

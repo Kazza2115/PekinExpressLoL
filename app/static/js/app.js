@@ -529,7 +529,7 @@
       ? `<span class="sb-bans" title="Champions bannis">${t.bans.map((b) => App.champIcon({ name: b.champion_name || '?', src: b.champion_icon_url, size: 'xs', title: b.champion_name || `Champion ${b.champion_id}` })).join('')}</span>` : '';
     const teamBlock = (t) => `<section class="sb-team side-${esc(t.side || '')} ${t.win ? 'is-win' : 'is-loss'}">
       <header class="sb-team-head">
-        <strong>${t.win ? 'Victoire' : 'Défaite'}</strong><span class="muted">${esc(t.side_label || '')}</span>
+        <strong>${t.win ? 'Victoire' : 'Défaite'}</strong>${t.surrendered ? '<span class="chip" title="Cette équipe a abandonné (/ff)">🏳️ Abandon</span>' : ''}<span class="muted">${esc(t.side_label || '')}</span>
         <span class="tnum">${t.kills}/${t.deaths}/${t.assists}</span><span class="tnum" title="Or total">💰 ${fmtK(t.gold)}</span>
         <span class="sb-obj">${objectives(t)}</span>${bans(t)}
       </header>
@@ -1295,7 +1295,8 @@
     const quota = d.outside_window
       ? ' · hors des heures du challenge, ne compte pas'
       : (d.over_quota ? ` · hors quota${d.day_game_number ? ` (${d.day_game_number}e partie du jour)` : ''}, ne compte pas` : '');
-    const msg = win ? `✅ ${who(d)} gagne${lpTxt}${quota}` : `❌ ${who(d)} perd${lpTxt}${quota}`;
+    const ff = d.surrendered === true ? (win ? ' (abandon adverse)' : ' (abandon)') : '';
+    const msg = win ? `✅ ${who(d)} gagne${ff}${lpTxt}${quota}` : `❌ ${who(d)} perd${ff}${lpTxt}${quota}`;
     const ignored = d.over_quota || d.outside_window;
     App.toast(`${msg}${champ ? ` (${champ})` : ''}`, { type: ignored ? 'warning' : (win ? 'success' : 'error'), timeout: ignored ? 10000 : 6000 });
     App.notify(msg, champ ? `Partie enregistrée — ${champ}` : 'Partie enregistrée', `match-${d.match_id || Date.now()}`);

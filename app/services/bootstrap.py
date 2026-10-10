@@ -1,5 +1,6 @@
 """Amorçage au démarrage : ligne `Challenge` unique, joueurs de `players.yaml`, rattrapage des
-détails de partie (colonnes ajoutées après coup, ré-extraites du JSON Match-V5 stocké)."""
+détails de partie (colonnes ajoutées après coup, ré-extraites du JSON Match-V5 stocké) et des
+remakes enregistrés comme de vraies parties."""
 
 from __future__ import annotations
 
@@ -13,7 +14,16 @@ import yaml
 from sqlmodel import Session, col, select
 
 from app.config import get_settings
-from app.db.models import Challenge, ChallengeStatus, Match, MatchParticipant, Player
+from app.db.models import (
+    REMAKE_FLAG_MAX_DURATION_S,
+    REMAKE_MAX_DURATION_S,
+    Challenge,
+    ChallengeStatus,
+    Match,
+    MatchParticipant,
+    Player,
+    is_remake_game,
+)
 from app.db.session import session_scope
 from app.riot import get_api
 from app.services.poller import participant_details
@@ -72,6 +82,33 @@ def backfill_match_details(session: Session) -> int:
             setattr(row, column, value)
         session.add(row)
         updated += 1
+    if updated:
+        session.commit()
+    return updated
+
+
+def reclassify_remakes(session: Session) -> int:
+    """Remakes enregistrés comme de vraies parties (règle des 5 min seule, avant le drapeau Riot
+    `gameEndedInEarlySurrender`) : `is_remake` recalculé depuis le `Match.raw_json` conservé, pour
+    qu'ils sortent des stats et des parties du jour. Renvoie le nombre de lignes corrigées.
+    """
+    matches = session.exec(
+        select(Match.match_id, Match.game_duration).where(
+            col(Match.game_duration) >= REMAKE_MAX_DURATION_S,
+            col(Match.game_duration) < REMAKE_FLAG_MAX_DURATION_S,
+        )
+    ).all()
+    updated = 0
+    for match_id, duration in matches:
+        parts = _match_parts(session, match_id)
+        if not parts:
+            continue
+        remake = is_remake_game(int(duration), parts)
+        for row in session.exec(select(MatchParticipant).where(MatchParticipant.match_id == match_id)).all():
+            if bool(row.is_remake) != remake:
+                row.is_remake = remake
+                session.add(row)
+                updated += 1
     if updated:
         session.commit()
     return updated

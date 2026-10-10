@@ -30,7 +30,6 @@ from app.db.models import (
     QUEUE_BY_ID,
     QUEUE_IDS,
     QUEUE_TYPES,
-    REMAKE_MAX_DURATION_S,
     Challenge,
     Joker,
     ChallengeStatus,
@@ -41,6 +40,7 @@ from app.db.models import (
     RankSnapshot,
     Team,
     game_end_of,
+    is_remake_game,
 )
 from app.db.session import as_utc, session_scope
 from app.events import EventBus
@@ -1058,7 +1058,6 @@ class Poller:
         )
         queue_id = int(info.get("queueId") or 0)
         queue = QUEUE_BY_ID.get(queue_id, Queue.SOLO)
-        is_remake = duration < REMAKE_MAX_DURATION_S
 
         session.add(
             Match(
@@ -1072,6 +1071,7 @@ class Poller:
         )
         rows: list[tuple[Player, MatchParticipant]] = []
         all_parts = [part for part in info.get("participants") or [] if isinstance(part, dict)]
+        is_remake = is_remake_game(duration, all_parts)
         team_kills = _team_kills(all_parts)
         for part in all_parts:
             participant_player = ctx.players_by_puuid.get(part.get("puuid") or "")
@@ -1153,6 +1153,7 @@ class Poller:
                 "game_end": _game_end(participant).isoformat(),
                 "game_duration": participant.game_duration,
                 "is_remake": participant.is_remake,
+                "surrendered": bool(participant.surrendered),
                 # Quota quotidien : numéro de la partie dans la journée, et si elle ne compte pas
                 "day_game_number": day_number,
                 "over_quota": over_quota,

@@ -360,7 +360,8 @@
         stat('Série en cours', `${streakHtml(s.streak)}${s.hot_streak ? ' 🔥' : ''}`),
         stat('Meilleure série', `<span class="lp-pos">${int(s.best_win_streak)} V</span>`, 'victoires d’affilée'),
         stat('Pire série', `<span class="lp-neg">${int(s.best_loss_streak)} D</span>`, 'défaites d’affilée'),
-        stat('Redditions', int(s.surrenders), ofGames(s.surrenders)),
+        stat('Défaites par abandon', int(s.surrenders), ofGames(s.surrenders) || 'son équipe a voté le /ff'),
+        stat('Victoires par abandon adverse', int(s.surrender_wins), ofGames(s.surrender_wins) || 'pas un abandon pour toi'),
         stat("Parties aujourd'hui", `${int(s.games_today || 0)} / ${isNum(limit) ? limit : DASH}`, `<span class="progress pf-progress ${isNum(limit) && s.games_today >= limit ? 'done' : ''}"><span style="width:${isNum(limit) && limit > 0 ? clampPct(((s.games_today || 0) / limit) * 100) : 0}%"></span></span>`),
       ]),
     ].join('');
@@ -675,7 +676,12 @@
   function matchExtras(m) {
     const tags = [multiBadges(m, true)];
     if (m.first_blood_kill) tags.push('<span class="pf-tag is-fb" title="Premier sang de la partie">🩸 Premier sang</span>');
-    if (m.surrendered) tags.push('<span class="pf-tag is-ff" title="Partie terminée par reddition">🏳️ Reddition</span>');
+    // Riot marque l'abandon pour les deux équipes : seule l'équipe perdante a abandonné
+    if (m.surrendered) {
+      tags.push(m.win
+        ? '<span class="pf-tag is-ff-win" title="L\'équipe adverse a abandonné : victoire, ce n\'est pas un abandon pour toi">🏳️ Abandon adverse</span>'
+        : '<span class="pf-tag is-ff" title="Ton équipe a abandonné (/ff)">🏳️ Abandon</span>');
+    }
     if (m.over_quota) tags.push('<span class="pf-tag is-ff" title="Au-delà des parties autorisées ce jour-là : ni LP ni stats">⛔ Hors quota, ne compte pas</span>');
     const facts = [];
     if (isNum(m.damage_share)) facts.push(`<span class="pf-m-fact" title="Part des dégâts de l'équipe">${miniBar(m.damage_share, 'is-red')}${pct(m.damage_share)} dégâts</span>`);

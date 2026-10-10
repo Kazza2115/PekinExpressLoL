@@ -392,7 +392,7 @@ EXPECTED_METRICS = [
     "avg_kda", "avg_kill_participation", "avg_cs_per_min", "avg_gold_per_min", "avg_damage", "avg_damage_share",
     "avg_vision", "avg_wards_placed", "best_win_streak", "multikills", "penta_kills", "first_bloods",
     "dragon_kills", "baron_kills", "turret_kills", "objectives_stolen", "avg_game_duration", "surrenders",
-    "season_winrate",
+    "surrender_wins", "season_winrate",
 ]
 
 

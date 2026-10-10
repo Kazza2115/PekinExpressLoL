@@ -227,7 +227,7 @@
   /* Comparatif des duos : lignes = statistiques, colonnes = duos          */
   /* ------------------------------------------------------------------ */
   const CMP_GROUPS = [
-    { label: 'Performance', keys: ['lp_net', 'lp_per_game', 'winrate', 'games', 'together_games', 'together_winrate', 'best_win_streak', 'avg_game_duration', 'surrenders'] },
+    { label: 'Performance', keys: ['lp_net', 'lp_per_game', 'winrate', 'games', 'together_games', 'together_winrate', 'best_win_streak', 'avg_game_duration', 'surrenders', 'surrender_wins'] },
     { label: 'Combat', keys: ['avg_kda', 'avg_kill_participation', 'avg_damage', 'avg_damage_share', 'multikills', 'penta_kills', 'first_bloods'] },
     { label: 'Farm & économie', keys: ['avg_cs_per_min', 'avg_gold_per_min'] },
     { label: 'Vision & objectifs', keys: ['avg_vision', 'avg_wards_placed', 'dragon_kills', 'baron_kills', 'turret_kills', 'objectives_stolen'] },

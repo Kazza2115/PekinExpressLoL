@@ -21,7 +21,13 @@ from app.config import PROJECT_ROOT, get_settings
 from app.db.session import init_db, session_scope
 from app.events import bus
 from app.riot import get_api
-from app.services.bootstrap import apply_default_schedule, backfill_match_details, ensure_challenge, load_players_yaml
+from app.services.bootstrap import (
+    apply_default_schedule,
+    backfill_match_details,
+    ensure_challenge,
+    load_players_yaml,
+    reclassify_remakes,
+)
 from app.services.poller import Poller
 from app.services.portal import run_portal_sync
 from app.state import state
@@ -46,6 +52,11 @@ async def lifespan(app: FastAPI):
         backfilled = backfill_match_details(session)
     if backfilled:
         log.info("Détails de partie complétés pour %d participation(s) existante(s)", backfilled)
+    # Remakes repérés grâce au drapeau Riot : ils sortent des stats et des parties du jour
+    with session_scope() as session:
+        remakes = reclassify_remakes(session)
+    if remakes:
+        log.info("%d participation(s) reclassée(s) en remake", remakes)
     await load_players_yaml(PROJECT_ROOT / "players.yaml")
     api = get_api()
     poller = Poller(api=api, bus=bus, state=state)

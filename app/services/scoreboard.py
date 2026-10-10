@@ -13,13 +13,12 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from app.db.models import Match, Player
+from app.db.models import Match, Player, is_remake_game
 from app.riot import ddragon
 
 POSITION_ORDER = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
 POSITION_LABELS = {"TOP": "Top", "JUNGLE": "Jungle", "MIDDLE": "Mid", "BOTTOM": "Bot", "UTILITY": "Support"}
 QUEUE_LABELS = {420: "Classée Solo/Duo", 440: "Classée Flex", 400: "Normale", 430: "Normale", 450: "ARAM", 490: "Partie rapide"}
-REMAKE_MAX_DURATION_S = 300
 
 
 class ScoreboardError(ValueError):
@@ -207,7 +206,11 @@ def build_scoreboard(match: Match, players_by_puuid: dict[str, Player]) -> dict[
             }
         )
 
-    remake = duration < REMAKE_MAX_DURATION_S
+    remake = is_remake_game(duration, parts)
+    # Partie terminée par abandon : Riot le marque pour les 10 joueurs ; l'équipe perdante a abandonné
+    surrender = not remake and any(p.get("gameEndedInSurrender") is True for p in parts)
+    for team in teams:
+        team["surrendered"] = surrender and not team["win"]
     if not remake:
         for team in teams:
             if team["players"]:
@@ -225,6 +228,7 @@ def build_scoreboard(match: Match, players_by_puuid: dict[str, Player]) -> dict[
         "duration_s": duration,
         "patch": patch,
         "remake": remake,
+        "surrender": surrender,
         "gold_diff": team_gold[100] - team_gold[200],
         "teams": teams,
     }

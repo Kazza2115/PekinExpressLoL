@@ -206,6 +206,17 @@ def kda(kills: int, deaths: int, assists: int) -> float:
     return (kills + assists) / deaths
 
 
+def surrendered_by_us(p: MatchParticipant) -> bool:
+    """Défaite par abandon : son équipe a voté le « /ff ». Riot marque la partie terminée par
+    abandon (`gameEndedInSurrender`) pour les 10 joueurs ; c'est l'équipe perdante qui a abandonné."""
+    return bool(p.surrendered) and not p.win and not p.is_remake
+
+
+def surrendered_by_them(p: MatchParticipant) -> bool:
+    """Victoire par abandon adverse : ce n'est pas un abandon pour le joueur."""
+    return bool(p.surrendered) and bool(p.win) and not p.is_remake
+
+
 def winrate(wins: int, losses: int) -> float | None:
     """Pourcentage de victoires (0..100, 1 décimale) ; None sans partie."""
     total = wins + losses
@@ -334,7 +345,9 @@ class PlayerStats:
     dragon_kills: int | None = None
     baron_kills: int | None = None
     objectives_stolen: int | None = None
-    surrenders: int | None = None  # parties terminées par un abandon (des deux côtés)
+    # Abandons (« /ff ») : Riot marque la partie des deux côtés ; seul celui qui perd a abandonné
+    surrenders: int | None = None  # défaites par abandon de son équipe
+    surrender_wins: int | None = None  # victoires par abandon de l'équipe adverse
     avg_game_duration: int | None = None  # secondes
     total_time_played: int | None = None  # secondes
     longest_game_s: int | None = None
@@ -735,7 +748,8 @@ def game_profile(
         dragon_kills=total("dragon_kills"),
         baron_kills=total("baron_kills"),
         objectives_stolen=total("objectives_stolen"),
-        surrenders=sum(1 for p in games if p.surrendered),
+        surrenders=sum(1 for p in games if surrendered_by_us(p)),
+        surrender_wins=sum(1 for p in games if surrendered_by_them(p)),
         avg_game_duration=round(statistics.fmean(durations)),
         total_time_played=sum(durations),
         longest_game_s=max(durations),
@@ -1346,7 +1360,9 @@ class TeamStats:
     baron_kills: int | None = None
     turret_kills: int | None = None
     objectives_stolen: int | None = None
-    surrenders: int | None = None
+    # Abandons du duo : une partie jouée ensemble compte une fois (comme les victoires)
+    surrenders: int | None = None  # défaites par abandon
+    surrender_wins: int | None = None  # victoires par abandon adverse
     avg_game_duration: int | None = None  # secondes (temps total / parties)
     total_time_played: int | None = None  # secondes
     avg_damage_share: float | None = None
@@ -1408,7 +1424,11 @@ def team_mvp(players: list[PlayerStats]) -> int | None:
 
 
 def compute_team_stats(
-    team: Team, players: list[PlayerStats], *, together: tuple[int, int, int] = (0, 0, 0)
+    team: Team,
+    players: list[PlayerStats],
+    *,
+    together: tuple[int, int, int] = (0, 0, 0),
+    together_surrenders: tuple[int, int] = (0, 0),
 ) -> TeamStats:
     """Agrège les stats des joueurs d'un duo ; `position` = 0 (rempli par `rank_teams`).
 
@@ -1416,6 +1436,8 @@ def compute_team_stats(
     `app.api.leaderboard.together_record`). Victoires, défaites et parties sont celles du *duo* :
     une partie jouée ensemble (même partie, même côté) compte une fois, pas une par joueur. Les LP
     restent la somme des deux joueurs (chacun gagne ou perd les siens sur la partie).
+    `together_surrenders` = (défaites, victoires) par abandon parmi ces parties communes
+    (`app.api.leaderboard.together_surrenders`) : comptées une fois, elles aussi.
     """
     together_games, together_wins, together_losses = (int(v) for v in together)
     player_games = sum(p.games for p in players)
@@ -1434,6 +1456,11 @@ def compute_team_stats(
 
     def sums(attr: str) -> int | None:
         return _known_sum([getattr(p, attr) for p in players])
+
+    def minus(total: int | None, shared: int) -> int | None:
+        return max(0, total - int(shared)) if total is not None else None
+
+    together_surrendered, together_surrender_wins = together_surrenders
     return TeamStats(
         team_id=int(team.id or 0),
         name=team.name,
@@ -1479,7 +1506,8 @@ def compute_team_stats(
         baron_kills=sums("baron_kills"),
         turret_kills=sums("turret_kills"),
         objectives_stolen=sums("objectives_stolen"),
-        surrenders=sums("surrenders"),
+        surrenders=minus(sums("surrenders"), together_surrendered),
+        surrender_wins=minus(sums("surrender_wins"), together_surrender_wins),
         # Temps de jeu cumulé des deux joueurs : la durée moyenne se rapporte donc aux parties jouées
         avg_game_duration=round(total_time / player_games) if total_time is not None and player_games else None,
         total_time_played=total_time,
@@ -1562,7 +1590,8 @@ COMPARISON_METRICS: tuple[tuple[str, str, str, bool, str], ...] = (
     ("turret_kills", "Tourelles", "", True, "int"),
     ("objectives_stolen", "Objectifs volés", "", True, "int"),
     ("avg_game_duration", "Durée moyenne", "s", False, "duration"),
-    ("surrenders", "Abandons", "", False, "int"),
+    ("surrenders", "Défaites par abandon", "", False, "int"),
+    ("surrender_wins", "Victoires par abandon adverse", "", True, "int"),
     ("season_winrate", "Winrate saison", "%", True, "pct"),
 )
 
