@@ -312,7 +312,6 @@
   /* Présence : identifiant du navigateur (le même pour tous ses onglets), de l'onglet, et le
      joueur que la personne dit être (« Qui es-tu ? », facultatif, jamais une autorisation). */
   const CID_KEY = 'pekin_cid';
-  const TAB_KEY = 'pekin_tab';
   const ME_KEY = 'pekin_me';
   function storage(kind) {
     try { const s = kind === 'local' ? window.localStorage : window.sessionStorage; return s || null; } catch (e) { return null; }
@@ -338,18 +337,25 @@
     } catch (e) { return randomId(); }
   }
   App.clientId = storedId('local', CID_KEY);
-  App.tabId = storedId('session', TAB_KEY);
+  // Onglet : propre à chaque chargement de page (un onglet dupliqué ou ouvert par window.open
+  // copie le sessionStorage : il ne doit pas partager l'identifiant de l'autre onglet)
+  App.tabId = randomId();
+  let memMe; // repli quand le navigateur refuse le stockage : l'identité tient le temps de la page
   App.getMe = function () {
     try {
       const s = storage('local');
-      const me = JSON.parse((s && s.getItem(ME_KEY)) || 'null');
-      return me && Number.isInteger(me.id) && me.id > 0 ? me : null;
-    } catch (e) { return null; }
+      if (s) {
+        const me = JSON.parse(s.getItem(ME_KEY) || 'null');
+        return me && Number.isInteger(me.id) && me.id > 0 ? me : null;
+      }
+    } catch (e) { /* stockage bloqué : repli en mémoire */ }
+    return memMe || null;
   };
   App.setMe = function (player) {
+    memMe = player && player.id ? { id: player.id, name: player.name || '' } : null;
     const s = storage('local');
     try {
-      if (player && player.id) s && s.setItem(ME_KEY, JSON.stringify({ id: player.id, name: player.name || '' }));
+      if (s && memMe) s.setItem(ME_KEY, JSON.stringify(memMe));
       else if (s) s.removeItem(ME_KEY);
     } catch (e) { /* stockage indisponible : l'identité ne tient que le temps de la page */ }
     if (App.pollNow) App.pollNow();
@@ -814,7 +820,9 @@
     livePill.dataset.count = String(n);
     livePill.classList.toggle('is-live', n > 0);
     const txt = livePill.querySelector('.pill-live-text');
-    if (txt) txt.textContent = n === 0 ? 'Personne en game' : `${n} en game`;
+    const label = n === 0 ? 'Personne en game' : `${n} en game`;
+    if (txt) txt.textContent = label;
+    livePill.setAttribute('aria-label', label);
   };
 
   /* Début (ms) d'une partie : `game_start` sinon maintenant − durée écoulée. */
@@ -824,11 +832,12 @@
   };
 
   /* État partagé : `items` (un par joueur en partie), `games` (une par partie, avec le tableau). */
-  App.live = { items: [], games: [], byPlayer: new Map(), byGame: new Map() };
+  App.live = { loaded: false, items: [], games: [], byPlayer: new Map(), byGame: new Map() };
   App.setLive = function (data) {
     const items = (data && Array.isArray(data.live)) ? data.live : [];
     const games = (data && Array.isArray(data.games)) ? data.games : [];
     App.live = {
+      loaded: true,
       items,
       games,
       byPlayer: new Map(items.map((i) => [i.player_id, i])),
@@ -958,6 +967,8 @@
       sig = next;
       const body = modal.el.querySelector('.modal-body');
       if (body) body.innerHTML = html();
+      const title = modal.el.querySelector('#modal-title');
+      if (title) title.textContent = g ? 'Partie en cours' : 'Partie terminée';
     }
     sig = (() => { const g = App.live.byGame.get(key); return g ? JSON.stringify([g.game_start, (g.teams || []).map((t) => (t.players || []).map((p) => p.champion_id))]) : 'end'; })();
     document.addEventListener('pekin:live', update);
@@ -969,23 +980,44 @@
   document.addEventListener('click', (e) => {
     const target = e.target && e.target.closest ? e.target.closest('[data-live-game]') : null;
     if (!target) return;
+    const link = e.target.closest('a[href]');
+    if (link && link !== target && target.contains(link)) return; // lien interne : on le suit
     e.preventDefault();
     e.stopPropagation();
     const gameId = target.dataset.liveGame;
     const anchor = document.getElementById(`live-game-${gameId}`);
     if (anchor) {
-      anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document.dispatchEvent(new CustomEvent('pekin:live-focus', { detail: { gameId } })); // déplie la carte
+      anchor.scrollIntoView({ behavior: App.reducedMotion ? 'auto' : 'smooth', block: 'start' });
       anchor.classList.remove('is-flash');
       void anchor.offsetWidth; // relance l'animation
       anchor.classList.add('is-flash');
+      if (!anchor.hasAttribute('tabindex')) anchor.setAttribute('tabindex', '-1');
+      try { anchor.focus({ preventScroll: true }); } catch (err) { /* vieux navigateur */ }
       return;
     }
     App.openLiveBoard(gameId, parseInt(target.dataset.livePlayer, 10) || null);
   });
 
+  /* Hauteur de l'en-tête collant (nav sur 1 à 3 lignes + bandeau) → --header-h, utilisée par
+     scroll-padding-top : les ancres (#duo-3, tableaux en direct) ne finissent plus dessous. */
+  const header = $('header.nav');
+  if (header && typeof window.ResizeObserver === 'function') {
+    new window.ResizeObserver(() => {
+      document.documentElement.style.setProperty('--header-h', `${header.offsetHeight}px`);
+    }).observe(header);
+  }
+
   /* Bandeau « En direct » sous la nav (toutes les pages) : une puce par partie. */
   const liveStrip = $('#live-strip');
   const liveStripItems = $('#live-strip-items');
+  if (liveStripItems) {
+    liveStripItems.addEventListener('wheel', (e) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || liveStripItems.scrollWidth <= liveStripItems.clientWidth) return;
+      e.preventDefault();
+      liveStripItems.scrollLeft += e.deltaY;
+    }, { passive: false });
+  }
   let stripSig = '';
   function renderLiveStrip() {
     if (!liveStrip || !liveStripItems) return;
@@ -1002,7 +1034,9 @@
         const live = App.live.byPlayer.get(cp.player_id);
         return App.champIcon({ name: cp.champion_name || '?', src: (row && row.champion_icon_url) || (live && live.champion_icon_url), size: 'xs', title: `${cp.display_name} · ${cp.champion_name || ''}` });
       }).join('');
-      const names = cps.map((cp) => esc(cp.display_name)).join(cps.length > 1 && g.versus ? ' vs ' : ' & ');
+      const bySide = {};
+      cps.forEach((cp) => { const k = cp.side || 'x'; (bySide[k] = bySide[k] || []).push(esc(cp.display_name)); });
+      const names = Object.values(bySide).map((list) => list.join(' & ')).join(' vs ');
       return `<button type="button" class="live-chip" data-live-game="${esc(g.game_id)}" style="--team-color:${esc(color)}" title="Voir la partie">
         <span class="live-chip-icons">${icons}</span><span class="live-chip-name">${names || 'Partie'}</span>
         <span class="live-chip-time tnum" data-elapsed-start="${App.liveStartMs(g)}">${App.formatDuration(g.elapsed_s || 0)}</span>
@@ -1098,7 +1132,10 @@
   /* ------------------------------------------------------------------ */
   /* Personnes connectées : pastille « N en ligne » et fenêtre détaillée  */
   /* ------------------------------------------------------------------ */
-  const PAGE_LABELS = { home: 'Accueil', duos: 'Duos', dashboard: 'Classement', rankings: 'Rangs', player: 'Profil', admin: 'Admin', other: 'Site' };
+  const PAGE_LABELS = {
+    home: 'sur l’accueil', duos: 'sur la page Duos', dashboard: 'sur le classement', rankings: 'sur les rangs',
+    player: 'sur une fiche joueur', admin: 'dans l’admin', other: 'sur le site',
+  };
   const onlinePill = $('#nav-online');
   let presenceSig = '';
   let onlineModal = null;
@@ -1106,9 +1143,12 @@
   App.presence = null;
 
   function applyPresence(p, sentMe, me) {
-    // Joueur choisi refusé par le serveur (supprimé, désactivé) ou renommé : on oublie l'identité
-    if (sentMe && !me) App.setMe(null);
-    else if (sentMe && me && me.display_name !== sentMe.name) App.setMe({ id: me.player_id, name: me.display_name });
+    // Joueur choisi refusé par le serveur (supprimé, désactivé) ou numéro repris par un autre joueur
+    // après une réinitialisation (nom différent) : on oublie l'identité plutôt que d'usurper l'autre
+    if (sentMe && (!me || me.display_name !== sentMe.name)) {
+      App.setMe(null);
+      App.toast('Ton choix « Qui es-tu ? » a été oublié (joueur introuvable) : choisis à nouveau.', { type: 'info', timeout: 6000 });
+    }
     const sig = JSON.stringify([p.online, p.anonymous, (p.players || []).map((x) => [x.player_id, x.active, x.page, x.in_game])]);
     if (sig === presenceSig) return;
     presenceSig = sig;
@@ -1125,37 +1165,64 @@
     onlinePill.dataset.count = String(n);
     const txt = onlinePill.querySelector('.pill-online-text');
     if (txt) txt.textContent = `${n} en ligne`;
+    onlinePill.setAttribute('aria-label', `${n} en ligne : voir qui`);
     const names = (App.presence.players || []).map((x) => x.display_name);
     const anon = App.presence.anonymous || 0;
     onlinePill.title = `Sur le site en ce moment : ${[...names, anon ? `${anon} visiteur${anon > 1 ? 's' : ''}` : ''].filter(Boolean).join(', ') || 'personne'}`;
   }
 
-  function onlineHtml() {
+  function peopleHtml() {
     const p = App.presence || { players: [], anonymous: 0, online: 0 };
     const me = App.getMe();
     const items = (p.players || []).map((x) => `<li class="online-item${x.active ? '' : ' is-away'}${me && me.id === x.player_id ? ' is-me' : ''}">
         ${App.avatar({ name: x.display_name, src: x.icon_url, color: x.team_color || undefined, size: 'sm', className: x.in_game ? 'is-live' : '' })}
         <a class="online-name" href="/player/${encodeURIComponent(x.player_id)}">${esc(x.display_name)}</a>
         ${x.in_game ? '<span class="badge-live"><span class="dot"></span>En game</span>' : ''}
-        <span class="online-where">${x.active ? `sur ${esc(PAGE_LABELS[x.page] || 'le site')}` : 'en arrière-plan'}</span>
+        <span class="online-where">${x.active ? esc(PAGE_LABELS[x.page] || PAGE_LABELS.other) : 'en arrière-plan'}</span>
       </li>`).join('');
     const anon = p.anonymous || 0;
-    const options = (playersForWho || []).map((x) => `<option value="${esc(x.id)}"${me && me.id === x.id ? ' selected' : ''}>${esc(x.display_name)}</option>`).join('');
+    // Le visiteur anonyme qui regarde la liste fait partie du compte : on le dit
+    const others = Math.max(0, anon - (me ? 0 : 1));
+    const visitors = (n) => `${n} visiteur${n > 1 ? 's' : ''} anonyme${n > 1 ? 's' : ''}`;
+    const anonLine = me
+      ? (anon ? `${items ? '+ ' : ''}${visitors(anon)}` : '')
+      : `Toi (anonyme)${others ? ` et ${others > 1 ? `${others} autres` : '1 autre'} visiteur${others > 1 ? 's' : ''}` : ''}`;
     return `${items ? `<ul class="online-list">${items}</ul>` : '<p class="muted">Aucun joueur identifié pour l’instant.</p>'}
-      ${anon ? `<p class="online-anon">+ ${anon} visiteur${anon > 1 ? 's' : ''} anonyme${anon > 1 ? 's' : ''}</p>` : ''}
-      <div class="online-who">
-        <label for="online-who-select">Qui es-tu ?</label>
-        <select id="online-who-select" class="input"><option value="">Spectateur (anonyme)</option>${options}</select>
-      </div>
+      ${anonLine ? `<p class="online-anon">${anonLine}</p>` : ''}`;
+  }
+
+  function whoHtml() {
+    const me = App.getMe();
+    const options = (playersForWho || []).map((x) => `<option value="${esc(x.id)}"${me && me.id === x.id ? ' selected' : ''}>${esc(x.display_name)}</option>`).join('');
+    return `<label for="online-who-select">Qui es-tu ?</label>
+      <select id="online-who-select" class="input"><option value="">Spectateur (anonyme)</option>${options}</select>`;
+  }
+
+  function onlineHtml() {
+    return `<div class="online-people" aria-live="polite">${peopleHtml()}</div>
+      <div class="online-who">${whoHtml()}</div>
       <p class="muted" style="font-size:12px;margin-top:8px">Ton nom apparaît alors dans cette liste pour les autres. Rien d'autre n'est enregistré.</p>`;
   }
 
-  function renderOnlineModal() {
+  /* Seule la liste est redessinée (la liste déroulante « Qui es-tu ? » n'est jamais remplacée
+     pendant qu'on s'en sert), en gardant le focus sur le même lien s'il y était. */
+  function renderOnlineModal(options) {
     if (!onlineModal) return;
-    const body = onlineModal.el.querySelector('.modal-body');
-    const select = body && body.querySelector('#online-who-select');
-    if (select && document.activeElement === select) return; // ne pas fermer la liste déroulante en cours
-    if (body) body.innerHTML = onlineHtml();
+    const wrap = onlineModal.el.querySelector('.online-people');
+    if (wrap) {
+      const active = document.activeElement;
+      const href = active && wrap.contains(active) ? active.getAttribute('href') : null;
+      wrap.innerHTML = peopleHtml();
+      if (href) {
+        const safeHref = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(href) : href.replace(/"/g, '');
+        const again = wrap.querySelector(`a[href="${safeHref}"]`) || onlineModal.el.querySelector('.modal-actions button');
+        if (again) again.focus();
+      }
+    }
+    if (options && options.who) {
+      const who = onlineModal.el.querySelector('.online-who');
+      if (who && !who.contains(document.activeElement)) who.innerHTML = whoHtml();
+    }
   }
 
   async function openOnline() {
@@ -1169,7 +1236,7 @@
       try {
         const st = await App.api('/api/state');
         playersForWho = ((st && st.players) || []).filter((x) => x.active !== false).map((x) => ({ id: x.id, display_name: x.display_name }));
-        renderOnlineModal();
+        renderOnlineModal({ who: true });
       } catch (e) { /* la liste reste sans choix d'identité */ }
     }
   }
@@ -1180,6 +1247,7 @@
       const id = parseInt(e.target.value, 10);
       const chosen = (playersForWho || []).find((x) => x.id === id);
       App.setMe(chosen ? { id: chosen.id, name: chosen.display_name } : null);
+      renderOnlineModal(); // « (toi) » tout de suite ; la liste complète suit au prochain échange
       App.toast(chosen ? `Tu apparais maintenant comme ${chosen.display_name}.` : 'Tu apparais maintenant comme spectateur.', { type: 'success', timeout: 3000 });
     });
     document.addEventListener('pekin:disconnected', () => onlinePill.classList.add('is-offline'));
@@ -1217,6 +1285,7 @@
   });
   // Début réel de la partie (après l'écran de chargement) ou composition arrivée entre-temps
   App.onEvent('poll_done', () => { if (App.live.items.length) App.refreshLive(); });
+  App.onEvent('live_update', () => App.refreshLive());
   App.onEvent('match_recorded', (d) => {
     if (d.is_remake) return;
     const lp = d.lp_change;

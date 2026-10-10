@@ -416,9 +416,11 @@ def build_live_board(
             {key: info[key] for key in ("player_id", "display_name", "team_id", "team_name", "team_color")}
             | {"side": None, "champion_name": ddragon.champion_display_name(live.champion_name)}
         )
+    # Duo ensemble = deux joueurs du même duo dans la même équipe (en face, c'est un duel)
     duo_counts: dict[Any, int] = {}
     for cp in challenge_players:
-        duo_counts[cp["team_id"]] = duo_counts.get(cp["team_id"], 0) + 1
+        key = (cp["team_id"], cp["side"])
+        duo_counts[key] = duo_counts.get(key, 0) + 1
     return {
         "game_id": first.game_id,
         "queue_id": first.queue_id,
@@ -430,7 +432,7 @@ def build_live_board(
         "elapsed_s": max(0, int((now - start).total_seconds())),
         "challenge_players": challenge_players,
         "in_game_player_ids": sorted(in_game_ids),
-        "duo_together": any(n >= 2 for tid, n in duo_counts.items() if tid is not None),
+        "duo_together": any(n >= 2 for (duo_id, _side), n in duo_counts.items() if duo_id is not None),
         "versus": len({cp["side"] for cp in challenge_players if cp["side"]}) > 1,
         "teams": teams,
     }

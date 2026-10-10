@@ -815,7 +815,9 @@
   function renderLiveBoard() {
     if (!els.liveSection || !els.liveBoard) return;
     const mine = App.live.byPlayer.get(playerId);
-    const game = (mine && App.live.byGame.get(String(mine.game_id))) || (App.live.items.length || !data ? null : data.live_game) || null;
+    // Tant que l'état « en direct » partagé n'est pas chargé, la fiche fait foi ; ensuite, lui seul
+    // (une partie finie disparaît même si la fiche n'a pas encore été rechargée)
+    const game = (mine && App.live.byGame.get(String(mine.game_id))) || (!App.live.loaded && data ? data.live_game : null) || null;
     els.liveSection.hidden = !game;
     if (!game) { liveSig = ''; els.liveBoard.innerHTML = ''; return; }
     const sig = JSON.stringify([game.game_id, game.game_start, game.loading, (game.teams || []).map((t) => (t.players || []).map((p) => [p.champion_id, p.rank_label]))]);

@@ -395,9 +395,32 @@
     }).join('');
   }
 
-  /* Scène « En direct » en haut du classement : un tableau par partie, redessiné seulement quand
-     la partie change (les durées défilent toutes seules). */
+  /* Scène « En direct » en haut du classement. Jusqu'à 2 parties : tableaux complets. Au-delà :
+     une carte compacte par partie (qui, champions, durée), dépliable, pour que le classement reste
+     visible même quand les 8 joueurs sont en game. Chaque carte n'est redessinée que si sa partie
+     (ou son état plié/déplié) change ; les durées défilent toutes seules. */
+  const FULL_BOARDS_MAX = 2;
   const stageSigs = new Map();
+  const stageOpen = new Map(); // game_id → choix de l'utilisateur (déplié ou non)
+  function isOpen(gameId, count) {
+    const key = String(gameId);
+    return stageOpen.has(key) ? stageOpen.get(key) : count <= FULL_BOARDS_MAX;
+  }
+  function summaryHtml(g, open) {
+    const cps = g.challenge_players || [];
+    const rows = (g.teams || []).flatMap((t) => t.players || []);
+    const icons = cps.map((cp) => {
+      const row = rows.find((p) => p.player_id === cp.player_id);
+      return App.champIcon({ name: cp.champion_name || '?', src: row && row.champion_icon_url, size: 'sm', title: `${cp.display_name} · ${cp.champion_name || ''}` });
+    }).join('');
+    const startMs = App.liveStartMs(g);
+    return `<div class="lb-summary">
+      <span class="lb-summary-icons">${icons}</span>
+      <span class="lb-summary-main"><span class="lb-title">${App.liveTitle(g)}</span>
+        <span class="lb-summary-sub"><span class="badge-live"><span class="dot"></span>En direct</span> ${esc(g.queue_label || App.queueLabel(g.queue_id, g.game_mode))} · <span class="tnum lb-time" data-elapsed-start="${startMs}">${App.formatDuration((Date.now() - startMs) / 1000)}</span></span></span>
+      <button type="button" class="btn btn-sm${open ? ' btn-ghost' : ''}" data-live-toggle="${esc(g.game_id)}" aria-expanded="${open}">${open ? 'Réduire' : 'Voir le tableau'}</button>
+    </div>`;
+  }
   function renderLiveStage() {
     if (!els.liveStage || !els.liveBoards) return;
     const games = App.live.games || [];
@@ -406,34 +429,57 @@
       const n = App.live.items.length;
       els.liveStageHint.textContent = games.length ? `${n} joueur${n > 1 ? 's' : ''} en partie` : '';
     }
+    const many = games.length > FULL_BOARDS_MAX;
     const keep = new Set();
     games.forEach((g, index) => {
       const id = `live-game-${g.game_id}`;
       keep.add(id);
-      const sig = JSON.stringify([g.game_start, g.loading, g.challenge_players, (g.teams || []).map((t) => (t.players || []).map((p) => [p.champion_id, p.rank_label]))]);
+      const open = isOpen(g.game_id, games.length);
+      const sig = JSON.stringify([open, many, g.game_start, g.loading, g.challenge_players, (g.teams || []).map((t) => (t.players || []).map((p) => [p.champion_id, p.rank_label]))]);
       let card = document.getElementById(id);
       if (!card) {
         card = document.createElement('article');
         card.id = id;
-        card.className = 'card lb-card is-live';
         els.liveBoards.appendChild(card);
       }
+      card.className = `card lb-card is-live${open ? ' is-open' : ' is-compact'}`;
       const color = ((g.challenge_players || [])[0] || {}).team_color;
       if (color) card.style.setProperty('--team-color', color);
       if (stageSigs.get(id) !== sig) {
         stageSigs.set(id, sig);
-        card.innerHTML = App.liveBoardHtml(g);
+        card.innerHTML = open
+          ? `${App.liveBoardHtml(g)}${many ? `<div class="lb-foot"><button type="button" class="btn btn-ghost btn-sm" data-live-toggle="${esc(g.game_id)}" aria-expanded="true">Réduire</button></div>` : ''}`
+          : summaryHtml(g, false);
       }
       if (els.liveBoards.children[index] !== card) els.liveBoards.insertBefore(card, els.liveBoards.children[index] || null);
     });
     Array.from(els.liveBoards.children).forEach((card) => {
       if (!keep.has(card.id)) { stageSigs.delete(card.id); card.remove(); }
     });
+    Array.from(stageOpen.keys()).forEach((key) => { if (!keep.has(`live-game-${key}`)) stageOpen.delete(key); });
   }
   document.addEventListener('pekin:live', renderLiveStage);
+  els.liveBoards.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-live-toggle]');
+    if (!btn) return;
+    const key = btn.dataset.liveToggle;
+    stageOpen.set(key, !isOpen(key, (App.live.games || []).length));
+    renderLiveStage();
+    const card = document.getElementById(`live-game-${key}`);
+    const again = card && card.querySelector('[data-live-toggle]');
+    if (again) again.focus();
+  });
+  // Badge « En game » cliqué ailleurs sur la page : la carte de la partie se déplie
+  document.addEventListener('pekin:live-focus', (e) => {
+    const key = e.detail && e.detail.gameId;
+    if (!key || isOpen(key, (App.live.games || []).length)) return;
+    stageOpen.set(String(key), true);
+    renderLiveStage();
+  });
   els.liveList.addEventListener('keydown', (e) => {
     const item = e.target.closest('[data-live-game]');
-    if (item && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); item.click(); }
+    if (!item || e.target !== item) return; // un lien dans la ligne garde son comportement
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); item.click(); }
   });
 
   /* Top 5 des rangs actuels (détail sur /rankings). */

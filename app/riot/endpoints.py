@@ -145,7 +145,8 @@ def _parse_active_participant(raw: dict[str, Any]) -> ActiveParticipantDTO:
     name, sep, tag = riot_id.rpartition("#")
     if not sep:
         name, tag = riot_id, ""
-    name = name.strip() or str(raw.get("summonerName") or "").strip() or "Joueur"
+    # Vide si inconnu (bot, Riot ID masqué) : le site affiche alors « Bot » ou « Joueur masqué »
+    name = name.strip() or str(raw.get("summonerName") or "").strip()
     perks = raw.get("perks") if isinstance(raw.get("perks"), dict) else {}
     perk_ids = [p for p in (perks.get("perkIds") or []) if isinstance(p, int) and not isinstance(p, bool) and p > 0]
     return ActiveParticipantDTO(

@@ -13,7 +13,7 @@ from sqlmodel import Session
 
 from app.db.models import RankSnapshot, Team
 from app.events import bus
-from app.presence import MAX_CLIENTS, TTL_HIDDEN_S, TTL_VISIBLE_S, PresenceRegistry
+from app.presence import LEAVE_GRACE_S, MAX_CLIENTS, TTL_HIDDEN_S, TTL_VISIBLE_S, PresenceRegistry
 from app.riot import demo as demo_module
 from app.riot.base import ActiveGameDTO
 from app.riot.demo import DemoRiotClient
@@ -79,7 +79,7 @@ def test_parse_active_game_keeps_the_whole_board():
     first = game.participants[0]
     assert (first.riot_name, first.riot_tag, first.team_id, first.spell_ids) == ("Joueur0", "EUW", 100, (4, 14))
     assert (first.keystone_id, first.primary_style_id, first.sub_style_id) == (8010, 8000, 8400)
-    assert game.participants[9].riot_name == "Joueur" and game.participants[9].riot_tag is None  # Riot ID masqué
+    assert game.participants[9].riot_name == "" and game.participants[9].riot_tag is None  # Riot ID masqué : « Joueur masqué » à l'écran
     assert [(b.team_id, b.champion_id) for b in game.bans] == [(100, 157), (200, 777)]  # -1 : pas de ban
     assert game.champions_by_puuid["p-mike"] == 62
 
@@ -87,7 +87,7 @@ def test_parse_active_game_keeps_the_whole_board():
 def test_parse_active_game_tolerates_missing_fields():
     game = parse_active_game({"gameId": 5, "participants": [{"puuid": "x"}, "pas un dict"]}, "x")
     assert len(game.participants) == 1
-    assert game.participants[0].riot_name == "Joueur" and game.participants[0].keystone_id is None
+    assert game.participants[0].riot_name == "" and game.participants[0].keystone_id is None
     assert game.bans == [] and game.map_id is None
 
 
@@ -276,7 +276,7 @@ def test_presence_counts_browsers_and_identified_players_once():
     assert not reg.touch(None, None, None, None, True)
 
 
-def test_presence_expires_hidden_tabs_later_and_leave_is_immediate():
+def test_presence_expires_hidden_tabs_later_and_leave_is_quick():
     clock = Clock()
     reg = PresenceRegistry(clock=clock)
     reg.touch("visible-aaaa", "tab-aaaa", "duos", None, True)
@@ -288,7 +288,15 @@ def test_presence_expires_hidden_tabs_later_and_leave_is_immediate():
     assert reg.snapshot().players == {}
     reg.touch("leaver-cccc", "tab-cccc", "home", None, True)
     reg.leave("leaver-cccc", "tab-cccc")
-    assert reg.snapshot().anonymous == 0
+    assert reg.snapshot().anonymous == 1  # page suivante du site peut-être en chargement
+    clock.t += LEAVE_GRACE_S + 0.5
+    assert reg.snapshot().anonymous == 0  # fermé pour de bon
+    reg.touch("leaver-dddd", "tab-dddd", "home", None, True)
+    reg.leave("leaver-dddd", "tab-dddd")
+    clock.t += 1
+    reg.touch("leaver-dddd", "tab-eeee", "duos", None, True)  # la page suivante s'est manifestée
+    clock.t += LEAVE_GRACE_S
+    assert reg.snapshot().anonymous == 1
 
 
 def test_presence_registry_is_bounded():
@@ -300,6 +308,17 @@ def test_presence_registry_is_bounded():
     assert reg.snapshot().anonymous == MAX_CLIENTS
     reg.touch("client-zzzzzz", "tab-0000", "no-such-page", None, True)
     assert reg.snapshot().anonymous == MAX_CLIENTS
+
+
+def test_presence_flood_never_evicts_identified_players():
+    clock = Clock()
+    reg = PresenceRegistry(clock=clock)
+    reg.touch("real-player1", "tab-0000", "duos", 4, True)
+    for index in range(MAX_CLIENTS * 2):
+        clock.t += 0.01
+        reg.touch(f"flood-{index:06d}", "tab-0000", "home", None, True)
+    snap = reg.snapshot()
+    assert set(snap.players) == {4} and snap.anonymous == MAX_CLIENTS - 1
 
 
 def test_events_poll_reports_who_is_online(client: TestClient, session: Session):
@@ -318,8 +337,83 @@ def test_events_poll_reports_who_is_online(client: TestClient, session: Session)
     odd = client.get("/api/events/recent?cid=%21%21&tab=&page=%3Cscript%3E&vis=x&me=abc")
     assert odd.status_code == 200 and odd.json()["me"] is None
     assert client.get("/api/events/recent?me=99999999999999999999").status_code == 200
-    # Fermeture de l'onglet : retiré tout de suite
+    # Fermeture de l'onglet : signalée (retirée au bout de quelques secondes sans nouvelle)
     assert client.post("/api/presence/leave", content=b'{"cid":"browser-aaaa","tab":"tab-1111"}').status_code == 204
     assert client.post("/api/presence/leave", content=b"pas du json").status_code == 204
     after = client.get("/api/events/recent?cid=browser-bbbb&tab=tab-2222&page=dashboard&vis=1").json()
-    assert after["presence"] == {"online": 1, "anonymous": 1, "players": []}  # Mike redevenu anonyme
+    assert after["presence"]["players"] == []  # Mike redevenu anonyme
+
+
+# --------------------------------------------------------------------------- #
+# Corrections de la relecture
+# --------------------------------------------------------------------------- #
+
+
+def test_duo_on_opposite_sides_is_a_duel_not_a_duo(session: Session):
+    team = Team(id=1, name="Duo Rouge", color="#ef4444", slot=1)
+    session.add(team)
+    session.commit()
+    mike = make_player(session, "Mike", "p-mike", team_id=1)
+    lea = make_player(session, "Léa", "p-lea", team_id=1)
+    payload = spectator_payload(["p-mike", "s1", "s2", "s3", "s4", "p-lea"])  # Léa en face (équipe rouge)
+    game = parse_active_game(payload, "p-mike")
+    board = build_live_board([live_state(mike.id, game), live_state(lea.id, game)], {"p-mike": mike, "p-lea": lea}, {1: team}, {}, NOW)
+    assert board["duo_together"] is False and board["versus"] is True
+
+
+async def test_discord_live_announce_keeps_opponents_separate(session: Session, monkeypatch: pytest.MonkeyPatch):
+    from app.db.models import ChallengeStatus
+    from tests.test_discord_embeds import make_settings
+
+    make_challenge(session, ChallengeStatus.RUNNING, start_at=NOW - timedelta(hours=1))
+    team = Team(name="Duo Rouge", color="#ef4444", slot=1)
+    session.add(team)
+    session.commit()
+    session.refresh(team)
+    make_player(session, "Mike", "p-mike", team_id=team.id)
+    make_player(session, "Léa", "p-lea", team_id=team.id)
+    sent: list[str] = []
+
+    async def fake_send(content: str, **_: Any) -> bool:
+        sent.append(content)
+        return True
+
+    monkeypatch.setattr("app.services.poller.send_discord", fake_send)
+    api = ScriptedAPI()
+    payload = spectator_payload(["p-mike", "s1", "s2", "s3", "s4", "p-lea"])
+    for puuid in ("p-mike", "p-lea"):
+        api.active[puuid] = parse_active_game(payload, puuid)
+    await Poller(api, bus, state, settings=make_settings()).poll_live_once()
+    assert len(sent) == 2 and not any("en duo" in content for content in sent)
+
+
+async def test_real_start_after_loading_screen_is_published(session: Session):
+    from app.db.models import ChallengeStatus
+
+    make_challenge(session, ChallengeStatus.RUNNING, start_at=NOW - timedelta(hours=1))
+    mike = make_player(session, "Mike", "p-mike")
+    api = ScriptedAPI()
+    loading = spectator_payload(["p-mike"])
+    loading["gameStartTime"] = 0  # écran de chargement
+    api.active["p-mike"] = parse_active_game(loading, "p-mike")
+    poller = Poller(api, bus, state)
+    await poller.poll_live_once()
+    before = len([e for e in bus.recent(limit=500) if e["type"] == "live_update"])
+    api.active["p-mike"] = parse_active_game(spectator_payload(["p-mike"]), "p-mike")
+    await poller.poll_live_once()
+    updates = [e for e in bus.recent(limit=500) if e["type"] == "live_update"]
+    assert len(updates) == before + 1 and updates[-1]["data"] == {"player_id": mike.id, "game_id": 77}
+    assert state.live_games[mike.id].game_start.timestamp() > 0
+
+
+async def test_demo_shared_game_is_seen_live_by_both_players(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(demo_module, "SHARED_GAME_CHANCE", 1.0)
+    api = DemoRiotClient(start_chance=1.0, game_duration_range=(0, 0), rng=random.Random(9), remake_chance=0.0)
+    mike = await api.get_account_by_riot_id("Mike", "DEMO")
+    lea = await api.get_account_by_riot_id("Lea", "EUW")
+    # Ordre d'un cycle : parties (Match-V5) de chacun, puis Spectator de chacun
+    await api.get_match_ids_by_puuid(mike.puuid, 420)
+    await api.get_match_ids_by_puuid(lea.puuid, 420)
+    seen_mike = await api.get_active_game(mike.puuid)
+    seen_lea = await api.get_active_game(lea.puuid)
+    assert seen_mike is not None and seen_lea is not None and seen_mike.game_id == seen_lea.game_id

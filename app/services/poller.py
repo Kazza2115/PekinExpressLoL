@@ -1143,10 +1143,15 @@ class Poller:
         if current is not None and current.game_id == game.game_id:
             # Même partie : Spectator renvoie gameStartTime = 0 pendant le chargement, on complète
             known_start = as_utc(game.game_start)
+            changed = False
             if current.game_start.timestamp() <= 0 and known_start is not None and known_start.timestamp() > 0:
                 current.game_start = known_start
+                changed = True
             if current.board is None and game.participants:
                 current.board = self._shared_board(game.game_id) or await self._prepare_board(game)
+                changed = True
+            if changed:
+                self.bus.publish("live_update", {"player_id": player.id, "game_id": game.game_id})
             return
         if current is not None:
             # Nouvelle partie sans avoir vu la fin de la précédente
@@ -1199,14 +1204,21 @@ class Poller:
         team = self._team_of(player, ctx)
         entries = [self._live_notice(session, player, team, champion_name, game.queue_id)]
         champions = getattr(game, "champions_by_puuid", None) or {}
+        # Côté de chaque joueur (Spectator) : un duo dans la même partie mais en face n'est pas « en duo »
+        participants = {p.puuid: p for p in getattr(game, "participants", None) or [] if p.puuid}
         if team is not None and champions:
             for mate in ctx.players_by_puuid.values():
                 if mate.id == player.id or mate.team_id != player.team_id or mate.puuid not in champions:
                     continue
+                mine, theirs = participants.get(player.puuid or ""), participants.get(mate.puuid or "")
+                if mine is not None and theirs is not None and mine.team_id != theirs.team_id:
+                    continue  # adversaires : chacun son annonce
                 current = self.state.live_games.get(mate.id) if mate.id is not None else None
                 if current is not None and current.game_id == game.game_id:
                     continue  # coéquipier déjà annoncé (cycle précédent)
-                mate_champion = await self._champion_name(champions[mate.puuid])
+                mate_champion = (theirs.champion_name if theirs is not None else None) or await self._champion_name(
+                    champions[mate.puuid]
+                )
                 entries.append(self._live_notice(session, mate, team, mate_champion, game.queue_id))
                 if len(self._live_announced) > 200:
                     self._live_announced.clear()

@@ -67,7 +67,7 @@ class ActiveParticipantDTO:
     """Un des 10 joueurs d'une partie en cours (Spectator-V5)."""
 
     puuid: str | None
-    riot_name: str  # partie gauche du Riot ID (« Joueur » si masqué)
+    riot_name: str  # partie gauche du Riot ID (vide si masqué ou bot)
     riot_tag: str | None
     team_id: int  # 100 (bleu) / 200 (rouge)
     champion_id: int

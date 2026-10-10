@@ -232,7 +232,7 @@ a.pf-duo-chip:hover { border-color: var(--team-color, var(--accent)); color: var
 /* --------------------------------------------------------------------------
    Parties : extras (multikills, premier sang, dégâts, or, balises, objectifs)
    -------------------------------------------------------------------------- */
-.match-row { scroll-margin-top: calc(var(--nav-h) + 16px); transition: background 0.3s var(--ease); }
+.match-row { transition: background 0.3s var(--ease); }
 .match-row:target { background: var(--accent-soft); box-shadow: inset 0 0 0 1px rgba(229, 182, 77, 0.35); border-radius: 0 var(--radius-xs) var(--radius-xs) 0; }
 .pf-m-extra { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; margin-top: 6px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .pf-m-extra .pf-mk { padding: 1px 7px; font-size: 10.5px; }

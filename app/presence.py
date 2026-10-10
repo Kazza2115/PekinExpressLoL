@@ -20,6 +20,9 @@ from dataclasses import dataclass, field
 # (et les navigateurs ralentissent encore les onglets cachés) : délais d'oubli correspondants.
 TTL_VISIBLE_S = 30.0
 TTL_HIDDEN_S = 75.0
+# Onglet quitté (fermé, ou page suivante du site en cours de chargement) : oublié après ce délai
+# s'il ne se manifeste plus, sans faire « clignoter » la personne en changeant de page
+LEAVE_GRACE_S = 4.0
 # Garde-fous contre le remplissage : nombre de navigateurs suivis, d'onglets par navigateur
 MAX_CLIENTS = 200
 MAX_TABS_PER_CLIENT = 8
@@ -72,8 +75,11 @@ class PresenceRegistry:
             client = self._clients.get(cid)  # type: ignore[arg-type]
             if client is None:
                 if len(self._clients) >= MAX_CLIENTS:
-                    stalest = min(self._clients, key=lambda key: self._clients[key].seen)
-                    del self._clients[stalest]
+                    # Plein : on oublie le visiteur anonyme le plus ancien (un afflux d'identifiants
+                    # inventés ne chasse pas les joueurs identifiés), sinon le plus ancien tout court
+                    anonymous = [key for key, c in self._clients.items() if c.player_id is None]
+                    pool = anonymous or list(self._clients)
+                    del self._clients[min(pool, key=lambda key: self._clients[key].seen)]
                 client = self._clients[cid] = _Client(player_id=player_id, seen=now)  # type: ignore[index]
             client.player_id = player_id
             client.seen = now
@@ -83,16 +89,17 @@ class PresenceRegistry:
         return True
 
     def leave(self, cid: str | None, tab: str | None) -> None:
-        """Onglet fermé (ou quitté) : on l'oublie tout de suite."""
+        """Onglet quitté : oublié d'ici `LEAVE_GRACE_S` s'il ne se manifeste plus (page fermée)."""
         if not self.valid_id(cid):
             return
+        now = self._clock()
         with self._lock:
             client = self._clients.get(cid)  # type: ignore[arg-type]
-            if client is None:
+            tab_state = client.tabs.get(tab if self.valid_id(tab) else "default") if client is not None else None  # type: ignore[arg-type]
+            if tab_state is None:
                 return
-            client.tabs.pop(tab if self.valid_id(tab) else "default", None)  # type: ignore[arg-type]
-            if not client.tabs:
-                del self._clients[cid]  # type: ignore[arg-type]
+            ttl = TTL_VISIBLE_S if tab_state.visible else TTL_HIDDEN_S
+            tab_state.seen = min(tab_state.seen, now - ttl + LEAVE_GRACE_S)
 
     def snapshot(self) -> PresenceSnapshot:
         now = self._clock()

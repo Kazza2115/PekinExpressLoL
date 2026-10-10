@@ -48,8 +48,12 @@ from app.services.stats import absolute_lp, rank_from_absolute_lp
 RANKED_SOLO_QUEUE_ID = 420
 POSITIONS = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
 DEMO_GAME_VERSION = "14.24.650.2384"
-# Une partie reste en cours au moins ce nombre de ticks après celui qui l'a démarrée
+# Une partie reste en cours au moins ce nombre de ticks après celui qui l'a démarrée (pour chacun
+# des joueurs simulés qui y jouent : chacun doit avoir pu la voir en cours)
 MIN_LIVE_TICKS = 2
+# Partie partagée dont un joueur n'est plus interrogé (retiré du challenge) : terminée quand même
+# ce délai après sa fin prévue
+SHARED_GAME_GRACE_S = 120.0
 # Nombre maximal de parties conservées en mémoire (les plus anciennes sont oubliées)
 MAX_STORED_MATCHES = 2000
 # Durée fictive d'une partie normale (secondes) et d'un remake
@@ -134,6 +138,7 @@ class _LiveGame:
     position: str
     team_id: int
     ticks: int = 0  # ticks écoulés depuis le démarrage
+    ticks_by_puuid: dict[str, int] = field(default_factory=dict)  # ticks vus par chaque joueur simulé
     # Les 10 joueurs, fixés dès le début (tableau en direct = tableau des scores final) :
     # {participant_id, puuid, game_name, tag_line, champion, champion_id, team_id, position,
     #  spells, runes, icon, level}
@@ -251,8 +256,11 @@ class DemoRiotClient:
 
     def _tick_player(self, player: _DemoPlayer, now: float) -> None:
         if player.live is not None:
-            player.live.ticks += 1
-            if now >= player.live.ends_at and player.live.ticks >= MIN_LIVE_TICKS:
+            live = player.live
+            live.ticks += 1
+            live.ticks_by_puuid[player.puuid] = live.ticks_by_puuid.get(player.puuid, 0) + 1
+            everyone_saw_it = all(live.ticks_by_puuid.get(puuid, 0) >= MIN_LIVE_TICKS for puuid in live.members)
+            if now >= live.ends_at and (everyone_saw_it or now >= live.ends_at + SHARED_GAME_GRACE_S):
                 self._finish_game(player, now)
                 player.cooldown = True
         elif player.cooldown:
