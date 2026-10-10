@@ -56,7 +56,7 @@ from app.riot.base import (
     RiotUnreachable,
 )
 from app.services import gifs
-from app.services.announce import announce_start_if_due
+from app.services.announce import announce_placements, announce_start_if_due
 from app.services.notifications import (
     LiveNotice,
     MatchNotice,
@@ -530,6 +530,7 @@ class Poller:
         except Exception:  # noqa: BLE001 — jamais bloquant
             log.exception("Fin automatique du challenge en échec")
         await announce_start_if_due(settings=self.settings)  # « c'est parti » à l'heure du début
+        await announce_placements(settings=self.settings)  # duos qui viennent de finir leurs placements
         if report.errors:
             log.info("Cycle terminé avec %d erreur(s) en %.2fs", len(report.errors), report.duration_s)
         else:

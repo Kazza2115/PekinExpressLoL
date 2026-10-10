@@ -354,6 +354,9 @@ carte de résultat, un GIF de victoire et un GIF de défaite. Le site poste ensu
   vérifie toutes les 30 s ; s'il était éteint à 9h, l'annonce part à son démarrage (jusqu'à 3 h de
   retard). Le challenge doit avoir été **démarré** (Admin → « 🚀 Démarrer », le début programmé est
   gardé).
+- **« 🎖️ Duo X a fini ses placements »** : dès que tous les joueurs d'un duo qui avait au moins un
+  compte en placement ont un rang Solo/Duo, une annonce (une seule fois) donne le rang de chacun, le
+  bilan de ses placements, le rang moyen du duo et sa place au classement.
 - L'annonce du tirage des duos, du démarrage du challenge et des jokers.
 
 **Mention du rôle** (ex. @PekinExpress) : active le mode développeur de Discord (Paramètres →

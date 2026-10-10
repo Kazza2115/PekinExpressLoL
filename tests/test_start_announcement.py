@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.config import DEFAULT_START_GIF
 from app.db.models import Challenge, ChallengeStatus, Player, Team, utcnow
@@ -207,3 +207,80 @@ def test_admin_announce_routes(client: TestClient, admin_headers: dict, sent):
     assert status["state"] == "not_running"
     result = client.post("/api/admin/announce-start", headers=admin_headers, json={}).json()
     assert set(result) == {"sent", "error", "before", "after"}
+
+
+# --------------------------------------------------------------------------- #
+# « Placements terminés » : une annonce par duo
+# --------------------------------------------------------------------------- #
+
+
+def _snapshot(session: Session, player_id: int, tier, rank, lp: int, at) -> None:
+    from app.db.models import Queue, RankSnapshot
+    from app.services.stats import absolute_lp
+
+    session.add(
+        RankSnapshot(player_id=player_id, queue=Queue.SOLO, tier=tier, rank=rank, lp=lp,
+                     absolute_lp=absolute_lp(tier, rank, lp), captured_at=at)
+    )
+
+
+def _placement_game(session: Session, player_id: int, match_id: str, win: bool, ended) -> None:
+    from app.db.models import Match, MatchParticipant, Queue
+
+    session.add(Match(match_id=match_id, queue_id=420, game_start=ended - timedelta(minutes=30), game_end=ended, game_duration=1800, raw_json="{}"))
+    session.add(MatchParticipant(match_id=match_id, player_id=player_id, queue=Queue.SOLO, game_start=ended - timedelta(minutes=30),
+                                 game_end=ended, game_duration=1800, champion_name="Ahri", win=win, team_side=100))
+
+
+@pytest.fixture
+def posted(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, list[dict[str, Any]]]]:
+    messages: list[tuple[str, list[dict[str, Any]]]] = []
+
+    async def fake_send(content: str, *, embeds=None, **_: Any) -> bool:
+        messages.append((content, embeds or []))
+        return True
+
+    monkeypatch.setattr(notifications, "send_discord", fake_send)
+    return messages
+
+
+async def test_duo_that_finishes_placements_is_announced_once(session: Session, posted):
+    challenge = setup_challenge(session, start_in=-timedelta(hours=2))
+    start = as_utc(challenge.start_at)
+    mike, lea = session.exec(select(Player).order_by(Player.id)).all()
+    _snapshot(session, mike.id, None, None, 0, start - timedelta(hours=1))  # Mike en placement
+    _snapshot(session, lea.id, "GOLD", "IV", 10, start - timedelta(hours=1))  # Léa déjà classée
+    _placement_game(session, mike.id, "P1", True, start + timedelta(minutes=40))
+    session.commit()
+    settings = make_settings()
+    assert await announce.announce_placements(settings=settings) == 0  # Mike pas encore classé
+
+    _snapshot(session, mike.id, "SILVER", "I", 60, start + timedelta(minutes=45))
+    session.commit()
+    assert await announce.announce_placements(settings=settings) == 1
+    assert await announce.announce_placements(settings=settings) == 0  # une seule fois
+    content, embeds = posted[0]
+    assert "Duo Rouge" in content and "a fini ses placements" in content
+    fields = {f["name"]: f["value"] for f in embeds[0]["fields"]}
+    assert fields["Mike"] == "**Silver I · 60 LP**\nPlacements : 1 V – 0 D"
+    assert fields["Léa"] == "**Gold IV · 10 LP**"
+    assert "Rang moyen du duo" in fields and fields["Classement"].startswith("1er sur 1")
+    assert any(e["type"] == "placements_done" for e in bus.recent(limit=50))
+
+
+async def test_duo_ranked_from_the_start_or_without_webhook_is_not_announced(session: Session, posted):
+    challenge = setup_challenge(session, start_in=-timedelta(hours=2))
+    start = as_utc(challenge.start_at)
+    mike, lea = session.exec(select(Player).order_by(Player.id)).all()
+    _snapshot(session, mike.id, "GOLD", "II", 30, start - timedelta(hours=1))
+    _snapshot(session, lea.id, "GOLD", "IV", 10, start - timedelta(hours=1))
+    session.commit()
+    assert await announce.announce_placements(settings=make_settings()) == 0  # pas de placements
+    _snapshot(session, mike.id, None, None, 0, start)  # (cas théorique) puis reclassé
+    _snapshot(session, mike.id, "GOLD", "I", 5, start + timedelta(minutes=5))
+    session.commit()
+    assert await announce.announce_placements(settings=make_settings(discord_webhook_url="")) == 0
+    team = session.exec(select(Team)).first()
+    session.refresh(team)
+    assert team.placements_announced_at is None  # webhook ajouté plus tard : l'annonce partira
+    assert posted == []

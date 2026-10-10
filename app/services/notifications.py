@@ -712,6 +712,60 @@ def build_start_announcement(
     return content, [embed]
 
 
+@dataclass
+class PlacementMember:
+    """Un joueur d'un duo qui annonce la fin de ses placements."""
+
+    name: str
+    rank_label: str
+    tier: str | None = None
+    placed: bool = False  # il sortait de placements (sinon : déjà classé)
+    wins: int = 0  # bilan des parties de placement
+    losses: int = 0
+
+
+def build_placements_announcement(
+    team_name: str,
+    team_color: str | None,
+    members: Sequence[PlacementMember],
+    *,
+    average_rank: str | None = None,
+    position: int | None = None,
+    teams_count: int | None = None,
+    lp_net: int | None = None,
+    settings: Settings | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Annonce « 🎖️ Duo Rouge a fini ses placements » : rang de chacun, bilan, rang moyen, place."""
+    settings = settings if settings is not None else get_settings()
+    names = " & ".join(m.name for m in members)
+    content = f"🎖️ **{team_name}** ({names}) a fini ses placements !"
+    fields = []
+    for member in members:
+        record = f"\nPlacements : {member.wins} V – {member.losses} D" if member.placed and (member.wins or member.losses) else ""
+        fields.append({"name": member.name, "value": f"**{member.rank_label}**{record}", "inline": True})
+    if average_rank:
+        fields.append({"name": "Rang moyen du duo", "value": average_rank, "inline": True})
+    if position and teams_count:
+        lp = f" · {format_lp_delta(lp_net)}" if lp_net is not None else ""
+        fields.append({"name": "Classement", "value": f"{_ordinal(position)} sur {teams_count}{lp}", "inline": True})
+    link = share_link("/dashboard", settings)
+    fields.append({"name": "Liens", "value": f"[🏆 Voir le classement]({link})", "inline": False})
+    best = max(members, key=lambda m: 0 if m.tier is None else 1)
+    embed: dict[str, Any] = {
+        "title": f"🎖️ {team_name} a fini ses placements",
+        "url": link,
+        "description": "Les rangs sont tombés : les LP comptent maintenant à partir de ces rangs.",
+        "color": int(team_color.lstrip("#"), 16) if team_color and len(team_color.lstrip("#")) == 6 else COLOR_INFO,
+        "fields": fields,
+        "footer": {"text": f"{FOOTER_TEXT} · {team_name}"},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    emblem = ddragon.rank_emblem_url(best.tier) if best.tier else None
+    if emblem:
+        embed["thumbnail"] = {"url": emblem}
+    return content, [embed]
+
+
 TEST_NOTIFICATION_CONTENT = "🔔 Test de notification — Pékin Express LoL : le webhook Discord fonctionne."
 
 

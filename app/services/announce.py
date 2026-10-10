@@ -132,3 +132,116 @@ async def announce_start_now(*, settings: Settings | None = None) -> dict[str, A
     async with _lock:
         result = await _send(settings, utcnow())
     return {"sent": result.sent, "error": result.error, "before": before, "after": announce_status(settings=settings)}
+
+
+# --------------------------------------------------------------------------- #
+# « Placements terminés » : une annonce par duo, quand ses joueurs ont tous un rang
+# --------------------------------------------------------------------------- #
+
+
+async def announce_placements(*, settings: Settings | None = None, now: datetime | None = None) -> int:
+    """Annonce chaque duo qui vient de finir ses placements (un de ses joueurs était non classé et
+    tous ont maintenant un rang Solo/Duo). Une seule fois par duo. Renvoie le nombre d'annonces."""
+    from app.api.leaderboard import build_leaderboard  # import local : pas de cycle services → api
+    from app.db.models import MatchParticipant, Queue, RankSnapshot, game_end_of
+    from app.services.stats import absolute_lp, format_rank, label_from_absolute_lp
+
+    settings = settings if settings is not None else get_settings()
+    now = now or utcnow()
+    if not (settings.discord_webhook_url or "").strip():
+        return 0  # pas de Discord : rien d'annoncé, les duos restent à annoncer
+    pending: list[tuple[int, tuple[str, list[dict[str, Any]]]]] = []
+    try:
+        with session_scope() as session:
+            challenge = session.exec(select(Challenge).order_by(col(Challenge.id))).first()
+            if challenge is None or challenge.status != ChallengeStatus.RUNNING:
+                return 0
+            teams = [t for t in session.exec(select(Team)).all() if t.placements_announced_at is None]
+            if not teams:
+                return 0
+            players = session.exec(select(Player).where(Player.active == True)).all()  # noqa: E712
+            ranking = None
+            for team in teams:
+                members = [p for p in players if p.team_id == team.id and p.id is not None]
+                if not members:
+                    continue
+                infos: list[notifications.PlacementMember] = []
+                had_placements = False
+                ranked_values: list[int] = []
+                for player in members:
+                    snaps = session.exec(
+                        select(RankSnapshot)
+                        .where(RankSnapshot.player_id == player.id, RankSnapshot.queue == Queue.SOLO)
+                        .order_by(col(RankSnapshot.captured_at))
+                    ).all()
+                    if not snaps or snaps[-1].tier is None:
+                        break  # encore en placement (ou jamais vu) : le duo n'a pas fini
+                    latest = snaps[-1]
+                    placed = any(s.tier is None for s in snaps)
+                    had_placements = had_placements or placed
+                    wins = losses = 0
+                    if placed:
+                        # Bilan des placements : parties classées terminées avant le premier rang obtenu
+                        first_ranked = next(as_utc(s.captured_at) for s in snaps if s.tier is not None)
+                        start = as_utc(challenge.start_at)
+                        for part in session.exec(
+                            select(MatchParticipant).where(
+                                MatchParticipant.player_id == player.id, MatchParticipant.queue == Queue.SOLO
+                            )
+                        ).all():
+                            ended = game_end_of(part)
+                            if part.is_remake or ended > first_ranked or (start is not None and ended < start):  # type: ignore[operator]
+                                continue
+                            wins += int(bool(part.win))
+                            losses += int(not part.win)
+                    value = absolute_lp(latest.tier, latest.rank, latest.lp)
+                    if value is not None:
+                        ranked_values.append(value)
+                    infos.append(
+                        notifications.PlacementMember(
+                            name=player.display_name,
+                            rank_label=format_rank(latest.tier, latest.rank, latest.lp),
+                            tier=latest.tier,
+                            placed=placed,
+                            wins=wins,
+                            losses=losses,
+                        )
+                    )
+                else:
+                    if not had_placements:
+                        continue  # duo classé dès le départ : pas de placements à annoncer
+                    if ranking is None:
+                        ranking, _ = build_leaderboard(session, challenge, now=now)
+                    team_stats = next((t for t in ranking if t.team_id == team.id), None)
+                    average = round(sum(ranked_values) / len(ranked_values)) if ranked_values else None
+                    pending.append(
+                        (
+                            int(team.id),  # type: ignore[arg-type]
+                            notifications.build_placements_announcement(
+                                team.name,
+                                team.color,
+                                infos,
+                                average_rank=label_from_absolute_lp(average) if average is not None else None,
+                                position=team_stats.position if team_stats is not None else None,
+                                teams_count=len(ranking),
+                                lp_net=team_stats.lp_net if team_stats is not None else None,
+                                settings=settings,
+                            ),
+                        )
+                    )
+        sent = 0
+        for team_id, (content, embeds) in pending:
+            if not await notifications.send_discord(content, embeds=embeds, settings=settings):
+                continue  # nouvel essai au prochain cycle
+            with session_scope() as session:
+                team = session.get(Team, team_id)
+                if team is not None:
+                    team.placements_announced_at = now
+                    session.add(team)
+                    session.commit()
+                    bus.publish("placements_done", {"team_id": team_id, "team_name": team.name})
+            sent += 1
+        return sent
+    except Exception:  # noqa: BLE001 — jamais bloquant pour le suivi des parties
+        log.warning("Annonce des placements impossible", exc_info=True)
+        return 0

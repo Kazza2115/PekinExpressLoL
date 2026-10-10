@@ -66,6 +66,7 @@ class Team(SQLModel, table=True):
     slot: int
     window_start: datetime | None = None  # None → fenêtre du challenge
     window_end: datetime | None = None
+    placements_announced_at: datetime | None = None  # annonce Discord « placements terminés » envoyée
     created_at: datetime = Field(default_factory=utcnow)
 
 

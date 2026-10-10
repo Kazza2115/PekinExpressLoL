@@ -1317,6 +1317,9 @@
     App.notify('🚀 Le challenge a commencé !', 'Que le meilleur duo gagne.');
   });
   App.onEvent('challenge_finished', () => App.toast('🏁 Le challenge est terminé.', { type: 'info' }));
+  App.onEvent('placements_done', (d) => {
+    App.toast(`🎖️ ${d.team_name || 'Un duo'} a fini ses placements : les rangs sont tombés !`, { type: 'success', timeout: 8000 });
+  });
   App.onEvent('challenge_begins', () => {
     App.toast('🚀 C’est parti : le challenge commence ! Bonne chance à tous les duos.', { type: 'success', timeout: 12000 });
     App.notify('🚀 C’est parti !', 'Le challenge commence : bonne chance à tous les duos.', 'challenge-begins');
