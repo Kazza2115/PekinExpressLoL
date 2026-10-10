@@ -87,7 +87,10 @@ FEED_MAX_LIMIT = 100
 PLAYER_MATCHES_LIMIT = 50
 MAX_DEMO_PLAYERS = 8
 DEFAULT_SERIES_COLOR = "#9ca3af"
-REGISTRATION_OPEN_STATUSES = (ChallengeStatus.REGISTRATION, ChallengeStatus.DRAWN)
+# Inscriptions ouvertes jusqu'à la fin du challenge (un joueur peut arriver en cours de route)
+REGISTRATION_OPEN_STATUSES = (ChallengeStatus.REGISTRATION, ChallengeStatus.DRAWN, ChallengeStatus.RUNNING)
+# Avant le départ seulement, un compte déjà lié peut être changé sans l'organisateur
+RELINK_OPEN_STATUSES = (ChallengeStatus.REGISTRATION, ChallengeStatus.DRAWN)
 REGISTRATION_CLOSED_DETAIL = "Les inscriptions sont closes."
 PLAYER_NOT_FOUND_DETAIL = "Joueur introuvable."
 # Flux SSE simultanés (un par onglet ouvert) ; au-delà → 503 le temps que ça se libère
@@ -826,7 +829,7 @@ async def link_player_account(
     _check_write_rate(request)
     # Un compte déjà lié ne change plus une fois le challenge démarré (sinon l'historique de rang
     # serait remplacé) — sauf pour l'organisateur. Lier un compte encore absent reste possible.
-    if player.is_linked and challenge.status not in REGISTRATION_OPEN_STATUSES:
+    if player.is_linked and challenge.status not in RELINK_OPEN_STATUSES:
         if not check_admin_password(x_admin_password):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=RELINK_LOCKED_DETAIL)
     riot_id = body.riot_id.strip()

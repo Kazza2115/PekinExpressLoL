@@ -380,7 +380,7 @@ Protégée par le mot de passe `ADMIN_PASSWORD`. Une fois connecté :
 | Challenge | **🚀 Démarrer** | Passe le challenge « en cours » (il faut que chaque joueur soit dans un duo complet). |
 | Challenge | **🏁 Terminer** | Fige le classement. |
 | Challenge | **Réinitialiser** | Supprime duos, photos de rang et parties ; retour aux inscriptions. Case à cocher pour garder ou non les joueurs inscrits. |
-| Duos | **Ajouter un duo** / **Enregistrer** / **Supprimer** | Compose les duos (deux joueurs par duo), nom, couleur, fenêtre de dates optionnelle. **Former les duos au hasard** en un clic. Verrouillé une fois le challenge démarré. |
+| Duos | **Ajouter un duo** / **Enregistrer** / **Supprimer** | Compose les duos (deux joueurs par duo), nom, couleur, fenêtre de dates optionnelle. **Former les duos au hasard** en un clic (avant le départ seulement). Pendant le challenge, les duos restent modifiables (joueur arrivé en retard : il s'inscrit sur l'accueil, puis tu le places dans un duo ; ses LP le suivent). Figés une fois le challenge terminé. |
 | Joueurs | interrupteur **Actif** | Désactive un joueur (exclu du suivi, retiré de son duo) sans le supprimer. |
 | Joueurs | **Supprimer** | Supprime le joueur, ses photos de rang et ses parties. Définitif. |
 | Système | **Forcer un rafraîchissement** | Lance un cycle d'interrogation Riot immédiatement. |

@@ -363,7 +363,7 @@
   /* Le challenge figé (en cours / terminé) : les duos ne se modifient plus. */
   function teamsReadOnly() {
     const status = (state.challenge && state.challenge.status) || 'registration';
-    return status === 'running' || status === 'finished';
+    return status === 'finished'; // en cours : duos encore modifiables (joueur arrivé en retard)
   }
 
   function playerOptions(team, selectedId) {
@@ -384,12 +384,15 @@
     const readOnly = teamsReadOnly();
     const status = (state.challenge && state.challenge.status) || 'registration';
 
-    els.teamsNotice.hidden = !readOnly;
+    els.teamsNotice.hidden = !readOnly && status !== 'running';
     els.teamsNotice.textContent = status === 'running'
-      ? '🔒 Le challenge est en cours : les duos sont figés. Termine ou réinitialise le challenge pour les modifier.'
+      ? '⚠️ Le challenge est en cours : tu peux encore changer les duos (joueur arrivé en retard : il s’inscrit sur l’accueil, puis tu le places ici). Les LP et parties d’un joueur le suivent dans son nouveau duo.'
       : '🔒 Le challenge est terminé : les duos sont figés. Clique « Réinitialiser » (en gardant les joueurs inscrits) pour recomposer les duos et rouvrir les inscriptions.';
     els.teamsHelp.hidden = readOnly;
     els.teamsActions.hidden = readOnly;
+    // Tirage au hasard : seulement avant le départ (il remplace tous les duos, jokers compris)
+    const autoBtn = $('#btn-team-auto');
+    if (autoBtn) autoBtn.hidden = status === 'running';
     // Duos tirés puis vidés (joueurs supprimés un à un, duos supprimés…) : le statut reste « Duos formés »
     // et rien ne dit que l'accueil accepte encore les inscriptions ni que « Réinitialiser » rouvre tout.
     if (!readOnly && status === 'drawn' && !(state.players || []).some((p) => p.active !== false)) {

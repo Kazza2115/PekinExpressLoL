@@ -37,7 +37,7 @@ router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
 
 HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 NO_TEAMS_DETAIL = "Aucun duo : compose-les dans Admin → Duos."
-TEAMS_LOCKED_DETAIL = "Les duos ne peuvent plus changer pendant le challenge."
+TEAMS_LOCKED_DETAIL = "Le challenge est terminé : les duos sont figés (« Réinitialiser » pour recomposer)."
 TEAM_NOT_FOUND_DETAIL = "Duo introuvable."
 PLAYER_NOT_FOUND_DETAIL = "Joueur introuvable."
 # Taille d'un duo
@@ -185,9 +185,10 @@ def _parse_color(value: str) -> str:
 
 
 def _ensure_teams_editable(challenge: Challenge) -> None:
-    """La composition des duos est figée une fois le challenge démarré : en cours (`running`) comme
-    terminé (`finished`, le classement final ne doit plus bouger). « Réinitialiser » la rouvre."""
-    if challenge.status in (ChallengeStatus.RUNNING, ChallengeStatus.FINISHED):
+    """Les duos restent modifiables pendant le challenge (joueur arrivé en retard, duo à recomposer :
+    les LP d'un joueur le suivent dans son nouveau duo). Seul un challenge terminé les fige (le
+    classement final ne doit plus bouger) ; « Réinitialiser » les rouvre."""
+    if challenge.status == ChallengeStatus.FINISHED:
         raise _bad_request(TEAMS_LOCKED_DETAIL)
 
 
@@ -530,7 +531,7 @@ async def patch_team(
     if "window_end" in fields:
         team.window_end = parse_datetime(body.window_end, "window_end")
     if "player_ids" in fields and body.player_ids is not None:
-        # Nom, couleur et fenêtre restent modifiables en cours de challenge ; pas la composition
+        # Composition : modifiable jusqu'à la fin du challenge (nom, couleur, fenêtre : toujours)
         _ensure_teams_editable(challenge)
         _assign_players(session, team, list(body.player_ids))
     session.add(team)

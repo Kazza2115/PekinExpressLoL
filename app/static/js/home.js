@@ -97,7 +97,7 @@
           </div>
         </div>
         ${p.link_error && !p.is_linked ? `<div class="link-error">⚠ ${esc(p.link_error)}</div>` : ''}
-        ${!p.is_linked && (status === 'registration' || status === 'drawn') ? `
+        ${!p.is_linked && status !== 'finished' ? `
           <form class="slot-link-form" data-link-form="${p.id}">
             <input type="text" name="riot_id" placeholder="Pseudo#TAG" value="${esc(p.riot_id || '')}" aria-label="Riot ID de ${esc(p.display_name)}" autocapitalize="off" spellcheck="false">
             <button type="submit" class="btn btn-sm btn-primary">Lier mon compte</button>
@@ -145,15 +145,17 @@
 
   function renderLayout() {
     const status = (state.challenge && state.challenge.status) || 'registration';
-    // Même règle que l'API (REGISTRATION_OPEN_STATUSES = registration + drawn) : les duos tirés
-    // n'empêchent ni de s'inscrire ni de lier son compte tant que le challenge n'a pas démarré.
-    const registration = status === 'registration' || status === 'drawn';
+    // Même règle que l'API (REGISTRATION_OPEN_STATUSES = registration + drawn + running) : un
+    // joueur arrivé en retard peut s'inscrire et lier son compte jusqu'à la fin du challenge.
+    const registration = status !== 'finished';
     els.registerCard.hidden = !registration;
     if (els.demoCard) els.demoCard.hidden = !registration;
     els.side.hidden = !registration;
     els.root.classList.toggle('home-layout', registration);
     els.playersHint.textContent = registration
-      ? 'Chaque joueur lie son compte LoL pour être suivi.'
+      ? (status === 'running'
+        ? 'Challenge en cours : un joueur en retard peut encore s’inscrire, puis l’organisateur le place dans un duo.'
+        : 'Chaque joueur lie son compte LoL pour être suivi.')
       : 'Les inscriptions sont closes.';
   }
 

@@ -40,7 +40,7 @@ TEAM_STATS_NEW_KEYS = {
 POINT_KEYS = {"t", "absolute_lp", "tier", "rank", "lp"}
 SAM = ("Sam", "Sam#EUW")
 ZOE = ("Zoé", "Zoe#EUW")
-TEAMS_LOCKED = "Les duos ne peuvent plus changer pendant le challenge."
+TEAMS_LOCKED = "Le challenge est terminé : les duos sont figés (« Réinitialiser » pour recomposer)."
 
 
 # ---------------------------------------------------------------------------
@@ -264,11 +264,13 @@ def test_manual_teams_then_start(client: TestClient, admin_headers: dict) -> Non
     assert started["challenge"]["start_at"] is not None
     assert client.get("/api/state").json()["challenge"]["status"] == "running"
 
-    # Composition figée pendant le challenge ; nom / couleur toujours modifiables
-    assert _create_team(client, admin_headers, {}, expected=400)["detail"] == TEAMS_LOCKED
-    assert _patch_team(client, admin_headers, t1["id"], {"player_ids": [p1["id"], p3["id"]]}, 400)["detail"] == TEAMS_LOCKED
-    response = client.delete(f"/api/admin/teams/{t1['id']}", headers=admin_headers)
-    assert response.status_code == 400 and response.json()["detail"] == TEAMS_LOCKED
+    # Pendant le challenge, la composition reste modifiable (joueur arrivé en retard, duo à refaire)
+    late = _register(client, "Tardif", None)["player"]
+    extra = _create_team(client, admin_headers, {"player_ids": [late["id"]]})["team"]
+    swapped = _patch_team(client, admin_headers, t1["id"], {"player_ids": [p1["id"], p3["id"]]})["team"]
+    assert sorted(swapped["player_ids"]) == sorted([p1["id"], p3["id"]])  # Sam quitte les Pandas
+    _patch_team(client, admin_headers, t2["id"], {"player_ids": [p2["id"], p4["id"]]})
+    assert client.delete(f"/api/admin/teams/{extra['id']}", headers=admin_headers).status_code == 200
     assert _patch_team(client, admin_headers, t1["id"], {"name": "Les Loups"})["team"]["name"] == "Les Loups"
     assert _start(client, admin_headers, expected=400)["detail"] == "Le challenge est déjà en cours."
 
@@ -460,9 +462,16 @@ def test_duos_endpoint(client: TestClient, admin_headers: dict) -> None:
     assert TEAM_STATS_NEW_KEYS <= set(board["teams"][0])
 
 
-def test_registration_closed_after_start(client: TestClient, admin_headers: dict) -> None:
+def test_registration_stays_open_during_the_challenge(client: TestClient, admin_headers: dict) -> None:
     p1, _p2, _draw, _started = _setup_duo(client, admin_headers)
+    # Joueur arrivé en retard : il s'inscrit pendant le challenge, l'organisateur le place ensuite
     response = client.post("/api/players", json={"display_name": "Tardif"})
+    assert response.status_code == 201, response.text
+    # … mais un compte déjà lié ne change pas sans l'organisateur pendant le challenge
+    response = client.post(f"/api/players/{p1['id']}/link", json={"riot_id": "Autre Compte#EUW"})
+    assert response.status_code == 403
+    _admin_post(client, admin_headers, "/api/admin/challenge/finish")
+    response = client.post("/api/players", json={"display_name": "Trop tard"})
     assert response.status_code == 400
     assert response.json()["detail"] == "Les inscriptions sont closes."
     # Un compte déjà lié ne change plus sans l'organisateur (l'historique de rang serait remplacé)

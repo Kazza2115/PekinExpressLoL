@@ -151,8 +151,16 @@ def test_home_keeps_registration_open_while_the_api_accepts_it(status: str) -> N
 
 
 @pytest.mark.skipif(NODE is None, reason="node introuvable : test du front ignoré")
-@pytest.mark.parametrize("status", ["running", "finished"])
-def test_home_closes_registration_once_the_challenge_has_started(status: str) -> None:
+def test_home_keeps_registration_open_during_the_challenge_for_late_players() -> None:
+    out = _render_home("running")
+    assert out["registerHidden"] is False and out["homeLayout"] is True, out
+    assert "en retard" in out["playersHint"], out["playersHint"]
+    assert out["linkForms"] == 1 and "Lier mon compte" in out["slotsHtml"], out["slotsHtml"]
+
+
+@pytest.mark.skipif(NODE is None, reason="node introuvable : test du front ignoré")
+@pytest.mark.parametrize("status", ["finished"])
+def test_home_closes_registration_once_the_challenge_is_over(status: str) -> None:
     out = _render_home(status)
     assert out["registerHidden"] is True and out["sideHidden"] is True, out
     assert out["homeLayout"] is False, out
