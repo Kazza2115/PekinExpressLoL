@@ -36,8 +36,12 @@ LP nets = valeur absolue du rang actuel − valeur absolue du rang au début du 
 ```
 
 Passer de Gold IV 80 LP à Gold III 10 LP fait donc **+30 LP nets**, promotion comprise.
-Un joueur non classé (« Unranked ») compte pour 0. Les LP nets d'un duo = somme de ses deux
-joueurs. En cas d'égalité, le winrate puis le nombre de parties départagent.
+**Parties de placement** : un joueur non classé au début compte à partir du **premier rang
+obtenu** (placé Silver I 60 LP, puis Gold IV 10 LP → **+50 LP nets**) ; ses parties de placement
+comptent comme parties (victoires, quota du jour). Tant qu'il n'a pas de rang, il est à 0.
+Les LP nets d'un duo = somme de ses deux joueurs (une victoire à deux à +20 chacun = +40 pour le
+duo), mais une partie jouée ensemble ne compte qu'**une** victoire ou défaite pour le duo. En cas
+d'égalité, le winrate puis le nombre de parties départagent.
 
 ### Programmer le début et la fin
 

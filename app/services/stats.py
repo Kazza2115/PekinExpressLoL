@@ -982,6 +982,8 @@ def compute_player_stats(
     - rang affiché = dernier snapshot de la file ;
     - référence = dernier snapshot pris avant ou au début de la fenêtre, sinon le premier après ;
     - LP nets = absolu(dernier snapshot ≤ fin de fenêtre) − absolu(référence), 0 si l'un est Unranked ;
+      joueur non classé au départ (placements) : la référence est son premier rang obtenu (placé
+      Silver I 60 LP puis Gold IV 10 LP → +50 LP) ;
     - parties hors fenêtre et remakes exclus des compteurs, moyennes, séries et champion favori.
     """
     now_utc = as_utc(now)
@@ -1006,6 +1008,22 @@ def compute_player_stats(
                 baseline = before[-1]
             else:
                 baseline = queue_snapshots[0]  # premier snapshot après le début
+    if baseline is not None and _snapshot_absolute_lp(baseline) is None:
+        # Non classé au départ (parties de placement) : les LP comptent à partir du premier rang
+        # obtenu, pris avant la fin de la fenêtre (avec la même grâce que le snapshot de fin)
+        limit_end = end_utc + WINDOW_END_GRACE if end_utc is not None else None
+        baseline_index = next(i for i, snap in enumerate(queue_snapshots) if snap is baseline)
+        first_ranked = next(
+            (
+                snap
+                for snap in queue_snapshots[baseline_index + 1 :]
+                if _snapshot_absolute_lp(snap) is not None
+                and (limit_end is None or as_utc(snap.captured_at) <= limit_end)  # type: ignore[operator]
+            ),
+            None,
+        )
+        if first_ranked is not None:
+            baseline = first_ranked
 
     # Snapshot de fin : le dernier pris avant la fin de fenêtre (classement figé après `window_end`),
     # avec une courte période de grâce : les résultats Riot arrivent 1 à 3 min après la partie.

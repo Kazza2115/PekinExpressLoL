@@ -485,19 +485,36 @@ class TestComputePlayerStats:
         assert s.last_game_at is None
         assert s.live is None
 
-    def test_unranked_snapshot_gives_zero_lp_net(self):
+    def test_placements_count_from_the_first_rank_obtained(self):
+        # Non classé au départ ; placé Silver I 60 LP après la 1re partie, puis Gold IV 10 LP → +50 LP
         player = make_player()
         snapshots = [
             snap(utc(2026, 10, 9, 23, 0), None, None, 0),
-            snap(utc(2026, 10, 10, 10, 0), "GOLD", "IV", 10),
+            snap(utc(2026, 10, 10, 10, 0), "SILVER", "I", 60),
+            snap(utc(2026, 10, 10, 12, 0), "GOLD", "IV", 10),
         ]
+        participants = [
+            game(utc(2026, 10, 10, 9, 55), win=True),  # placement
+            game(utc(2026, 10, 10, 11, 0), win=True),
+            game(utc(2026, 10, 10, 11, 50), win=True),
+        ]
+        s = compute_player_stats(
+            player=player, snapshots=snapshots, participants=participants,
+            window_start=WINDOW_START, window_end=None, games_limit=10, tz=PARIS, now=NOW,
+        )
+        assert s.baseline_absolute_lp == absolute_lp("SILVER", "I", 60)
+        assert s.absolute_lp == absolute_lp("GOLD", "IV", 10)
+        assert s.lp_net == 50
+        assert s.games == 3 and s.wins == 3  # la partie de placement compte comme partie
+
+    def test_still_unranked_gives_zero_lp_net(self):
+        player = make_player()
+        snapshots = [snap(utc(2026, 10, 9, 23, 0), None, None, 0), snap(utc(2026, 10, 10, 10, 0), None, None, 0)]
         s = compute_player_stats(
             player=player, snapshots=snapshots, participants=[],
             window_start=WINDOW_START, window_end=None, games_limit=10, tz=PARIS, now=NOW,
         )
-        assert s.baseline_absolute_lp is None
-        assert s.absolute_lp == 1210
-        assert s.lp_net == 0
+        assert s.baseline_absolute_lp is None and s.lp_net == 0
 
     def test_flex_queue(self):
         s = compute(queue=Queue.FLEX)
