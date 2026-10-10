@@ -361,7 +361,7 @@
         stat('Meilleure série', `<span class="lp-pos">${int(s.best_win_streak)} V</span>`, 'victoires d’affilée'),
         stat('Pire série', `<span class="lp-neg">${int(s.best_loss_streak)} D</span>`, 'défaites d’affilée'),
         stat('Défaites par abandon', int(s.surrenders), ofGames(s.surrenders) || 'son équipe a voté le /ff'),
-        stat('Victoires par abandon adverse', int(s.surrender_wins), ofGames(s.surrender_wins) || 'pas un abandon pour toi'),
+        stat('Victoires par abandon adverse', int(s.surrender_wins), ofGames(s.surrender_wins) || 'pas compté comme abandon'),
         stat("Parties aujourd'hui", `${int(s.games_today || 0)} / ${isNum(limit) ? limit : DASH}`, `<span class="progress pf-progress ${isNum(limit) && s.games_today >= limit ? 'done' : ''}"><span style="width:${isNum(limit) && limit > 0 ? clampPct(((s.games_today || 0) / limit) * 100) : 0}%"></span></span>`),
       ]),
     ].join('');
@@ -679,8 +679,8 @@
     // Riot marque l'abandon pour les deux équipes : seule l'équipe perdante a abandonné
     if (m.surrendered) {
       tags.push(m.win
-        ? '<span class="pf-tag is-ff-win" title="L\'équipe adverse a abandonné : victoire, ce n\'est pas un abandon pour toi">🏳️ Abandon adverse</span>'
-        : '<span class="pf-tag is-ff" title="Ton équipe a abandonné (/ff)">🏳️ Abandon</span>');
+        ? '<span class="pf-tag is-ff-win" title="L\'équipe adverse a abandonné : victoire, pas comptée comme abandon">🏳️ Abandon adverse</span>'
+        : '<span class="pf-tag is-ff" title="Son équipe a abandonné (/ff)">🏳️ Abandon</span>');
     }
     if (m.over_quota) tags.push('<span class="pf-tag is-ff" title="Au-delà des parties autorisées ce jour-là : ni LP ni stats">⛔ Hors quota, ne compte pas</span>');
     const facts = [];

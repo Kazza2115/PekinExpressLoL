@@ -16,7 +16,12 @@ httpx, Jinja2, JS vanilla, CSS maison (pas de Tailwind), Chart.js vendored.
 - LP nets d'un joueur = `absolute_lp(dernier snapshot) − absolute_lp(snapshot de référence)`,
   le snapshot de référence étant le dernier snapshot pris **avant ou au** début de la fenêtre,
   sinon le premier snapshot après. Unranked → `None` (affiché « Unranked », LP nets = 0).
-- Les remakes (durée < 5 min, `MatchParticipant.is_remake`) sont exclus des stats.
+- Les remakes (`MatchParticipant.is_remake`, voir `is_remake_game` : durée < 5 min, ou drapeau Riot
+  `gameEndedInEarlySurrender` avant 15 min) sont exclus des stats et du quota quotidien ;
+  `bootstrap.reclassify_remakes` reclasse au démarrage les parties enregistrées avant le drapeau.
+- Abandons : `surrendered` (`gameEndedInSurrender`) est vrai pour les 10 joueurs ; seule l'équipe
+  perdante a abandonné (`stats.surrendered_by_us` / `surrendered_by_them` → `surrenders` /
+  `surrender_wins`, parties jouées ensemble comptées une fois pour le duo).
 - « Avertir les joueurs quand un duo lance une partie » : événement `live_start` → SSE
   (toast + Notification navigateur) + webhook Discord optionnel.
 
@@ -28,7 +33,8 @@ httpx, Jinja2, JS vanilla, CSS maison (pas de Tailwind), Chart.js vendored.
   propriétés `tz` (ZoneInfo), `platform_host`, `region_host`, `has_api_key`.
 - `app/db/models.py` — `Challenge, Team, Player, RankSnapshot, Match, MatchParticipant`,
   enums `ChallengeStatus`, `Queue`, constantes `QUEUE_IDS`, `QUEUE_TYPES`, `QUEUE_BY_ID`,
-  `QUEUE_BY_TYPE`, `REMAKE_MAX_DURATION_S`, helper `utcnow()`.
+  `QUEUE_BY_TYPE`, `REMAKE_MAX_DURATION_S`, `REMAKE_FLAG_MAX_DURATION_S`, helpers `utcnow()`,
+  `is_remake_game(duration_s, participants)`.
 - `app/db/session.py` — `get_engine(), set_engine(), init_db(), get_session()` (dépendance
   FastAPI), `session_scope()` (context manager), `as_utc(dt)`.
   ⚠️ SQLite renvoie des datetimes **naïfs** : toujours passer par `as_utc()` avant de comparer.
@@ -222,7 +228,7 @@ class Poller:
    Si aucun snapshot n'existe encore pour la queue → en insérer un (référence).
 2. Match-V5 IDs (queue 420, + 440 si flex) depuis `challenge.start_at` (si running) sinon 20 derniers ;
    pour chaque ID absent de `Match` → `get_match`, insérer `Match` + `MatchParticipant` pour **chaque**
-   joueur du challenge présent dans la partie (lookup par puuid). `is_remake` si `gameDuration < 300`.
+   joueur du challenge présent dans la partie (lookup par puuid). `is_remake = is_remake_game(gameDuration, participants)`.
    `lp_change` = diff `absolute_lp` entre le snapshot juste avant et juste après `game_start + duration`
    si disponibles (sinon None ; sera recalculé au poll suivant par `backfill_lp_changes`). Publier `match_recorded`.
 3. Spectator-V5 **une seule fois par joueur par cycle** → `state.live_games` : nouvelle partie → publier

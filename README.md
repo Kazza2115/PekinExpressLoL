@@ -66,7 +66,15 @@ le récupère).
 ### Ce qui compte, ce qui ne compte pas
 
 - Seules les parties **Ranked Solo/Duo** comptent (la **Flex** peut être ajoutée en option).
-- Les **remakes** (parties de moins de 5 minutes) sont **exclus** des statistiques.
+- Les **remakes** sont **exclus** des statistiques et des **parties du jour** (ils ne prennent pas
+  de place dans le quota). Un remake, c'est une partie de moins de 5 minutes, ou une partie que
+  Riot marque comme remake (`gameEndedInEarlySurrender`) avant 15 minutes : un remake voté tard
+  est donc reconnu. Au démarrage, le site revérifie les parties déjà enregistrées.
+- **Abandons** : Riot marque « terminée par abandon » pour les deux équipes, mais seule l'équipe
+  perdante a abandonné. Une **victoire par abandon adverse** n'est donc pas un abandon pour le
+  joueur : les stats distinguent les **défaites par abandon** et les **victoires par abandon
+  adverse** (fiche joueur, comparatif des duos, fil des parties, Discord). Dans un duo, une
+  partie jouée ensemble ne compte qu'une fois.
 - Les LP d'une partie terminée **avant le début ou après la fin** ne comptent pas, même si Riot
   ne les publie qu'après coup : les compteurs de victoires et défaites de Riot disent combien
   de parties chaque relevé de rang couvre, et la part des parties hors des heures est retirée.
@@ -279,7 +287,7 @@ déjà enregistré.
 
 La page **Rangs** (`/rankings`) classe les joueurs par rang actuel : podium, places gagnées
 ou perdues depuis le départ, pic de rang, saison, duos par rang moyen et répartition par
-palier. La page **Duos** se termine par un **comparatif des duos** sur 26 statistiques
+palier. La page **Duos** se termine par un **comparatif des duos** sur 27 statistiques
 (meilleur duo en doré, pire en rouge).
 
 La page se met à jour toute seule (flux d'événements), avec un rechargement de secours

@@ -46,8 +46,8 @@ REMAKE_FLAG_MAX_DURATION_S = 15 * 60
 def is_remake_game(duration_s: int, participants: Iterable[Any] = ()) -> bool:
     """Remake (« partie annulée ») : très courte, ou marquée comme telle par Riot avant 15 min.
 
-    `participants` : les 10 participants Match-V5 (dict). Un remake ne compte ni dans les stats,
-    ni dans les parties du jour, ni dans les LP.
+    `participants` : les 10 participants Match-V5 (dict). Un remake ne compte ni dans les stats
+    ni dans les parties du jour.
     """
     if duration_s < REMAKE_MAX_DURATION_S:
         return True
