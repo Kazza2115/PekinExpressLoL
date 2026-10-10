@@ -21,12 +21,24 @@ from sqlmodel import Session, col, select
 from app.api.deps import get_challenge, require_admin
 from app.api.serializers import challenge_to_dict, player_public, team_public
 from app.config import get_settings, reload_settings
-from app.db.models import Challenge, ChallengeStatus, Joker, Match, MatchParticipant, Player, Queue, RankSnapshot, Team, utcnow
+from app.db.models import (
+    Challenge,
+    ChallengeStatus,
+    Joker,
+    Match,
+    MatchParticipant,
+    Player,
+    Queue,
+    RankSnapshot,
+    Team,
+    game_end_of,
+    utcnow,
+)
 from app.db.session import as_utc, get_session
 from app.services.bootstrap import apply_default_schedule, parse_fr_datetime
 from app.events import bus
 from app.riot import get_api, reset_api
-from app.services import gifs, notifications
+from app.services import double_lp, gifs, notifications
 from app.services.announce import announce_start_if_due, announce_start_now, announce_status
 from app.services.draw import perform_draw, team_identity
 from app.state import state
@@ -80,6 +92,10 @@ class TeamPatch(BaseModel):
     window_start: str | None = None
     window_end: str | None = None
     player_ids: list[int] | None = None  # remplace la composition (0 à 2 joueurs)
+
+
+class DoubleLpPatch(BaseModel):
+    double_lp: bool  # True : la moitié du gain est retirée des LP nets ; False : victoire normale
 
 
 class PlayerPatch(BaseModel):
@@ -578,6 +594,87 @@ async def cancel_joker(joker_id: EntityId, session: Session = Depends(get_sessio
     session.commit()
     bus.publish("joker_cancelled", {"joker_id": joker_id, "team_id": team_id})
     return {"ok": True, "joker_id": joker_id, "team_id": team_id}
+
+
+DOUBLE_LP_LIST_LIMIT = 200
+
+
+@router.get("/double-lp")
+async def list_double_lp(session: Session = Depends(get_session)) -> dict[str, Any]:
+    """Victoires aux LP connus (plus récentes d'abord) : double LP repérés et victoires normales,
+    pour corriger la détection (`services.double_lp`) à la main."""
+    wins = session.exec(
+        select(MatchParticipant)
+        .where(
+            MatchParticipant.win == True,  # noqa: E712
+            MatchParticipant.is_remake == False,  # noqa: E712
+            col(MatchParticipant.lp_change).is_not(None),
+            col(MatchParticipant.lp_change) > 0,
+        )
+        .order_by(col(MatchParticipant.game_start).desc(), col(MatchParticipant.id).desc())
+    ).all()
+    players = {p.id: p for p in session.exec(select(Player)).all() if p.id is not None}
+    teams = {t.id: t for t in session.exec(select(Team)).all() if t.id is not None}
+    by_player: dict[int, list[MatchParticipant]] = {}
+    for win in wins:
+        by_player.setdefault(win.player_id, []).append(win)
+    items: list[dict[str, Any]] = []
+    for win in wins[:DOUBLE_LP_LIST_LIMIT]:
+        player = players.get(win.player_id)
+        team = teams.get(player.team_id) if player is not None and player.team_id is not None else None
+        usual = double_lp.usual_gain(
+            int(other.lp_change)  # type: ignore[arg-type]
+            for other in by_player.get(win.player_id, [])
+            if other.id != win.id and other.queue == win.queue and other.double_lp is not True
+        )
+        items.append(
+            {
+                "id": win.id,
+                "match_id": win.match_id,
+                "player_id": win.player_id,
+                "display_name": player.display_name if player is not None else f"Joueur {win.player_id}",
+                "team_name": team.name if team is not None else None,
+                "team_color": team.color if team is not None else None,
+                "champion_name": win.champion_name,
+                "queue": win.queue.value if isinstance(win.queue, Queue) else win.queue,
+                "game_end": game_end_of(win).isoformat(),
+                "lp_change": win.lp_change,
+                "usual_gain": round(usual, 1) if usual is not None else None,
+                "double_lp": win.double_lp,
+                "manual": bool(win.double_lp_manual),
+                "lp_bonus": double_lp.lp_bonus(win),
+            }
+        )
+    return {
+        "items": items,
+        "flagged": sum(1 for win in wins if win.double_lp),
+        "total": len(wins),
+        "ratio": double_lp.DOUBLE_RATIO,
+    }
+
+
+@router.patch("/double-lp/{participant_id}")
+async def patch_double_lp(
+    body: DoubleLpPatch, participant_id: EntityId, session: Session = Depends(get_session)
+) -> dict[str, Any]:
+    """Décision de l'organisateur : double LP ou victoire normale (plus jamais revue par la détection)."""
+    participant = session.get(MatchParticipant, participant_id)
+    if participant is None or not participant.win or participant.is_remake:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Victoire introuvable.")
+    participant.double_lp = body.double_lp
+    participant.double_lp_manual = True
+    session.add(participant)
+    session.commit()
+    bus.publish(
+        "double_lp_changed",
+        {
+            "match_id": participant.match_id,
+            "player_id": participant.player_id,
+            "double_lp": body.double_lp,
+            "lp_bonus": double_lp.lp_bonus(participant),
+        },
+    )
+    return {"ok": True, "id": participant_id, "double_lp": body.double_lp, "lp_bonus": double_lp.lp_bonus(participant)}
 
 
 @router.patch("/players/{player_id}")

@@ -27,6 +27,8 @@
     btnTeamAuto: $('#btn-team-auto'),
     players: $('#players-admin'),
     playersCount: $('#players-admin-count'),
+    doubleLp: $('#double-lp-admin'),
+    doubleLpCount: $('#double-lp-count'),
     sysStats: $('#sys-stats'),
     sysErrors: $('#sys-errors'),
     sysMode: $('#sys-mode'),
@@ -144,6 +146,7 @@
     renderPlayers();
     renderSystem(state.last_poll);
     renderDemoPlayersNotice();
+    loadDoubleLp();
   }
 
   /* Joueurs créés en mode démo (identifiants inventés) alors que le site est en mode réel :
@@ -605,6 +608,63 @@
   }
 
   /* ------------------------------------------------------------------ */
+  /* Double LP (Aegis of Valor) : détection automatique, corrigeable      */
+  /* ------------------------------------------------------------------ */
+  async function loadDoubleLp() {
+    if (!els.doubleLp) return;
+    let data;
+    try {
+      data = await admin(() => api('/api/admin/double-lp', { admin: true }));
+    } catch (err) {
+      els.doubleLp.innerHTML = `<tr><td colspan="5" class="muted">${esc(err.message)}</td></tr>`;
+      return;
+    }
+    if (data === undefined) return;
+    renderDoubleLp(data);
+  }
+
+  function renderDoubleLp(data) {
+    const items = (data && data.items) || [];
+    els.doubleLpCount.textContent = data && data.total
+      ? `${data.flagged || 0} double LP sur ${data.total} victoire${data.total > 1 ? 's' : ''}`
+      : '';
+    if (!items.length) {
+      els.doubleLp.innerHTML = '<tr><td colspan="5" class="muted">Aucune victoire aux LP connus pour l\'instant.</td></tr>';
+      return;
+    }
+    els.doubleLp.innerHTML = items.map((w) => {
+      const status = w.double_lp
+        ? `<span class="chip chip-gold" title="La moitié du gain est retirée des LP nets">⚡ −${w.lp_bonus} LP</span>`
+        : (w.double_lp === null ? '<span class="muted" title="Pas encore assez de victoires pour connaître son gain habituel">à revoir</span>' : '<span class="muted">normale</span>');
+      const how = w.manual ? '<span class="muted" title="Décision de l\'organisateur">· manuel</span>' : (w.double_lp ? '<span class="muted">· auto</span>' : '');
+      return `<tr class="${w.double_lp ? 'is-flagged' : ''}">
+        <td><div class="cell-player">${w.team_color ? `<span class="swatch" style="--team-color:${esc(w.team_color)}"></span>` : ''}<a href="/player/${w.player_id}#match-${esc(w.match_id)}">${esc(w.display_name)}</a></div></td>
+        <td>${esc(w.champion_name || '')}<div class="muted">${esc(App.formatDateTime(w.game_end))}</div></td>
+        <td class="num">${App.lpHtml(w.lp_change)}</td>
+        <td class="num">${w.usual_gain === null || w.usual_gain === undefined ? '<span class="muted">—</span>' : `+${esc(String(Math.round(w.usual_gain)))} LP`}</td>
+        <td><div class="cell-player"><label class="switch" title="${w.double_lp ? 'Compter comme une victoire normale' : 'Marquer comme double LP (moitié du gain retirée)'}"><input type="checkbox" data-double-lp="${w.id}" ${w.double_lp ? 'checked' : ''}><span class="track"></span></label>${status}${how}</div></td>
+      </tr>`;
+    }).join('');
+
+    $$('[data-double-lp]', els.doubleLp).forEach((input) => input.addEventListener('change', async () => {
+      const id = input.dataset.doubleLp;
+      const value = input.checked;
+      input.disabled = true;
+      try {
+        const r = await admin(() => api(`/api/admin/double-lp/${id}`, { method: 'PATCH', admin: true, body: { double_lp: value } }));
+        if (r === undefined) { input.checked = !value; return; }
+        toast(value ? `Double LP : ${r.lp_bonus} LP retirés des LP nets.` : 'Victoire normale : tous ses LP comptent.', { type: 'success', timeout: 4000 });
+        await loadDoubleLp();
+      } catch (err) {
+        input.checked = !value;
+        toast(err.message, { type: 'error' });
+      } finally {
+        input.disabled = false;
+      }
+    }));
+  }
+
+  /* ------------------------------------------------------------------ */
   /* Système                                                              */
   /* ------------------------------------------------------------------ */
   function stat(label, value, sub) {
@@ -875,6 +935,7 @@
     teams_changed: () => { if (!els.panel.hidden) load(); },
     joker_used: () => { if (!els.panel.hidden) load(); },
     joker_cancelled: () => { if (!els.panel.hidden) load(); },
+    double_lp: () => { if (!els.panel.hidden) loadDoubleLp(); },
     team_updated: () => { if (!els.panel.hidden) load(); },
     challenge_started: () => { if (!els.panel.hidden) load(); },
     challenge_finished: () => { if (!els.panel.hidden) load(); },

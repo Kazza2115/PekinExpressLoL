@@ -70,6 +70,8 @@ DEMO_RUNES_BY_POSITION: dict[str, list[tuple[int, int, int]]] = {
 
 # Probabilité qu'une partie normale se termine par un abandon (gameEndedInSurrender)
 SURRENDER_CHANCE = 0.15
+# Probabilité qu'une victoire rapporte le double de LP (« Aegis of Valor », autofill)
+AEGIS_CHANCE = 0.1
 # Probabilité qu'un autre joueur du challenge (libre) rejoigne la partie qui démarre, et qu'il
 # soit alors dans la même équipe (sinon : en face)
 SHARED_GAME_CHANCE = 0.3
@@ -206,6 +208,8 @@ class DemoRiotClient:
         self.start_chance = start_chance
         self.game_duration_range = game_duration_range
         self.rng = rng or random.Random()
+        # Tirage séparé pour l'Aegis : n'altère pas la suite aléatoire du reste de la simulation
+        self._aegis_rng = random.Random(hash(self.rng.getstate()))
         self.remake_chance = remake_chance
         self.win_chance = win_chance
         self.request_count = 0
@@ -376,6 +380,8 @@ class DemoRiotClient:
         if current is None:
             return
         delta = self.rng.randint(14, 26) * (1 if win else -1)
+        if win and self._aegis_rng.random() < AEGIS_CHANCE:
+            delta *= 2  # double LP (« Aegis of Valor »)
         player.tier, player.rank, player.lp = rank_from_absolute_lp(current + delta)
 
     def _trim_matches(self) -> None:

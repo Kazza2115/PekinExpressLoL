@@ -15,6 +15,7 @@ from typing import Any
 
 from app.db.models import MatchParticipant, Player, Queue, RankSnapshot, Team, game_end_of
 from app.db.session import as_utc
+from app.services.double_lp import counted_lp, lp_bonus
 from app.state import LiveGameState
 
 # Tiers dans l'ordre croissant ; chaque tier non‑apex vaut 4 divisions × 100 LP = 400 LP
@@ -398,6 +399,9 @@ class PlayerStats:
     over_quota_match_ids: list[str] = field(default_factory=list)
     # LP de parties jouées avant le début ou après la fin, vus dans les relevés des bords (retirés)
     lp_outside_window: int = 0
+    # Double LP (« Aegis of Valor », `services.double_lp`) : bonus retirés de `lp_net`
+    double_lp_games: int = 0
+    lp_double_bonus: int = 0
     # Joker du duo : limite du jour (10, ou 13 avec le joker) et jours où il a servi
     games_limit_today: int = 0
     joker_today: bool = False
@@ -600,7 +604,7 @@ def _by_day(games: list[MatchParticipant], tz: tzinfo, games_limit: int) -> list
     return [
         {
             **_split_entry(rows, day=day, label=fr_day_label(day)),
-            "lp_change": _known_sum([p.lp_change for p in rows]),
+            "lp_change": _known_sum([counted_lp(p) for p in rows]),
             "limit": int(games_limit),
         }
         for day, rows in sorted(groups.items())
@@ -642,7 +646,7 @@ def _records(games: list[MatchParticipant], version: str | None, ddragon) -> dic
         ),
         "most_vision": (lambda p: p.vision_score, lambda p, v: f"Score de vision {round(v)}", False),
         "biggest_lp_gain": (
-            lambda p: p.lp_change if p.lp_change is not None and p.lp_change > 0 else None,
+            lambda p: counted_lp(p) if (counted_lp(p) or 0) > 0 else None,
             lambda p, v: format_signed_lp(v),
             False,
         ),
@@ -712,9 +716,10 @@ def game_profile(
 
     durations = [int(p.game_duration) for p in games]
     multikills = {attr: total(attr) for attr in ("double_kills", "triple_kills", "quadra_kills", "penta_kills")}
-    known_lp = [p.lp_change for p in games if p.lp_change is not None]
-    win_lp = [p.lp_change for p in games if p.win and p.lp_change is not None]
-    loss_lp = [p.lp_change for p in games if not p.win and p.lp_change is not None]
+    # LP comptés pour le challenge : bonus de double LP retiré (`services.double_lp`)
+    known_lp = [counted_lp(p) for p in games if p.lp_change is not None]
+    win_lp = [counted_lp(p) for p in games if p.win and p.lp_change is not None]
+    loss_lp = [counted_lp(p) for p in games if not p.win and p.lp_change is not None]
     blue = [p for p in games if p.team_side == BLUE_SIDE]
     red = [p for p in games if p.team_side == RED_SIDE]
     blue_wins = sum(1 for p in blue if p.win)
@@ -1092,7 +1097,10 @@ def compute_player_stats(
                 start=start_utc,
                 end=end_utc,
             )
-    lp_net = lp_net_all_games - lp_over - lp_outside
+    # Double LP : la moitié du gain de ces victoires est un bonus Riot, retiré des LP nets
+    lp_double_bonus = sum(lp_bonus(p) for p in games_in_window)
+    double_lp_games = sum(1 for p in games_in_window if lp_bonus(p) > 0)
+    lp_net = lp_net_all_games - lp_over - lp_outside - lp_double_bonus
     over_per_day: dict[str, int] = {}
     for p in games_over:
         key = day_key(game_end_of(p), tz)
@@ -1246,6 +1254,8 @@ def compute_player_stats(
         lp_over_quota_approx=lp_over_approx,
         over_quota_match_ids=[p.match_id for p in games_over],
         lp_outside_window=lp_outside,
+        double_lp_games=double_lp_games,
+        lp_double_bonus=lp_double_bonus,
         games_limit_today=int(games_limit) + (int(joker_today[1]) if joker_today is not None else 0),
         joker_today=joker_today is not None,
         joker_days=sorted((jokers or {}).keys()),
@@ -1296,7 +1306,7 @@ def compute_champion_stats(games: list[MatchParticipant], version: str | None = 
                 avg_assists=round(statistics.fmean(p.assists for p in rows), 1),
                 avg_damage=round(statistics.fmean(p.damage_to_champions for p in rows)),
                 avg_kill_participation=_mean_or_none([p.kill_participation for p in rows], 1),
-                lp_change=_known_sum([p.lp_change for p in rows]),
+                lp_change=_known_sum([counted_lp(p) for p in rows]),
                 last_played=max(game_end_of(p) for p in rows).isoformat(),
             )
         )
@@ -1375,6 +1385,9 @@ class TeamStats:
     # Parties au-delà du quota quotidien (non comptées) et leurs LP
     games_over_quota: int = 0
     lp_over_quota: int = 0
+    # Double LP repérés chez les deux joueurs et bonus retirés des LP nets
+    double_lp_games: int = 0
+    lp_double_bonus: int = 0
     # Joker (rempli par `app.api.leaderboard.joker_summary`)
     jokers_total: int = 0
     jokers_used: int = 0
@@ -1521,6 +1534,8 @@ def compute_team_stats(
         else None,
         games_over_quota=sum(p.games_over_quota for p in players),
         lp_over_quota=sum(p.lp_over_quota for p in players),
+        double_lp_games=sum(p.double_lp_games for p in players),
+        lp_double_bonus=sum(p.lp_double_bonus for p in players),
     )
 
 

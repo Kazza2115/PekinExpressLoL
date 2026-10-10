@@ -15,6 +15,7 @@ from urllib.parse import quote
 from app.db.models import Challenge, Match, MatchParticipant, Player, RankSnapshot, Team, game_end_of
 from app.db.session import as_utc
 from app.riot import ddragon
+from app.services.double_lp import lp_bonus
 from app.services.stats import format_rank, kda, rank_color
 
 OPGG_BASE = "https://www.op.gg/summoners/euw"
@@ -196,6 +197,10 @@ def match_row(
         "damage_to_champions": participant.damage_to_champions,
         "vision_score": participant.vision_score,
         "lp_change": participant.lp_change,
+        # Double LP (Aegis of Valor) : `lp_bonus` LP retirés des LP nets (0 sinon)
+        "double_lp": bool(participant.double_lp),
+        "double_lp_manual": bool(participant.double_lp_manual),
+        "lp_bonus": lp_bonus(participant),
         "is_remake": participant.is_remake,
         "opgg_url": opgg_url(player),
         # Détails Match-V5 (None sur les parties antérieures à ces colonnes, sans JSON à rattraper)

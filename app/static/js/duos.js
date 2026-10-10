@@ -438,6 +438,8 @@
   const refresh = App.debounce(load, 1000);
   App.connectEvents({
     match_recorded: refresh,
+    double_lp: refresh,
+    double_lp_changed: refresh,
     rank_changed: refresh,
     poll_done: refresh,
     live_start: refresh,

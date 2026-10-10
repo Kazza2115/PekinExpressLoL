@@ -343,9 +343,14 @@
         stat('Contrôle infligé / partie', dur(s.avg_cc_time), 'temps de CC sur les ennemis'),
       ]),
       group('📈', 'LP', [
-        stat('LP nets', lpSpan(s.lp_net), s.games_over_quota
-          ? `${int(s.games_over_quota)} partie${s.games_over_quota > 1 ? 's' : ''} hors quota non comptée${s.games_over_quota > 1 ? 's' : ''} (${signed(s.lp_over_quota)} LP${s.lp_over_quota_approx ? ' environ' : ''})`
-          : 'depuis le début du challenge'),
+        stat('LP nets', lpSpan(s.lp_net), [
+          s.games_over_quota
+            ? `${int(s.games_over_quota)} partie${s.games_over_quota > 1 ? 's' : ''} hors quota non comptée${s.games_over_quota > 1 ? 's' : ''} (${signed(s.lp_over_quota)} LP${s.lp_over_quota_approx ? ' environ' : ''})`
+            : '',
+          s.lp_double_bonus
+            ? `⚡ ${int(s.lp_double_bonus)} LP de double LP retirés (${plural(s.double_lp_games, 'victoire', 'victoires')})`
+            : '',
+        ].filter(Boolean).join(' · ') || 'depuis le début du challenge'),
         stat('LP / partie', lpSpan(s.lp_per_game, 1), isNum(s.lp_known_games) ? `${plural(s.lp_known_games, 'partie', 'parties')} avec LP connus` : ''),
         stat('Gain moyen', lpSpan(s.avg_lp_win, 1), 'par victoire'),
         stat('Perte moyenne', lpSpan(s.avg_lp_loss, 1), 'par défaite'),
@@ -682,6 +687,7 @@
         ? '<span class="pf-tag is-ff-win" title="L\'équipe adverse a abandonné : victoire, pas comptée comme abandon">🏳️ Abandon adverse</span>'
         : '<span class="pf-tag is-ff" title="Son équipe a abandonné (/ff)">🏳️ Abandon</span>');
     }
+    if (m.lp_bonus > 0 && !m.over_quota) tags.push(`<span class="pf-tag is-double-lp" title="Riot a doublé les LP de cette victoire (Aegis of Valor, autofill)${m.double_lp_manual ? ' · confirmé par l\'organisateur' : ''} : la moitié est retirée des LP nets">⚡ Double LP · ${int(m.lp_bonus)} LP retirés</span>`);
     if (m.over_quota) tags.push('<span class="pf-tag is-ff" title="Au-delà des parties autorisées ce jour-là : ni LP ni stats">⛔ Hors quota, ne compte pas</span>');
     const facts = [];
     if (isNum(m.damage_share)) facts.push(`<span class="pf-m-fact" title="Part des dégâts de l'équipe">${miniBar(m.damage_share, 'is-red')}${pct(m.damage_share)} dégâts</span>`);
@@ -836,6 +842,8 @@
   const refresh = App.debounce(() => load().catch((e) => console.warn(e)), 1000);
   App.connectEvents({
     match_recorded: (d) => { if (!d.player_id || d.player_id === playerId) refresh(); },
+    double_lp: (d) => { if (!d.player_id || d.player_id === playerId) refresh(); },
+    double_lp_changed: (d) => { if (!d.player_id || d.player_id === playerId) refresh(); },
     rank_changed: (d) => { if (!d.player_id || d.player_id === playerId) refresh(); },
     live_start: (d) => { if (!d.player_id || d.player_id === playerId) refresh(); },
     live_end: (d) => { if (!d.player_id || d.player_id === playerId) refresh(); },

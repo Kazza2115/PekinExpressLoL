@@ -366,7 +366,7 @@
           <div class="feed-sub"><span>${esc(m.champion_name || '')}</span>${m.position ? App.posIcon(m.position_icon_url, m.position) : ''}<span class="tnum">${kda}</span><span>${App.formatDuration(m.game_duration)}</span>${m.surrendered && !m.is_remake ? (m.win ? '<span class="feed-ff is-win" title="L\'équipe adverse a abandonné : victoire, pas comptée comme abandon">🏳️ abandon adverse</span>' : '<span class="feed-ff" title="Son équipe a abandonné (/ff)">🏳️ abandon</span>') : ''}${m.queue && m.queue !== 'SOLO' ? `<span>${esc(App.queueLabel(m.queue))}</span>` : ''}</div>
           ${hasItems ? `<div class="feed-items">${App.itemRow(m.item_urls, { size: 'sm' })}</div>` : ''}
         </div>
-        <div class="feed-lp">${m.is_remake ? '<span class="chip">Remake</span>' : m.outside_window ? `<span class="chip" title="Partie terminée hors des heures du challenge : ne compte pas (${esc(App.formatLp(m.lp_change))})">Hors délai</span>` : (m.over_quota ? `<span class="chip chip-red" title="Au-delà des parties autorisées ce jour-là : ne compte pas (${esc(App.formatLp(m.lp_change))})">Hors quota</span>` : App.lpHtml(m.lp_change))}<span class="ago">${esc(ago)}</span>${m.match_id ? `<button type="button" class="feed-detail" data-match="${esc(m.match_id)}" data-player="${m.player_id}" title="Tableau des scores de la partie (10 joueurs)">📊 Tableau</button>` : ''}</div>
+        <div class="feed-lp">${m.is_remake ? '<span class="chip">Remake</span>' : m.outside_window ? `<span class="chip" title="Partie terminée hors des heures du challenge : ne compte pas (${esc(App.formatLp(m.lp_change))})">Hors délai</span>` : (m.over_quota ? `<span class="chip chip-red" title="Au-delà des parties autorisées ce jour-là : ne compte pas (${esc(App.formatLp(m.lp_change))})">Hors quota</span>` : `${App.lpHtml(m.lp_change)}${m.lp_bonus > 0 ? `<span class="chip chip-gold feed-double" title="Double LP (Aegis of Valor) : ${esc(String(m.lp_bonus))} LP bonus retirés des LP nets">⚡ x2</span>` : ''}`)}<span class="ago">${esc(ago)}</span>${m.match_id ? `<button type="button" class="feed-detail" data-match="${esc(m.match_id)}" data-player="${m.player_id}" title="Tableau des scores de la partie (10 joueurs)">📊 Tableau</button>` : ''}</div>
       </div>`;
     }).join('');
   }
@@ -526,6 +526,8 @@
 
   App.connectEvents({
     match_recorded: refreshScores,
+    double_lp: refreshScores,
+    double_lp_changed: refreshScores,
     rank_changed: refreshScores,
     poll_done: refreshScores,
     live_start: refreshLive,

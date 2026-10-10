@@ -1331,6 +1331,11 @@
     App.notify(msg, 'Seules les parties terminées à partir de maintenant en profitent.', `joker-${d.team_id || ''}`);
   });
   App.onEvent('joker_cancelled', () => App.toast('🃏 Un joker a été annulé par l’organisateur.', { type: 'info' }));
+  App.onEvent('double_lp', (d) => {
+    const msg = `⚡ Double LP repéré pour ${who(d)} : ${d.lp_bonus || 0} LP bonus retirés de ses LP nets`;
+    App.toast(msg, { type: 'warning', timeout: 9000 });
+    App.notify(msg, 'Riot a doublé les LP de cette victoire (Aegis of Valor).', `double-lp-${d.match_id || ''}-${d.player_id || ''}`);
+  });
 
   /* Après une mise à jour du site, le serveur redémarre : quand la page se reconnecte au flux
      SSE et voit (via `hello`) que la version des fichiers a changé, elle se recharge d'elle-même. */

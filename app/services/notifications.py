@@ -22,6 +22,7 @@ import httpx
 from app.config import Settings, get_settings
 from app.db.session import as_utc
 from app.riot import ddragon
+from app.services.double_lp import lp_bonus
 from app.services.portal import share_link
 
 if TYPE_CHECKING:
@@ -441,6 +442,9 @@ def match_embed(notice: MatchNotice, *, settings: Settings | None = None) -> dic
         (" par abandon adverse 🏳️" if win else " par abandon 🏳️") if part.surrendered and not part.is_remake else ""
     )
     lines.append(f"{result} avec **{champion_label(part.champion_name)}**")
+    bonus = lp_bonus(part) if not (notice.over_quota or notice.outside_window) else 0
+    if bonus:
+        lines.append(f"⚡ **Double LP** (Aegis of Valor) : {bonus} LP bonus retirés de ses LP nets du challenge.")
     multi = int(h.get("largest_multi_kill") or 0)
     if multi >= 3:
         lines.append(f"🔥 **{MULTI_KILL_LABELS[min(multi, 5)]} !**")
@@ -562,6 +566,45 @@ def build_match_message(
         if gif:
             embeds[-1]["image"] = {"url": gif}
     return content, embeds
+
+
+def build_double_lp_message(
+    player: Player,
+    team: Team | None,
+    participant: MatchParticipant,
+    *,
+    usual_gain: float | None = None,
+    settings: Settings | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
+    """(texte, carte) d'un double LP repéré après coup (LP connus après l'annonce du résultat)."""
+    settings = settings if settings is not None else get_settings()
+    bonus = lp_bonus(participant)
+    gain = int(participant.lp_change or 0)
+    usual = f", le double de son gain habituel (≈ {round(usual_gain)} LP)" if usual_gain else ""
+    link = share_link(f"/player/{player.id}#match-{participant.match_id}", settings)
+    content = f"⚡ Double LP repéré pour **{player.display_name}** : {bonus} LP bonus retirés de ses LP nets"
+    embed: dict[str, Any] = {
+        "author": _author(player, settings),
+        "title": f"⚡ Double LP pour {player.display_name}",
+        "url": link,
+        "description": "\n".join(
+            [
+                f"Victoire avec **{champion_label(participant.champion_name)}** : **+{gain} LP**{usual}.",
+                "Riot double parfois les LP d'une victoire (« Aegis of Valor », en autofill). Pour que le"
+                f" challenge reste équitable, **{bonus} LP bonus sont retirés** de ses LP nets ;"
+                f" les {gain - bonus} autres comptent.",
+            ]
+        ),
+        "color": COLOR_INFO,
+        "footer": _footer(team),
+    }
+    thumbnail = _champion_thumbnail(participant.champion_name)
+    if thumbnail:
+        embed["thumbnail"] = thumbnail
+    timestamp = _iso(participant.game_end) or _iso(participant.game_start)
+    if timestamp:
+        embed["timestamp"] = timestamp
+    return content, [embed]
 
 
 @dataclass
