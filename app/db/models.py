@@ -45,7 +45,8 @@ class Challenge(SQLModel, table=True):
     name: str = "Pékin Express LoL"
     status: ChallengeStatus = Field(default=ChallengeStatus.REGISTRATION)
     start_at: datetime | None = None  # début effectif (clic "Démarrer")
-    start_announced_at: datetime | None = None  # annonce Discord « c'est parti » envoyée (ce début-là)
+    start_announced_at: datetime | None = None  # annonce Discord « c'est parti » traitée (ce début-là)
+    start_announce_dropped: bool = False  # … abandonnée (site démarré plus de 3 h après le début)
     end_at: datetime | None = None  # fin (clic "Terminer") ou None
     games_per_day: int = 10
     track_flex: bool = False

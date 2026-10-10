@@ -36,6 +36,7 @@
     liveCheck: $('#live-check'),
     btnReload: $('#btn-reload'),
     btnDiscord: $('#btn-discord'),
+    btnAnnounce: $('#btn-announce'),
   };
 
   let state = null;
@@ -806,6 +807,46 @@
       </ol>` : '';
     return `<ul class="diag-list">${items.join('')}</ul>${checklist}`;
   }
+
+  /* Annonce « c'est parti » : état (envoyée, en attente, abandonnée…) puis envoi à la main. */
+  els.btnAnnounce.addEventListener('click', async () => {
+    App.setLoading(els.btnAnnounce, true);
+    try {
+      const st = await admin(() => api('/api/admin/announce-start', { admin: true }));
+      if (st === undefined) return;
+      const info = `<p><strong>État :</strong> ${esc(st.message || '')}</p>
+        <p class="muted" style="font-size:13px">Challenge : ${esc(st.status || '?')} · début enregistré : ${esc(st.start_at || '—')}${st.announced_at ? ` · dernière annonce : ${esc(st.announced_at)}` : ''}</p>
+        ${st.status !== 'running' ? '<p>⚠️ Démarre d’abord le challenge (bouton « 🚀 Démarrer » en haut de l’Admin), sinon les parties ne sont pas suivies.</p>' : ''}`;
+      App.openModal({
+        title: 'Annonce du début sur Discord',
+        html: `${info}<p>Envoyer l’annonce « 🚀 C’est parti » maintenant (mention du rôle, duos, GIF) ?</p>`,
+        actions: [
+          { label: 'Annuler', className: 'btn-ghost', onClick: ({ close }) => close() },
+          {
+            label: '📣 Envoyer maintenant',
+            className: 'btn-primary',
+            onClick: async ({ close, button }) => {
+              App.setLoading(button, true);
+              try {
+                const r = await admin(() => api('/api/admin/announce-start', { method: 'POST', admin: true, body: {} }));
+                close();
+                if (r && r.sent) toast('📣 Annonce du début envoyée sur Discord.', { type: 'success' });
+                else if (r) toast(`Annonce non envoyée : ${r.error || 'Discord a refusé le message'}.`, { type: 'error', timeout: 10000 });
+              } catch (err) {
+                toast(err.message, { type: 'error' });
+              } finally {
+                App.setLoading(button, false);
+              }
+            },
+          },
+        ],
+      });
+    } catch (err) {
+      toast(err.message, { type: 'error' });
+    } finally {
+      App.setLoading(els.btnAnnounce, false);
+    }
+  });
 
   els.btnDiscord.addEventListener('click', async () => {
     App.setLoading(els.btnDiscord, true);

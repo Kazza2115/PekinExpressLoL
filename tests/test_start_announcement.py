@@ -38,14 +38,14 @@ def _fresh_gif_cache():
 def sent(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, list[dict[str, Any]]]]:
     messages: list[tuple[str, list[dict[str, Any]]]] = []
 
-    async def fake_send(content: str, *, embeds=None, **_: Any) -> bool:
+    async def fake_post(content: str, *, embeds=None, **_: Any) -> notifications.DiscordSendResult:
         messages.append((content, embeds or []))
-        return True
+        return notifications.DiscordSendResult(sent=True, status=204)
 
     async def fake_resolve(url: str | None, **_: Any) -> str | None:
         return GIF if url else None
 
-    monkeypatch.setattr(notifications, "send_discord", fake_send)
+    monkeypatch.setattr(notifications, "post_discord", fake_post)
     monkeypatch.setattr(gifs, "resolve_gif", fake_resolve)
     return messages
 
@@ -108,12 +108,12 @@ async def test_too_late_is_dropped_and_failed_send_is_retried(session: Session, 
     later = utcnow() + timedelta(minutes=11)
     calls = {"n": 0}
 
-    async def flaky_send(content: str, **_: Any) -> bool:
+    async def flaky_post(content: str, **_: Any) -> notifications.DiscordSendResult:
         calls["n"] += 1
         sent.append((content, []))
-        return calls["n"] > 1
+        return notifications.DiscordSendResult(sent=calls["n"] > 1, error=None if calls["n"] > 1 else "HTTP 500")
 
-    monkeypatch.setattr(notifications, "send_discord", flaky_send)
+    monkeypatch.setattr(notifications, "post_discord", flaky_post)
     assert await announce.announce_start_if_due(settings=settings) is False  # pas encore l'heure
     assert calls["n"] == 0
     assert await announce.announce_start_if_due(settings=settings, now=later) is False  # refusé
@@ -175,3 +175,35 @@ def test_admin_start_now_announces_and_future_start_says_ready(client: TestClien
     calls.clear()
     assert client.post("/api/admin/challenge/start", headers=admin_headers, json={}).status_code == 200
     assert calls == ["announce"]  # début immédiat : l'annonce « c'est parti » (GIF, duos)
+
+
+async def test_no_webhook_keeps_the_announcement_pending(session: Session, sent):
+    challenge = setup_challenge(session)
+    no_hook = make_settings(gif_start=DEFAULT_START_GIF, discord_webhook_url="")
+    assert await announce.announce_start_if_due(settings=no_hook) is False
+    session.refresh(challenge)
+    assert challenge.start_announced_at is None  # webhook ajouté ensuite : l'annonce partira
+    assert announce.announce_status(settings=no_hook)["state"] == "no_webhook"
+    assert await announce.announce_start_if_due(settings=make_settings(gif_start=DEFAULT_START_GIF)) is True
+
+
+async def test_status_explains_why_and_manual_send_always_works(session: Session, sent):
+    challenge = setup_challenge(session, start_in=-timedelta(hours=14))  # « Démarrer » cliqué la veille
+    settings = make_settings(gif_start=DEFAULT_START_GIF)
+    assert await announce.announce_start_if_due(settings=settings) is False
+    status = announce.announce_status(settings=settings)
+    assert status["state"] == "dropped" and "plus de 3 h" in status["message"] and status["start_at"]
+    result = await announce.announce_start_now(settings=settings)
+    assert result["sent"] is True and len(sent) == 1 and result["after"]["state"] == "sent"
+    challenge.status = ChallengeStatus.DRAWN
+    session.add(challenge)
+    session.commit()
+    assert announce.announce_status(settings=settings)["state"] == "not_running"
+
+
+def test_admin_announce_routes(client: TestClient, admin_headers: dict, sent):
+    assert client.get("/api/admin/announce-start").status_code == 401
+    status = client.get("/api/admin/announce-start", headers=admin_headers).json()
+    assert status["state"] == "not_running"
+    result = client.post("/api/admin/announce-start", headers=admin_headers, json={}).json()
+    assert set(result) == {"sent", "error", "before", "after"}

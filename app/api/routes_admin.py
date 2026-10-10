@@ -27,7 +27,7 @@ from app.services.bootstrap import apply_default_schedule, parse_fr_datetime
 from app.events import bus
 from app.riot import get_api, reset_api
 from app.services import gifs, notifications
-from app.services.announce import announce_start_if_due
+from app.services.announce import announce_start_if_due, announce_start_now, announce_status
 from app.services.draw import perform_draw, team_identity
 from app.state import state
 
@@ -424,6 +424,7 @@ async def reset_challenge(
     challenge.start_at = None
     challenge.end_at = None
     challenge.start_announced_at = None
+    challenge.start_announce_dropped = False
     session.add(challenge)
     session.commit()
     session.refresh(challenge)
@@ -770,6 +771,24 @@ async def reload_app_settings(request: Request) -> dict[str, Any]:
             except Exception:  # noqa: BLE001
                 log.warning("Fermeture de l'ancien client Riot impossible", exc_info=True)
     return {"demo_mode": settings.demo_mode, "has_api_key": settings.has_api_key, "client_replaced": swapped}
+
+
+@router.get("/announce-start")
+async def get_announce_status() -> dict[str, Any]:
+    """Où en est l'annonce Discord du début du challenge."""
+    return announce_status()
+
+
+@router.post("/announce-start")
+async def post_announce_start() -> dict[str, Any]:
+    """Envoie l'annonce « c'est parti » maintenant (rôle, duos, GIF), avec le diagnostic."""
+    reload_settings()  # dernières valeurs de .env (webhook, rôle, GIF)
+    gifs.reset_cache()
+    try:
+        return await announce_start_now()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Annonce du début impossible", exc_info=True)
+        return {"sent": False, "error": f"erreur inattendue ({type(exc).__name__})", "before": None, "after": None}
 
 
 @router.post("/test-notification")
