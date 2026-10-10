@@ -722,6 +722,8 @@ async def refresh(request: Request) -> dict[str, Any]:
     poller = getattr(request.app.state, "poller", None)
     if poller is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Poller indisponible.")
+    if hasattr(poller, "refresh_summoners_soon"):
+        poller.refresh_summoners_soon()  # icônes d'invocateur relues tout de suite
     report = await poller.poll_once()
     return report.to_dict()
 

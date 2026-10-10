@@ -82,6 +82,8 @@ APEX_TIERS = frozenset({"MASTER", "GRANDMASTER", "CHALLENGER"})
 # Une partie terminée depuis plus longtemps n'est plus annoncée sur Discord
 # (évite le spam si le challenge démarre avec une date de début dans le passé)
 NOTIFY_MAX_AGE = timedelta(minutes=30)
+# Icône et niveau d'invocateur relus au plus tous les 15 min (1 requête Summoner-V4 par joueur)
+SUMMONER_REFRESH_INTERVAL_S = 15 * 60
 # Préfixe des puuid inventés par le client démo (app/riot/demo.py)
 DEMO_PUUID_PREFIX = "demo-"
 # Nombre d'IDs de parties demandés par joueur et par file à chaque cycle, et pages max
@@ -371,6 +373,8 @@ class Poller:
         self._inflight: asyncio.Task[PollReport] | None = None
         # (game_id, player_id) déjà annoncés dans le message de leur duo (début de partie)
         self._live_announced: set[tuple[int, int]] = set()
+        # player_id → dernière relecture de l'icône d'invocateur (time.monotonic) ; vide = au 1er cycle
+        self._summoner_checked: dict[int, float] = {}
 
     @property
     def settings(self) -> Settings:
@@ -588,7 +592,40 @@ class Poller:
             ("league", self._poll_league),
             ("matches", self._poll_matches),
             ("spectator", self._poll_spectator),
+            ("summoner", self._poll_summoner),
         ]
+
+    def refresh_summoners_soon(self) -> None:
+        """L'icône et le niveau de chaque joueur seront relus au prochain cycle (bouton Admin)."""
+        self._summoner_checked.clear()
+
+    async def _poll_summoner(
+        self,
+        session: Session,
+        player: Player,
+        challenge: Challenge | None,
+        report: PollReport,
+        ctx: _CycleContext,
+    ) -> None:
+        """Icône d'invocateur et niveau à jour (un joueur peut changer d'icône pendant le challenge)."""
+        if player.id is None or not player.puuid:
+            return
+        checked = self._summoner_checked.get(player.id)
+        if checked is not None and time.monotonic() - checked < SUMMONER_REFRESH_INTERVAL_S:
+            return
+        self._summoner_checked[player.id] = time.monotonic()
+        summoner = await self.api.get_summoner_by_puuid(player.puuid)
+        changed = False
+        if summoner.profile_icon_id is not None and summoner.profile_icon_id != player.profile_icon_id:
+            player.profile_icon_id = summoner.profile_icon_id
+            changed = True
+        if summoner.summoner_level is not None and summoner.summoner_level != player.summoner_level:
+            player.summoner_level = summoner.summoner_level
+            changed = True
+        if changed:
+            session.add(player)
+            session.commit()
+            log.info("Icône / niveau d'invocateur mis à jour : %s", player.display_name)
 
     async def _run_phase(
         self,

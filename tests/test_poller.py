@@ -366,7 +366,7 @@ async def test_scripted_cycle_snapshots_live_matches_and_lp_change(session: Sess
     assert report.players_polled == 2
     assert report.new_snapshots == 2
     assert report.new_matches == 0
-    assert report.requests == 6  # 2 league + 2 match ids + 2 spectator
+    assert report.requests == 8  # 2 league + 2 match ids + 2 spectator + 2 icônes (1er cycle)
     assert report.duration_s >= 0
 
     session.expire_all()
@@ -477,8 +477,8 @@ async def test_errors_are_reported_not_raised(session: Session):
     assert len(report.errors) == 2
     assert any("Mike" in error for error in report.errors)
     assert any("Jean" in error for error in report.errors)
-    # Les autres étapes ont quand même tourné (match ids + spectator pour chaque joueur)
-    assert report.requests == 6
+    # Les autres étapes ont quand même tourné (match ids, spectator et icône pour chaque joueur)
+    assert report.requests == 8
     assert events_of("poll_done")[-1]["data"]["errors"] == report.errors
     assert state.polling is False
 
@@ -520,8 +520,35 @@ async def test_unreachable_riot_stops_the_cycle_after_first_error(session: Sessi
     api.entries["p-mike"] = gold_iv(50)
     report = await poller.poll_once()
     assert report.errors == []
-    assert report.requests == 6
+    assert report.requests == 8  # dont les 2 icônes, pas encore relues (cycle précédent interrompu)
     assert report.new_snapshots == 2  # Mike (Gold) + Jean (unranked)
+
+
+async def test_summoner_icon_and_level_are_refreshed(session: Session, monkeypatch: pytest.MonkeyPatch):
+    make_challenge(session, ChallengeStatus.RUNNING, start_at=utcnow() - timedelta(hours=1))
+    mike = make_player(session, "Mike", "p-mike")
+    api = ScriptedAPI()
+    icons = {"p-mike": 29}
+
+    async def summoner(puuid: str) -> SummonerDTO:
+        api.request_count += 1
+        return SummonerDTO(puuid=puuid, summoner_id=None, profile_icon_id=icons[puuid], summoner_level=412)
+
+    api.get_summoner_by_puuid = summoner  # type: ignore[method-assign]
+    poller = Poller(api, bus, state)
+    await poller.poll_once()
+    session.expire_all()
+    assert (session.get(Player, mike.id).profile_icon_id, session.get(Player, mike.id).summoner_level) == (29, 412)
+    icons["p-mike"] = 5000  # nouvelle icône choisie en jeu
+    first = api.request_count
+    await poller.poll_once()
+    assert api.request_count - first == 3  # pas de relecture avant 15 min (league, matches, spectator)
+    session.expire_all()
+    assert session.get(Player, mike.id).profile_icon_id == 29
+    poller.refresh_summoners_soon()  # « Forcer un rafraîchissement » (Admin)
+    await poller.poll_once()
+    session.expire_all()
+    assert session.get(Player, mike.id).profile_icon_id == 5000
 
 
 async def test_concurrent_poll_once_share_one_cycle(session: Session):
