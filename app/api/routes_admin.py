@@ -621,14 +621,15 @@ async def list_double_lp(session: Session = Depends(get_session)) -> dict[str, A
     shown = wins[:DOUBLE_LP_LIST_LIMIT]
     players = {p.id: p for p in session.exec(select(Player)).all() if p.id is not None}
     teams = {t.id: t for t in session.exec(select(Team)).all() if t.id is not None}
-    usual: dict[int, float | None] = {}
+    seen: dict[int, double_lp.Assessment] = {}
     for player_id in {win.player_id for win in shown}:
-        usual.update(double_lp.reference_gains(session, player_id))
+        seen.update(double_lp.explain(session, player_id))
     items: list[dict[str, Any]] = []
     for win in shown:
         player = players.get(win.player_id)
         team = teams.get(player.team_id) if player is not None and player.team_id is not None else None
-        gain = usual.get(win.id or 0)
+        assessment = seen.get(win.id or 0)
+        gain = assessment.usual if assessment is not None else None
         items.append(
             {
                 "id": win.id,
@@ -641,6 +642,9 @@ async def list_double_lp(session: Session = Depends(get_session)) -> dict[str, A
                 "game_end": game_end_of(win).isoformat(),
                 "lp_change": win.lp_change,
                 "usual_gain": round(gain, 1) if gain is not None else None,
+                "threshold": assessment.threshold if assessment is not None else None,
+                "references": assessment.references if assessment is not None else 0,
+                "reason": _double_lp_reason(win, assessment),
                 "double_lp": win.double_lp,
                 "manual": bool(win.double_lp_manual),
                 "lp_bonus": double_lp.lp_bonus(win),
@@ -652,6 +656,20 @@ async def list_double_lp(session: Session = Depends(get_session)) -> dict[str, A
         "total": len(wins),
         "ratio": double_lp.DOUBLE_RATIO,
     }
+
+
+def _double_lp_reason(win: MatchParticipant, assessment: double_lp.Assessment | None) -> str:
+    """Pourquoi la victoire est (ou n'est pas) un double LP, en clair pour l'organisateur."""
+    if win.double_lp_manual:
+        return "Décision de l'organisateur" + (" : double LP" if win.double_lp else " : victoire normale")
+    if assessment is not None and assessment.mixed:
+        return "LP mélangés avec une autre partie entre deux relevés : non jugée"
+    if assessment is None or assessment.usual is None:
+        found = assessment.references if assessment is not None else 0
+        return f"À revoir : {found} victoire(s) de comparaison sur {double_lp.REFERENCE_MIN_WINS} nécessaires"
+    if win.double_lp:
+        return f"Double LP : +{win.lp_change} ≥ seuil de {assessment.threshold} LP"
+    return f"Victoire normale : +{win.lp_change} sous le seuil de {assessment.threshold} LP"
 
 
 @router.patch("/double-lp/{participant_id}")

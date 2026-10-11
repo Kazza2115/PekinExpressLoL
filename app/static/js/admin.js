@@ -641,8 +641,8 @@
         <td><div class="cell-player">${w.team_color ? `<span class="swatch" style="--team-color:${esc(w.team_color)}"></span>` : ''}<a href="/player/${w.player_id}#match-${esc(w.match_id)}">${esc(w.display_name)}</a></div></td>
         <td>${esc(w.champion_name || '')}<div class="muted">${esc(App.formatDateTime(w.game_end))}</div></td>
         <td class="num">${App.lpHtml(w.lp_change)}</td>
-        <td class="num">${w.usual_gain === null || w.usual_gain === undefined ? '<span class="muted">—</span>' : `+${esc(String(Math.round(w.usual_gain)))} LP`}</td>
-        <td><div class="cell-player"><label class="switch" title="${w.double_lp ? 'Compter comme une victoire normale' : 'Marquer comme double LP (moitié du gain retirée)'}"><input type="checkbox" data-double-lp="${w.id}" ${w.double_lp ? 'checked' : ''}><span class="track"></span></label>${status}${how}</div></td>
+        <td class="num">${w.usual_gain === null || w.usual_gain === undefined ? '<span class="muted">—</span>' : `+${esc(String(Math.round(w.usual_gain)))} LP`}${w.threshold ? `<div class="muted">seuil ${esc(String(w.threshold))} LP</div>` : ''}</td>
+        <td><div class="cell-player"><label class="switch" title="${w.double_lp ? 'Compter comme une victoire normale' : 'Marquer comme double LP (moitié du gain retirée)'}"><input type="checkbox" data-double-lp="${w.id}" ${w.double_lp ? 'checked' : ''}><span class="track"></span></label>${status}${how}</div>${w.reason ? `<div class="muted">${esc(w.reason)}</div>` : ''}</td>
       </tr>`;
     }).join('');
 

@@ -24,8 +24,10 @@ httpx, Jinja2, JS vanilla, CSS maison (pas de Tailwind), Chart.js vendored.
   `surrender_wins`, parties jouées ensemble comptées une fois pour le duo).
 - Double LP (Aegis of Valor, `services/double_lp.py`) : après `backfill_lp_changes`, le poller
   juge chaque victoire Solo/Duo aux LP connus (`assess_double_lp` : gain ≥ 1,6 × la médiane des
-  6 victoires de référence les plus proches, au moins 3, et ≥ 30 LP ; sinon `None`, rejugée plus
-  tard ; victoires dont les relevés encadrent plusieurs parties Riot exclues) →
+  6 victoires de référence les plus proches, au moins 3, et ≥ 24 LP ; références = autres
+  victoires enregistrées + intervalles de relevés « +1 victoire » ; sans référence `None`, et
+  une victoire jugée normale est rejugée à chaque cycle ; victoires dont les relevés encadrent
+  plusieurs parties Riot exclues ; `explain` pour l'Admin) →
   `MatchParticipant.double_lp`. `lp_bonus` (moitié du gain) est retiré de `lp_net` pour les
   parties comptées ; annonce Discord sur la carte du résultat, sinon récapitulatif à part
   (`double_lp_announced_at`). L'Admin corrige (`double_lp_manual`, `GET/PATCH

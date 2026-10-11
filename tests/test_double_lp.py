@@ -54,7 +54,8 @@ def test_judge_double_lp():
     assert judge(46, 23) is True  # le double exact
     assert judge(38, 23) is True  # ≥ 1,6 × le gain habituel
     assert judge(30, 23) is False  # bon gain, mais pas un double
-    assert judge(28, 15) is False  # double d'un petit gain, sous le minimum de 30 LP
+    assert judge(28, 15) is True  # double d'un petit gain
+    assert judge(22, 13) is False  # sous le minimum de 24 LP : trop ambigu
     assert judge(-20, 23) is None and judge(None, 23) is None  # défaites, LP inconnus
     # Sans gain habituel : jamais de double LP, même pour un très gros gain (après placements…)
     assert judge(50, None) is None
@@ -151,6 +152,44 @@ def test_win_mixed_with_an_unrecorded_game_is_not_judged(session: Session):
         _win(session, f"M{index}", lp, 120 + index * 40)
     assert assess_double_lp(session, player) == []
     assert _verdicts(session)["MERGED"] is None
+
+
+def _snapshot(session: Session, captured: datetime, absolute: int, wins: int, losses: int = 8) -> None:
+    session.add(RankSnapshot(player_id=1, queue=Queue.SOLO, tier="GOLD", rank="IV", lp=absolute - 1200, wins=wins,
+                             losses=losses, absolute_lp=absolute, captured_at=captured))
+    session.commit()
+
+
+def test_rank_snapshots_give_references_before_the_first_recorded_wins(session: Session):
+    """Le site tournait avant le début : les victoires lues dans les relevés de rang (+1 victoire,
+    LP en hausse) servent de comparaison, même sans partie enregistrée."""
+    player = _player(session)
+    base = utc(2026, 10, 9, 18, 0)
+    _snapshot(session, base, 1210, wins=10)
+    _snapshot(session, base + timedelta(minutes=40), 1230, wins=11)  # +20
+    _snapshot(session, base + timedelta(minutes=80), 1212, wins=11, losses=9)  # défaite : ignorée
+    _snapshot(session, base + timedelta(minutes=120), 1233, wins=12, losses=9)  # +21
+    _snapshot(session, base + timedelta(minutes=160), 1252, wins=13, losses=9)  # +19
+    _snapshot(session, utc(2026, 10, 10, 10, 30), 1292, wins=14, losses=9)  # la victoire jugée : +40
+    _win(session, "FIRST", 40, 0)  # fin à 10:25
+    assert [(g.match_id, usual) for g, usual in assess_double_lp(session, player)] == [("FIRST", 20.0)]
+
+
+def test_a_win_judged_normal_is_judged_again(session: Session):
+    """Jugée normale avec trop peu de recul (ou par une version précédente) : rejugée quand les
+    références montrent que c'était un double LP."""
+    player = _player(session)
+    _win(session, "M1", 36, 0, double_lp=False)
+    _win(session, "M2", 18, 40)
+    _win(session, "M3", 17, 80)
+    _win(session, "M4", 19, 120)
+    assert [g.match_id for g, _ in assess_double_lp(session, player)] == ["M1"]
+    # Un double LP repéré n'est jamais retiré automatiquement
+    _win(session, "M5", 40, 160)
+    _win(session, "M6", 41, 200)
+    _win(session, "M7", 42, 240)
+    assess_double_lp(session, player)
+    assert _verdicts(session)["M1"] is True
 
 
 def test_flex_wins_are_never_judged(session: Session):
@@ -336,6 +375,9 @@ def test_admin_lists_and_corrects_double_lp(client, session: Session, admin_head
     data = client.get("/api/admin/double-lp", headers=admin_headers).json()
     assert (data["flagged"], data["total"]) == (1, 5)  # la Flex n'apparaît pas
     by_match = {item["match_id"]: item for item in data["items"]}
+    assert by_match["M4"]["reason"] == "Double LP : +46 ≥ seuil de 38 LP"
+    assert by_match["M5"]["reason"] == "Victoire normale : +35 sous le seuil de 37 LP"  # M4, double, exclue
+    assert by_match["M4"]["threshold"] == 38
     # Gain habituel autour de M4 : médiane de 22, 24, 23 et 35
     assert (by_match["M4"]["double_lp"], by_match["M4"]["lp_bonus"], by_match["M4"]["usual_gain"]) == (True, 23, 23.5)
 

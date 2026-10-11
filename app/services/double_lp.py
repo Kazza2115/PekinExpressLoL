@@ -7,10 +7,14 @@ donc aux LP : une victoire qui rapporte environ le double du gain habituel du jo
 
 - Seule la file Solo/Duo est jugée : c'est la seule qui compte pour les LP nets.
 - Gain habituel : médiane des victoires de référence les plus proches dans le temps (le gain
-  évolue pendant la montée). Il en faut au moins `REFERENCE_MIN_WINS` : sans ça, la victoire
-  reste « à revoir ». Jamais de double LP sans comparaison (une victoire juste après les
-  placements, ou d'un compte au MMR élevé, rapporte normalement 40 LP ou plus).
+  évolue pendant la montée). Les références sont les autres victoires enregistrées, et aussi
+  chaque victoire lue dans les relevés de rang (+1 victoire, LP en hausse), y compris avant le
+  début du challenge si le site tournait déjà. Il en faut au moins `REFERENCE_MIN_WINS` : sans
+  ça, la victoire reste « à revoir ». Jamais de double LP sans comparaison (une victoire juste
+  après les placements, ou d'un compte au MMR élevé, rapporte normalement 40 LP ou plus).
 - Double LP si le gain atteint `DOUBLE_RATIO` × le gain habituel (et au moins `DOUBLE_MIN_GAIN`).
+- Une victoire jugée normale est rejugée à chaque cycle (de nouvelles références peuvent montrer
+  que c'était un double LP) ; un double LP repéré reste acquis (seul l'organisateur l'annule).
 - Une victoire dont les relevés de rang encadrent plusieurs parties Riot (compteurs victoires +
   défaites) n'est ni jugée ni prise comme référence : ses LP mélangent plusieurs parties.
 - Bonus retiré des LP nets : la moitié du gain (arrondie à l'inférieur), le reste compte.
@@ -19,8 +23,11 @@ donc aux LP : une victoire qui rapporte environ le double du gain habituel du jo
 
 from __future__ import annotations
 
+import math
 import statistics
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from datetime import datetime
 
 from sqlmodel import Session, col, select
 
@@ -32,7 +39,8 @@ REFERENCE_MIN_WINS = 3
 REFERENCE_NEAREST = 6
 # Un double LP exact vaut 2 × le gain habituel ; le gain varie d'une partie à l'autre de quelques LP
 DOUBLE_RATIO = 1.6
-DOUBLE_MIN_GAIN = 30
+# En dessous, jamais de double LP (le double d'un petit gain de 12 à 14 LP reste ambigu)
+DOUBLE_MIN_GAIN = 24
 
 
 def _is_solo(value: Queue | str | None) -> bool:
@@ -61,11 +69,19 @@ def usual_gain(gains: Iterable[int]) -> float | None:
     return float(statistics.median(values))
 
 
+def threshold_for(reference: float | None) -> int | None:
+    """Gain minimal d'un double LP pour ce gain habituel ; None sans gain habituel."""
+    if reference is None:
+        return None
+    return max(DOUBLE_MIN_GAIN, math.ceil(DOUBLE_RATIO * reference - 1e-9))
+
+
 def judge(lp_change: int | None, reference: float | None) -> bool | None:
     """True = double LP, False = victoire normale, None = pas encore jugeable (pas de gain habituel)."""
-    if lp_change is None or lp_change <= 0 or reference is None:
+    threshold = threshold_for(reference)
+    if lp_change is None or lp_change <= 0 or threshold is None:
         return None
-    return lp_change >= max(DOUBLE_MIN_GAIN, DOUBLE_RATIO * reference)
+    return lp_change >= threshold
 
 
 def _riot_games(snapshot: RankSnapshot) -> int:
@@ -78,30 +94,80 @@ def single_game_interval(game: MatchParticipant, snapshots: Sequence[RankSnapsho
     `snapshots` : relevés Solo/Duo du joueur, triés par date. Sans relevé avant ou après, on ne
     peut rien dire : True (de toute façon, `lp_change` n'est alors pas connu).
     """
-    end = game_end_of(game)
-    before: RankSnapshot | None = None
-    after: RankSnapshot | None = None
-    for snapshot in snapshots:
-        captured = as_utc(snapshot.captured_at)
-        if captured is not None and captured <= end:
-            before = snapshot
-        else:
-            after = snapshot
-            break
+    before, after = _bracket(game, snapshots)
     if before is None or after is None:
         return True
     return _riot_games(after) - _riot_games(before) <= 1
 
 
-def nearest_references(game: MatchParticipant, candidates: Sequence[MatchParticipant]) -> list[int]:
-    """LP des victoires de référence les plus proches dans le temps de `game`."""
+def _bracket(game: MatchParticipant, snapshots: Sequence[RankSnapshot]) -> tuple[RankSnapshot | None, RankSnapshot | None]:
     end = game_end_of(game)
+    before: RankSnapshot | None = None
+    for snapshot in snapshots:
+        captured = as_utc(snapshot.captured_at)
+        if captured is not None and captured <= end:
+            before = snapshot
+        else:
+            return before, snapshot
+    return before, None
 
-    def distance(other: MatchParticipant) -> float:
-        return abs((game_end_of(other) - end).total_seconds())
 
-    nearest = sorted(candidates, key=distance)[:REFERENCE_NEAREST]
-    return [int(other.lp_change) for other in nearest]  # type: ignore[arg-type]
+@dataclass(frozen=True)
+class Assessment:
+    """Ce que la détection voit pour une victoire (affiché dans l'Admin)."""
+
+    usual: float | None  # gain habituel (None : moins de `REFERENCE_MIN_WINS` références)
+    threshold: int | None  # gain minimal d'un double LP
+    references: int  # victoires de référence disponibles
+    mixed: bool  # LP mélangés avec une autre partie Riot : non jugée
+
+
+class _History:
+    """Victoires Solo/Duo aux LP connus et relevés de rang Solo/Duo d'un joueur."""
+
+    def __init__(self, wins: list[MatchParticipant], snapshots: list[RankSnapshot]) -> None:
+        self.wins = wins
+        self.snapshots = snapshots
+        self._keys = {w.id: self._key(w) for w in wins}
+        self._mixed = {w.id for w in wins if not single_game_interval(w, snapshots)}
+        # Gains de victoires, une entrée par intervalle entre deux relevés : (fin, gain, partie)
+        self._points: dict[object, tuple[datetime, int, MatchParticipant | None]] = {}
+        for win in wins:
+            if win.id not in self._mixed:
+                self._points[self._keys[win.id]] = (game_end_of(win), int(win.lp_change or 0), win)
+        for before, after in zip(snapshots, snapshots[1:]):
+            if before.absolute_lp is None or after.absolute_lp is None or after.id in self._points:
+                continue
+            one_win = int(after.wins or 0) - int(before.wins or 0) == 1 and int(after.losses or 0) == int(before.losses or 0)
+            gain = int(after.absolute_lp) - int(before.absolute_lp)
+            captured = as_utc(after.captured_at)
+            if one_win and gain > 0 and captured is not None:
+                self._points[after.id] = (captured, gain, None)
+
+    @classmethod
+    def load(cls, session: Session, player_id: int) -> _History:
+        return cls(_solo_wins(session, player_id), _solo_snapshots(session, player_id))
+
+    def _key(self, game: MatchParticipant) -> object:
+        """Intervalle de relevés de la partie : l'identifiant du relevé qui suit sa fin."""
+        _before, after = _bracket(game, self.snapshots)
+        return after.id if after is not None else ("partie", game.id)
+
+    def mixed(self, game: MatchParticipant) -> bool:
+        return game.id in self._mixed
+
+    def assess(self, game: MatchParticipant) -> Assessment:
+        own = self._keys.get(game.id)
+        flagged = {self._keys[w.id] for w in self.wins if w.double_lp is True and w.id != game.id}
+        end = game_end_of(game)
+        points = [
+            (abs((when - end).total_seconds()), gain)
+            for key, (when, gain, _win) in self._points.items()
+            if key != own and key not in flagged
+        ]
+        gains = [gain for _distance, gain in sorted(points)[:REFERENCE_NEAREST]]
+        usual = usual_gain(gains)
+        return Assessment(usual=usual, threshold=threshold_for(usual), references=len(points), mixed=self.mixed(game))
 
 
 def _solo_wins(session: Session, player_id: int) -> list[MatchParticipant]:
@@ -126,50 +192,37 @@ def _solo_snapshots(session: Session, player_id: int) -> list[RankSnapshot]:
     return [s for s in snapshots if _is_solo(s.queue)]
 
 
-def reference_gains(session: Session, player_id: int) -> dict[int, float | None]:
-    """Gain habituel autour de chaque victoire Solo/Duo du joueur (même règle que le jugement),
-    calculé avec les décisions actuelles : pour l'affichage dans l'Admin."""
-    wins = _solo_wins(session, player_id)
-    snapshots = _solo_snapshots(session, player_id)
-    clean = {w.id for w in wins if single_game_interval(w, snapshots)}
-    gains: dict[int, float | None] = {}
-    for game in wins:
-        if game.id is None:
-            continue
-        candidates = [w for w in wins if w.id != game.id and w.id in clean and w.double_lp is not True]
-        gains[game.id] = usual_gain(nearest_references(game, candidates))
-    return gains
+def explain(session: Session, player_id: int) -> dict[int, Assessment]:
+    """Ce que la détection voit pour chaque victoire Solo/Duo du joueur (Admin)."""
+    history = _History.load(session, player_id)
+    return {w.id: history.assess(w) for w in history.wins if w.id is not None}
 
 
 def assess_double_lp(session: Session, player: Player) -> list[tuple[MatchParticipant, float | None]]:
-    """Juge les victoires Solo/Duo du joueur dont les LP sont connus et pas encore jugées.
+    """Juge les victoires Solo/Duo du joueur dont les LP sont connus : celles pas encore jugées, et
+    celles jugées normales (de nouvelles références peuvent révéler un double LP).
 
     Renvoie les parties nouvellement repérées comme double LP, avec le gain habituel retenu,
-    dans l'ordre chronologique. Les décisions de l'organisateur (`double_lp_manual`) ne sont
-    jamais revues.
+    dans l'ordre chronologique. Un double LP repéré n'est jamais retiré automatiquement, et les
+    décisions de l'organisateur (`double_lp_manual`) ne sont jamais revues.
     """
     if player.id is None:
         return []
-    wins = _solo_wins(session, player.id)
-    if not any(w.double_lp is None and not w.double_lp_manual for w in wins):
-        return []
-    snapshots = _solo_snapshots(session, player.id)
-    clean = {w.id for w in wins if single_game_interval(w, snapshots)}
+    history = _History.load(session, player.id)
     flagged: list[tuple[MatchParticipant, float | None]] = []
     changed = False
-    for game in wins:
-        if game.double_lp is not None or game.double_lp_manual or game.id not in clean:
+    for game in history.wins:
+        if game.double_lp is True or game.double_lp_manual or history.mixed(game):
             continue
-        candidates = [w for w in wins if w.id != game.id and w.id in clean and w.double_lp is not True]
-        reference = usual_gain(nearest_references(game, candidates))
-        verdict = judge(game.lp_change, reference)
-        if verdict is None:
+        assessment = history.assess(game)
+        verdict = judge(game.lp_change, assessment.usual)
+        if verdict is None or verdict == game.double_lp:
             continue
         game.double_lp = verdict
         session.add(game)
         changed = True
         if verdict:
-            flagged.append((game, reference))
+            flagged.append((game, assessment.usual))
     if changed:
         session.commit()
     return flagged

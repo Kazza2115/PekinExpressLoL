@@ -78,14 +78,17 @@ le récupère).
 - **Double LP** (« Aegis of Valor ») : Riot double parfois les LP d'une victoire (joueur en
   autofill, parfois support ou jungle). L'API Riot ne le signale pas, donc le site le repère aux
   LP : une victoire Solo/Duo qui rapporte au moins **1,6 fois le gain habituel** du joueur (et
-  au moins 30 LP). Le gain habituel est la médiane de ses victoires les plus proches dans le
-  temps ; il en faut au moins 3, sinon la victoire attend d'être jugée (jamais de double LP sans
-  comparaison : après les placements, +40 ou +50 LP est normal). Une victoire dont les LP se
-  mélangent à ceux d'une autre partie Riot n'est pas jugée. **La moitié du gain est retirée des
+  au moins 24 LP). Le gain habituel est la médiane de ses victoires les plus proches dans le
+  temps, lues dans ses parties enregistrées et dans ses relevés de rang (y compris avant le
+  début si le site tournait déjà) ; il en faut au moins 3, sinon la victoire attend d'être
+  jugée (jamais de double LP sans comparaison : après les placements, +40 ou +50 LP est
+  normal). Une victoire jugée normale est rejugée quand de nouvelles victoires arrivent. Une
+  victoire dont les LP se mélangent à ceux d'une autre partie Riot n'est pas jugée. **La moitié du gain est retirée des
   LP nets**, le bot l'annonce sur Discord (sur la carte du résultat, ou dans un message à part
   si elle est repérée plus tard) et la partie porte la mention « ⚡ Double LP ». L'organisateur
-  corrige une détection fausse ou manquée dans **Admin → Double LP** : sa décision est annoncée
-  sur Discord (confirmation, ou LP rendus).
+  corrige une détection fausse ou manquée dans **Admin → Double LP**, où chaque victoire dit
+  pourquoi elle est jugée ainsi (seuil, comparaison manquante…) : sa décision est annoncée sur
+  Discord (confirmation, ou LP rendus).
 - Les LP d'une partie terminée **avant le début ou après la fin** ne comptent pas, même si Riot
   ne les publie qu'après coup : les compteurs de victoires et défaites de Riot disent combien
   de parties chaque relevé de rang couvre, et la part des parties hors des heures est retirée.
