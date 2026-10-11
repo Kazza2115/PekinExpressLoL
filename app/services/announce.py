@@ -258,9 +258,13 @@ _palmares_lock = asyncio.Lock()
 
 
 def _palmares_due(challenge: Challenge | None, now: datetime) -> bool:
-    if challenge is None or challenge.status != ChallengeStatus.FINISHED or challenge.palmares_announced_at is not None:
+    if challenge is None or challenge.status != ChallengeStatus.FINISHED:
         return False
     end = as_utc(challenge.end_at)
+    done = as_utc(challenge.palmares_announced_at)
+    # Déjà posté pour cette fin-là ; une fin repoussée (challenge rouvert) appelle un nouveau palmarès
+    if done is not None and (end is None or done >= end):
+        return False
     return end is None or now >= end + PALMARES_DELAY
 
 

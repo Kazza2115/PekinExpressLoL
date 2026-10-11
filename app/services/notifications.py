@@ -663,12 +663,19 @@ def _embed_size(embed: Mapping[str, Any]) -> int:
 
 
 def _trophy_line(trophy: Mapping[str, Any]) -> str | None:
-    winners = trophy.get("winners") or []
+    """« 🔪 Carnage — **Alice** · 18/2/5 avec Katarina » ; ex aequo : le détail de chacun s'il diffère."""
+    winners = list(trophy.get("winners") or [])
     if not winners:
         return None
-    names = " & ".join(f"**{w.get('display_name') or w.get('name')}**" for w in winners[:3])
+    shown = winners[:3]
     more = f" (+{len(winners) - 3})" if len(winners) > 3 else ""
-    return f"{trophy.get('icon')} {trophy.get('title')} — {names}{more} · {winners[0].get('label') or ''}".rstrip(" ·")
+    labels = [str(w.get("label") or "") for w in shown]
+    name = lambda w: f"**{w.get('display_name') or w.get('name')}**"  # noqa: E731
+    if len(set(labels)) == 1:
+        body = " & ".join(name(w) for w in shown) + more + (f" · {labels[0]}" if labels[0] else "")
+    else:
+        body = " & ".join(f"{name(w)} ({label})" if label else name(w) for w, label in zip(shown, labels)) + more
+    return f"{trophy.get('icon')} {trophy.get('title')} — {body}"
 
 
 def build_palmares_message(
@@ -709,15 +716,15 @@ def build_palmares_message(
             "description": "\n".join(podium_lines + ([""] + duo_lines if duo_lines else [])) or "Pas encore de duo classé.",
             "color": COLOR_GOLD,
         },
+        # Pas d'`url` sur les cartes suivantes : Discord n'affiche qu'une carte par URL identique
         {
             "title": "🎖️ Trophées individuels",
-            "url": link,
             "description": "\n".join(glory) or "Aucun trophée décerné.",
             "color": COLOR_INFO,
         },
     ]
     if shame:
-        embeds.append({"title": "🤡 Trophées de la honte", "url": link, "description": "\n".join(shame), "color": COLOR_LOSS})
+        embeds.append({"title": "🤡 Trophées de la honte", "description": "\n".join(shame), "color": COLOR_LOSS})
     embeds[-1]["description"] += f"\n\n[📜 Victoires et exploits de chacun sur le site]({link})"
     embeds[-1]["footer"] = {"text": FOOTER_TEXT}
     # Garde-fou : Discord refuse au-delà de 6000 caractères pour l'ensemble des cartes

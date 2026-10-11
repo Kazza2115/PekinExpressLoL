@@ -198,22 +198,20 @@ def award(spec: TrophySpec, players: list[PlayerStats]) -> list[tuple[PlayerStat
     """Gagnant(s) d'un trophée (ex aequo partagés) ; vide si personne n'est éligible."""
     if len(players) < spec.min_players:
         return []
-    candidates: list[tuple[PlayerStats, float]] = []
+    pool: list[tuple[PlayerStats, float]] = []  # joueurs éligibles (assez de parties, valeur connue)
     for p in players:
         if p.games < spec.min_games:
             continue
         value = spec.value(p)
-        if value is None:
-            continue
-        if spec.min_value is not None and value < spec.min_value:
-            continue
-        candidates.append((p, float(value)))
+        if value is not None:
+            pool.append((p, float(value)))
+    candidates = [(p, v) for p, v in pool if spec.min_value is None or v >= spec.min_value]
     if not candidates:
         return []
     best = (max if spec.higher else min)(value for _p, value in candidates)
     winners = [(p, value) for p, value in candidates if abs(value - best) < 1e-9]
-    if len(winners) == len(candidates) >= 3:
-        return []  # tout le monde à égalité (ex. 10 parties chacun) : rien ne distingue personne
+    if len(winners) == len(pool) >= 3:
+        return []  # tous les joueurs éligibles à égalité (ex. 10 parties chacun) : personne ne se distingue
     return winners
 
 
@@ -254,11 +252,15 @@ def team_trophies(teams: list[TeamStats]) -> list[dict[str, Any]]:
             ],
         }
 
+    playing = [t for t in teams if t.games > 0]
+
     def best(values: list[tuple[TeamStats, float]]) -> list[TeamStats]:
         if not values:
             return []
         top = max(v for _t, v in values)
-        return [t for t, v in values if abs(v - top) < 1e-9]
+        picked = [t for t, v in values if abs(v - top) < 1e-9]
+        # Tous les duos à égalité (au moins 3) : rien ne les distingue
+        return [] if len(picked) == len(playing) >= 3 else picked
 
     together = [(t, t.together_winrate) for t in teams if t.together_games >= MIN_TOGETHER_GAMES and t.together_winrate is not None]
     games = [(t, float(t.games)) for t in teams if t.games > 0]

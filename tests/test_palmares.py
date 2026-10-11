@@ -42,6 +42,8 @@ def test_ties_are_shared_and_minimums_apply():
     assert [p.player_id for p, _v in award(SPECS["red_lantern"], players)] == [3]
     assert award(SPECS["red_lantern"], [a]) == []  # seul joueur : pas de lanterne rouge
     assert award(SPECS["steals"], players) == []  # personne n'a volé d'objectif : non décerné
+    thieves = [_member(i, games=6, objectives_stolen=1 if i <= 3 else 0) for i in range(1, 9)]
+    assert [p.player_id for p, _v in award(SPECS["steals"], thieves)] == [1, 2, 3]  # 3 voleurs sur 8 : partagé
     same = [_member(i, games=10, wins=5, losses=5) for i in (1, 2, 3)]
     assert award(SPECS["grinder"], same) == []  # tous à égalité : rien ne les distingue
     assert [p.player_id for p, _v in award(SPECS["grinder"], same[:2])] == [1, 2]  # à deux : partagé
@@ -96,7 +98,8 @@ def test_palmares_discord_message_fits_discord(client: TestClient, admin_headers
     assert content.startswith("🏆 **Palmarès de la 1re édition** du ") and f"**{winner['name']}**" in content
     assert 2 <= len(embeds) <= 10
     assert sum(notifications._embed_size(e) for e in embeds) <= 6000  # noqa: SLF001
-    assert all(e["url"].endswith("/palmares") for e in embeds)
+    # Discord n'affiche qu'une carte par URL identique : seule la première a un lien
+    assert embeds[0]["url"].endswith("/palmares") and all("url" not in e for e in embeds[1:])
     assert embeds[0]["description"].startswith("🥇 **")
     assert "Victoires et exploits de chacun" in embeds[-1]["description"]
 
@@ -163,3 +166,26 @@ def test_reset_archives_the_edition(client: TestClient, admin_headers: dict):
     assert data["current"]["edition"] == 2 and data["current"]["final"] is False
     assert [e["edition"] for e in data["editions"]] == [1]
     assert client.get("/api/state").json()["challenge"]["status"] == ChallengeStatus.RUNNING.value
+
+
+def test_discord_line_gives_each_tied_winner_their_own_detail():
+    trophy = {"icon": "🎭", "title": "One-trick", "winners": [
+        {"display_name": "Alice", "label": "7 parties sur Yasuo"},
+        {"display_name": "Bob", "label": "7 parties sur Lux"},
+    ]}
+    assert notifications._trophy_line(trophy) == (  # noqa: SLF001
+        "🎭 One-trick — **Alice** (7 parties sur Yasuo) & **Bob** (7 parties sur Lux)"
+    )
+    same = {"icon": "🏳️", "title": "Roi du /ff", "winners": [
+        {"display_name": "Alice", "label": "1 abandon"}, {"display_name": "Bob", "label": "1 abandon"},
+    ]}
+    assert notifications._trophy_line(same) == "🏳️ Roi du /ff — **Alice** & **Bob** · 1 abandon"  # noqa: SLF001
+
+
+def test_reopened_challenge_gets_a_new_final_palmares():
+    end = utcnow() - timedelta(hours=5)
+    challenge = Challenge(status=ChallengeStatus.FINISHED, end_at=end, palmares_announced_at=end + timedelta(minutes=31))
+    assert announce._palmares_due(challenge, utcnow()) is False  # noqa: SLF001 — déjà posté pour cette fin
+    challenge.end_at = end + timedelta(hours=2)  # rouvert, puis terminé plus tard
+    assert announce._palmares_due(challenge, end + timedelta(hours=2, minutes=10)) is False  # noqa: SLF001 — 30 min
+    assert announce._palmares_due(challenge, end + timedelta(hours=3)) is True  # noqa: SLF001
