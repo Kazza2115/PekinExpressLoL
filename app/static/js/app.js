@@ -1331,6 +1331,11 @@
     App.notify(msg, 'Seules les parties terminées à partir de maintenant en profitent.', `joker-${d.team_id || ''}`);
   });
   App.onEvent('joker_cancelled', () => App.toast('🃏 Un joker a été annulé par l’organisateur.', { type: 'info' }));
+  App.onEvent('palmares_announced', (d) => {
+    const msg = d.final ? `🏆 Le palmarès de la ${d.edition_label || 'édition'} est en ligne${d.winner ? ` : bravo à ${d.winner} !` : ''}` : '🏆 Palmarès provisoire posté sur Discord';
+    App.toast(`${App.escapeHtml(msg)} → <a href="/palmares">voir les trophées</a>`, { type: 'success', timeout: 12000, html: true });
+    App.notify(msg, 'Trophées, victoires et exploits de chacun sur la page Palmarès.', 'palmares');
+  });
   App.onEvent('double_lp', (d) => {
     const msg = `⚡ Double LP repéré pour ${who(d)} : ${d.lp_bonus || 0} LP bonus retirés de ses LP nets`;
     App.toast(msg, { type: 'warning', timeout: 9000 });

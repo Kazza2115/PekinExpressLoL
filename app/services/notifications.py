@@ -650,6 +650,83 @@ def build_double_lp_cancel_message(
     return content, [embed]
 
 
+COLOR_GOLD = 0xF1C40F
+PODIUM_MEDALS = ("🥇", "🥈", "🥉")
+# Discord refuse un message dont les cartes dépassent 6000 caractères au total
+EMBEDS_TOTAL_LIMIT = 5800
+
+
+def _embed_size(embed: Mapping[str, Any]) -> int:
+    size = len(str(embed.get("title") or "")) + len(str(embed.get("description") or ""))
+    size += len(str((embed.get("footer") or {}).get("text") or "")) + len(str((embed.get("author") or {}).get("name") or ""))
+    return size + sum(len(str(f.get("name") or "")) + len(str(f.get("value") or "")) for f in embed.get("fields") or [])
+
+
+def _trophy_line(trophy: Mapping[str, Any]) -> str | None:
+    winners = trophy.get("winners") or []
+    if not winners:
+        return None
+    names = " & ".join(f"**{w.get('display_name') or w.get('name')}**" for w in winners[:3])
+    more = f" (+{len(winners) - 3})" if len(winners) > 3 else ""
+    return f"{trophy.get('icon')} {trophy.get('title')} — {names}{more} · {winners[0].get('label') or ''}".rstrip(" ·")
+
+
+def build_palmares_message(
+    palmares: Mapping[str, Any], *, settings: Settings | None = None
+) -> tuple[str, list[dict[str, Any]]]:
+    """(texte, cartes) du palmarès : podium des duos, trophées de duo, trophées individuels et de
+    la honte, lien vers la page `/palmares` (victoires et exploits de chacun)."""
+    settings = settings if settings is not None else get_settings()
+    link = share_link("/palmares", settings)
+    label = palmares.get("edition_label") or "1re édition"
+    name = palmares.get("name") or "Pékin Express LoL"
+    final = bool(palmares.get("final"))
+    podium = list(palmares.get("podium") or [])
+    winner = podium[0] if podium else None
+    duo = ""
+    if winner is not None:
+        mates = " & ".join(p.get("display_name") or "?" for p in winner.get("players") or [])
+        duo = f" : bravo à **{winner.get('name')}**" + (f" ({mates})" if mates else "") + " !"
+    title = f"Palmarès de la {label}" if final else f"Palmarès provisoire ({label}, challenge en cours)"
+    content = f"🏆 **{title}** du {name}{duo}"
+
+    podium_lines = []
+    for index, team in enumerate(podium[:3]):
+        mates = " & ".join(p.get("display_name") or "?" for p in team.get("players") or [])
+        record = f"{team.get('wins', 0)} V / {team.get('losses', 0)} D"
+        podium_lines.append(
+            f"{PODIUM_MEDALS[index]} **{team.get('name')}** — {mates} · **{format_lp_delta(int(team.get('lp_net') or 0))}**"
+            f" nets · {record}"
+        )
+    duo_lines = [line for line in (_trophy_line(t) for t in palmares.get("team_trophies") or []) if line]
+    glory = [line for line in (_trophy_line(t) for t in palmares.get("trophies") or [] if t.get("category") != "honte") if line]
+    shame = [line for line in (_trophy_line(t) for t in palmares.get("trophies") or [] if t.get("category") == "honte") if line]
+
+    embeds: list[dict[str, Any]] = [
+        {
+            "title": f"🏆 Les vainqueurs · {label}",
+            "url": link,
+            "description": "\n".join(podium_lines + ([""] + duo_lines if duo_lines else [])) or "Pas encore de duo classé.",
+            "color": COLOR_GOLD,
+        },
+        {
+            "title": "🎖️ Trophées individuels",
+            "url": link,
+            "description": "\n".join(glory) or "Aucun trophée décerné.",
+            "color": COLOR_INFO,
+        },
+    ]
+    if shame:
+        embeds.append({"title": "🤡 Trophées de la honte", "url": link, "description": "\n".join(shame), "color": COLOR_LOSS})
+    embeds[-1]["description"] += f"\n\n[📜 Victoires et exploits de chacun sur le site]({link})"
+    embeds[-1]["footer"] = {"text": FOOTER_TEXT}
+    # Garde-fou : Discord refuse au-delà de 6000 caractères pour l'ensemble des cartes
+    while sum(_embed_size(e) for e in embeds) > EMBEDS_TOTAL_LIMIT and len(embeds[1]["description"].split("\n")) > 3:
+        lines = embeds[1]["description"].split("\n")
+        embeds[1]["description"] = "\n".join(lines[:-2] + ["…"])
+    return content, embeds
+
+
 @dataclass
 class LiveNotice:
     """Un joueur du challenge qui vient de lancer une partie classée."""

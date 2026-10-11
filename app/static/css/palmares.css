@@ -1,0 +1,120 @@
+/* ==========================================================================
+   Palmarès (/palmares) : podium des duos, trophées, victoires et exploits
+   S'appuie sur les jetons de app.css (--surface, --accent, --green…).
+   ========================================================================== */
+
+#pm-root .avatar-md { --avatar-size: 42px; }
+.pm-name { font-weight: 700; color: var(--text-strong); min-width: 0; overflow-wrap: anywhere; }
+.pm-name a { color: inherit; }
+.pm-team-chip { max-width: 180px; font-size: 11px; padding: 1px 8px; }
+.pm-editions { gap: 6px; }
+
+/* --------------------------------------------------------------------------
+   Podium
+   -------------------------------------------------------------------------- */
+.pm-hero {
+  padding: 26px 24px 20px;
+  background:
+    radial-gradient(640px 280px at 50% 0%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 70%),
+    var(--surface);
+  border-color: color-mix(in srgb, var(--accent) 25%, var(--border));
+}
+.pm-podium { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: end; }
+.pm-podium-card {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center;
+  padding: 18px 14px 0; border-radius: var(--radius); overflow: hidden;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--team-color) 16%, var(--surface-2)), var(--surface-2));
+  border: 1px solid color-mix(in srgb, var(--team-color) 35%, var(--border));
+}
+.pm-podium-card.place-1 { padding-top: 26px; box-shadow: 0 10px 40px color-mix(in srgb, var(--accent) 18%, transparent); border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.pm-medal { font-size: 34px; line-height: 1; }
+.pm-podium-card.place-1 .pm-medal { font-size: 48px; }
+.pm-place { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.pm-podium-card.place-1 .pm-place { color: var(--accent); }
+.pm-team-name { margin: 0; font-size: 20px; line-height: 1.2; overflow-wrap: anywhere; }
+.pm-podium-card.place-1 .pm-team-name { font-size: 24px; }
+.pm-team-lp { font-size: 18px; font-weight: 800; }
+.pm-team-record { font-size: 12.5px; }
+.pm-podium-players { display: flex; flex-direction: column; gap: 8px; width: 100%; margin: 10px 0 14px; text-align: left; }
+.pm-podium-player { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 8px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--surface) 65%, transparent); }
+.pm-podium-player > div { min-width: 0; }
+.pm-podium-player .muted { font-size: 12px; }
+.pm-step {
+  align-self: stretch; margin: 0 -14px; padding: 10px 0; font-size: 22px; font-weight: 900; color: var(--muted);
+  background: color-mix(in srgb, var(--team-color) 10%, var(--surface-3));
+  border-top: 1px solid color-mix(in srgb, var(--team-color) 30%, var(--border));
+}
+.pm-podium-card.place-1 .pm-step { padding: 22px 0; color: var(--accent); }
+.pm-podium-card.place-2 .pm-step { padding: 14px 0; }
+
+.pm-rest { list-style: none; margin: 18px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pm-rest li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-2); min-width: 0; }
+.pm-rest-pos { width: 22px; font-weight: 800; color: var(--muted); text-align: center; flex: 0 0 auto; }
+.pm-rest .truncate { flex: 1 1 auto; min-width: 0; }
+.pm-rest-lp { margin-left: auto; font-weight: 700; flex: 0 0 auto; }
+
+/* --------------------------------------------------------------------------
+   Trophées
+   -------------------------------------------------------------------------- */
+.pm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; align-items: start; }
+.pm-trophy {
+  display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; border-radius: var(--radius);
+  background: var(--surface); border: 1px solid var(--border); min-width: 0;
+}
+.pm-trophy.is-empty { opacity: 0.55; }
+.pm-trophy.is-shame { background: linear-gradient(180deg, color-mix(in srgb, var(--red) 6%, var(--surface)), var(--surface)); }
+.pm-trophy-head { display: flex; gap: 12px; align-items: flex-start; }
+.pm-trophy-head h3 { margin: 0 0 2px; font-size: 15px; }
+.pm-trophy-head p { margin: 0; font-size: 12px; line-height: 1.35; }
+.pm-trophy-icon {
+  flex: 0 0 auto; width: 42px; height: 42px; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 22px; border-radius: 12px; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.pm-trophy.is-shame .pm-trophy-icon { background: var(--red-soft); border-color: color-mix(in srgb, var(--red) 30%, transparent); }
+.pm-winners { display: flex; flex-direction: column; gap: 8px; margin-top: auto; position: relative; }
+.pm-winner { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.pm-winner-text { min-width: 0; }
+.pm-value { font-size: 12.5px; color: var(--accent); font-weight: 600; overflow-wrap: anywhere; }
+.pm-trophy.is-shame .pm-value { color: #ff8a8a; }
+.pm-none { font-size: 13px; font-style: italic; }
+.pm-tie { align-self: flex-start; font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+
+/* --------------------------------------------------------------------------
+   Joueurs : victoires et exploits
+   -------------------------------------------------------------------------- */
+.pm-players { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.pm-player { display: flex; flex-direction: column; gap: 14px; border-top: 3px solid var(--team-color); min-width: 0; }
+.pm-player-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.pm-player-pos { flex: 0 0 auto; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: 9px; background: var(--surface-2); font-weight: 800; color: var(--muted); }
+.pm-player-id { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.pm-player-name { font-size: 16px; }
+.pm-rank { font-size: 12.5px; }
+.pm-player-lp { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; font-weight: 800; font-size: 17px; }
+.pm-player-lp .muted { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.pm-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.pm-stats > div { display: flex; flex-direction: column; align-items: center; padding: 8px 4px; border-radius: var(--radius-sm); background: var(--surface-2); }
+.pm-stat-value { font-weight: 800; font-size: 16px; color: var(--text-strong); }
+.pm-stats .muted { font-size: 11px; }
+.pm-badges { display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; }
+.pm-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; background: var(--accent-soft); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+.pm-badge.is-shame { background: var(--red-soft); color: #ff8a8a; border-color: color-mix(in srgb, var(--red) 30%, transparent); }
+.pm-block h4 { margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.pm-exploits, .pm-wins { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.pm-exploits li { display: flex; gap: 8px; font-size: 13px; line-height: 1.4; }
+.pm-exploits li > span:first-child { flex: 0 0 auto; width: 18px; text-align: center; }
+.pm-wins li { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.pm-win-score { flex: 1 1 auto; min-width: 0; }
+
+@media (max-width: 860px) {
+  .pm-podium { grid-template-columns: 1fr; }
+  /* Sur mobile : vainqueurs d'abord */
+  .pm-podium-card.place-1 { order: -1; }
+  .pm-step { display: none; }
+  .pm-podium-players { margin-bottom: 16px; }
+}
+@media (max-width: 420px) {
+  .pm-hero { padding: 18px 14px 14px; }
+  .pm-players { grid-template-columns: 1fr; }
+  .pm-grid { grid-template-columns: 1fr; }
+  .pm-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

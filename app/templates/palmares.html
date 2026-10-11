@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Palmarès · {{ challenge.name }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/css/palmares.css?v={{ asset_v }}">{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="section-label">Palmarès</span>
+    <h1 class="page-title" id="pm-title">Les vainqueurs</h1>
+    <div class="page-sub flex wrap" style="gap:14px"><span class="muted" id="pm-sub">Chargement…</span></div>
+  </div>
+  <div class="btn-row pm-editions" id="pm-editions" role="tablist" aria-label="Éditions" hidden></div>
+</div>
+
+<div id="pm-root">
+  <section class="card pm-hero skeleton" style="min-height:280px" aria-label="Podium"></section>
+</div>
+{% endblock %}
+
+{% block scripts %}<script src="/static/js/palmares.js?v={{ asset_v }}"></script>{% endblock %}

@@ -8,12 +8,12 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from app.api import routes_api
 from app.db.models import Challenge, ChallengeStatus, Joker, Match, MatchParticipant, Queue, RankSnapshot
 from app.services.notifications import format_joker_used, format_match_recorded
 from app.services.stats import compute_player_stats, excluded_lp, split_daily_quota
 from tests.conftest import ADMIN_PASSWORD
 from tests.test_poller import events_of
+from tests.test_schedule import FrozenClock
 from tests.test_stats import PARIS, game, make_player as stats_player, snap, utc
 
 H = {"X-Admin-Password": ADMIN_PASSWORD}
@@ -125,7 +125,8 @@ def test_excluded_lp_without_counters_changes_nothing() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def start_duo(client: TestClient, monkeypatch: pytest.MonkeyPatch, now: datetime) -> tuple[int, list[int]]:
+def start_duo(client: TestClient) -> tuple[int, list[int]]:
+    """Deux duos, challenge démarré avec ses dates (« Démarrer » cliqué à l'heure de l'horloge figée)."""
     ids = []
     for name, riot in (("Mike", "Mike Demo#EUW"), ("Léa", "Lea Demo#EUW"), ("Tom", "Tom Demo#EUW")):
         r = client.post("/api/players", json={"display_name": name, "riot_id": riot})
@@ -135,18 +136,18 @@ def start_duo(client: TestClient, monkeypatch: pytest.MonkeyPatch, now: datetime
     client.post("/api/admin/teams", headers=H, json={"player_ids": ids[2:]})
     r = client.post("/api/admin/challenge/start", headers=H, json={"start_at": START.isoformat(), "end_at": END.isoformat()})
     assert r.status_code == 200, r.text
-    monkeypatch.setattr(routes_api, "utcnow", lambda: now)
     return team["id"], ids
 
 
 def test_joker_route_rules(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    team_id, ids = start_duo(client, monkeypatch, START - timedelta(hours=1))
+    clock = FrozenClock(monkeypatch, START - timedelta(hours=1))
+    team_id, ids = start_duo(client)
     url = f"/api/teams/{team_id}/joker"
     # Avant le début : refusé
     r = client.post(url, json={"player_id": ids[0]})
     assert r.status_code == 400 and "pas encore commencé" in r.json()["detail"]
 
-    monkeypatch.setattr(routes_api, "utcnow", lambda: START + timedelta(hours=3))
+    clock.now = START + timedelta(hours=3)
     # Joueur d'un autre duo : refusé
     assert client.post(url, json={"player_id": ids[2]}).status_code == 400
     r = client.post(url, json={"player_id": ids[1]})
@@ -156,7 +157,7 @@ def test_joker_route_rules(client: TestClient, monkeypatch: pytest.MonkeyPatch) 
     assert events_of("joker_used")
     # Une seule fois
     assert "déjà actif aujourd'hui" in client.post(url, json={"player_id": ids[0]}).json()["detail"]
-    monkeypatch.setattr(routes_api, "utcnow", lambda: START + timedelta(days=1))
+    clock.now = START + timedelta(days=1)
     assert "déjà utilisé son joker" in client.post(url, json={"player_id": ids[0]}).json()["detail"]
 
     duo = next(t for t in client.get("/api/duos").json()["teams"] if t["team_id"] == team_id)
@@ -168,13 +169,14 @@ def test_joker_route_rules(client: TestClient, monkeypatch: pytest.MonkeyPatch) 
     assert client.post(url, json={"player_id": ids[0]}).status_code == 201
 
     # Après la fin : refusé
-    monkeypatch.setattr(routes_api, "utcnow", lambda: END + timedelta(minutes=1))
+    clock.now = END + timedelta(minutes=1)
     other = next(t for t in client.get("/api/duos").json()["teams"] if t["team_id"] != team_id)
     assert "fini" in client.post(f"/api/teams/{other['team_id']}/joker", json={"player_id": ids[2]}).json()["detail"]
 
 
 def test_joker_counts_in_player_stats(client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
-    team_id, ids = start_duo(client, monkeypatch, START + timedelta(hours=1))
+    FrozenClock(monkeypatch, START + timedelta(hours=1))
+    team_id, ids = start_duo(client)
     assert client.post(f"/api/teams/{team_id}/joker", json={"player_id": ids[0]}).status_code == 201
     for i in range(14):
         end = START + timedelta(hours=1, minutes=40 * (i + 1))
@@ -193,9 +195,8 @@ def test_joker_counts_in_player_stats(client: TestClient, session: Session, monk
 
 
 def test_dates_sent_with_start_and_reopen_after_finish(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.api import routes_admin
-
-    start_duo(client, monkeypatch, START + timedelta(hours=1))
+    clock = FrozenClock(monkeypatch, START + timedelta(hours=1))
+    start_duo(client)
     # Démarrer une seconde fois : refusé, dates intactes
     r = client.post("/api/admin/challenge/start", headers=H, json={"start_at": None, "end_at": None})
     assert r.status_code == 400
@@ -204,7 +205,7 @@ def test_dates_sent_with_start_and_reopen_after_finish(client: TestClient, monke
     # Effacer le début d'un challenge en cours : refusé
     assert client.patch("/api/admin/challenge", headers=H, json={"start_at": None}).status_code == 400
     # Fini par erreur (fin dimanche 00h saisie), puis fin repoussée : le challenge reprend
-    monkeypatch.setattr(routes_admin, "utcnow", lambda: START + timedelta(hours=2))
+    clock.now = START + timedelta(hours=2)
     client.post("/api/admin/challenge/finish", headers=H)
     r = client.patch("/api/admin/challenge", headers=H, json={"end_at": "2099-10-12T00:00"})
     assert r.json()["reopened"] is True and r.json()["challenge"]["status"] == "running"

@@ -73,6 +73,19 @@ class Challenge(SQLModel, table=True):
     jokers_per_team: int = 1
     joker_extra_games: int = 3
     created_at: datetime = Field(default_factory=utcnow)
+    palmares_announced_at: datetime | None = None  # palmarès (vainqueurs, trophées) posté sur Discord
+
+
+class Edition(SQLModel, table=True):
+    """Palmarès figé d'une édition terminée (gardé quand le challenge est réinitialisé)."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    number: int = Field(index=True)  # 1 = première édition
+    name: str
+    start_at: datetime | None = None
+    end_at: datetime | None = None
+    archived_at: datetime = Field(default_factory=utcnow)
+    payload: str  # JSON du palmarès (`services.palmares.build_palmares`)
 
 
 class Team(SQLModel, table=True):

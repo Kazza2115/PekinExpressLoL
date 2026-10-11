@@ -313,6 +313,30 @@ Dans la page **Admin**, **« Terminer »** lance un dernier relevé puis fige le
 l'instant du clic. Les parties terminées avant ce moment comptent (le site laisse quelques
 minutes de marge pour que Riot les remonte) ; celles terminées après ne comptent plus.
 
+### 5. Le palmarès
+
+La page **Palmarès** (`/palmares`) affiche les vainqueurs de l'édition et les trophées :
+
+- **le podium des duos** (LP nets) et des **trophées de duo** (duo fusionnel, increvable, en feu) ;
+- **les trophées individuels** : MVP, Machine à gagner, Sniper (winrate), Inarrêtable (série),
+  Ascenseur, Jackpot, Intouchable (KDA), Le boucher, Carnage, Roi des multikills, Premier sang,
+  Canon à dégâts, Fermier en chef, Picsou, Œil de Sauron, Chasseur de monstres, Démolisseur,
+  Voleur, Mur de briques, Infirmier, Maître du contrôle, No-life, Marathonien, One-trick,
+  Couteau suisse… Les ex aequo se partagent le trophée ; les moyennes demandent 3 parties
+  (5 pour le winrate) ; un trophée que personne n'a mérité (aucun objectif volé…) n'est pas
+  décerné ;
+- **les trophées de la honte**, pour rire : Lanterne rouge, Abonné à l'écran gris, Fantôme,
+  Série noire, Roi du /ff, Abonné à l'Aegis, Hors-la-loi, Touriste ;
+- **les victoires et exploits de chacun** : bilan (victoires, défaites, winrate, rang de départ
+  → d'arrivée), trophées gagnés, exploits (pentakills, records, séries, promotions…) et plus
+  belles victoires.
+
+Pendant le challenge, la page montre un palmarès **provisoire**. **30 minutes après la fin**
+(le temps que les dernières parties arrivent), le bot poste le palmarès définitif sur Discord
+(une seule fois) ; **Admin → Système → « 🏆 Annoncer le palmarès »** le poste tout de suite.
+À la **réinitialisation**, le palmarès de l'édition terminée est gardé : la page affiche alors
+les éditions précédentes (« 1re édition », « 2e édition »…).
+
 ### Option : une fenêtre différente par duo
 
 Si les duos ne jouent pas le même week-end, l'organisateur peut définir dans l'admin, pour

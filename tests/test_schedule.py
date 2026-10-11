@@ -8,9 +8,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from app.api import routes_admin
+from app.api import leaderboard, routes_admin, routes_api
 from app.db.models import Challenge, ChallengeStatus, Match, MatchParticipant, Queue
 from app.events import bus
+from app.services import announce
 from app.services import poller as poller_module
 from app.services.poller import Poller
 from app.state import state
@@ -20,6 +21,30 @@ from tests.test_poller import ScriptedAPI, events_of
 H = {"X-Admin-Password": ADMIN_PASSWORD}
 START_UTC = datetime(2026, 10, 10, 7, 0, tzinfo=timezone.utc)  # samedi 9h à Paris (UTC+2)
 END_UTC = datetime(2026, 10, 11, 22, 0, tzinfo=timezone.utc)  # lundi 00h à Paris
+EVE_UTC = START_UTC - timedelta(days=1)  # vendredi 9h à Paris : la veille du début
+
+# Toutes les lectures de « maintenant » de l'app sur le chemin des routes testées (Admin, API,
+# classement, annonces, et le cycle du poller lancé par « Démarrer » / « Terminer »)
+APP_CLOCKS = (
+    (routes_admin, "utcnow"),
+    (routes_api, "utcnow"),
+    (leaderboard, "utcnow"),
+    (announce, "utcnow"),
+    (poller_module, "_utcnow"),
+)
+
+
+class FrozenClock:
+    """« Maintenant » figé à `now` pour toute l'app (avancer : `clock.now = …`).
+
+    Le calendrier testé est daté (octobre 2026) : sans horloge figée, la date réelle finit par le
+    rattraper (le cycle lancé par « Démarrer » termine alors le challenge dont la fin est passée).
+    """
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, now: datetime) -> None:
+        self.now = now
+        for module, name in APP_CLOCKS:
+            monkeypatch.setattr(module, name, lambda: self.now)
 
 
 
@@ -55,7 +80,10 @@ def add_game(session: Session, player_id: int, match_id: str, end_utc: datetime)
         ("2026-10-10T07:00:00.000Z", "2026-10-11T22:00:00.000Z"),  # ce qu'envoie le navigateur (Admin)
     ],
 )
-def test_planned_dates_survive_start_and_bound_the_games(client: TestClient, session: Session, start_value, end_value):
+def test_planned_dates_survive_start_and_bound_the_games(
+    client: TestClient, session: Session, monkeypatch: pytest.MonkeyPatch, start_value, end_value
+):
+    FrozenClock(monkeypatch, EVE_UTC)
     ids = setup_duo(client)
     r = client.patch("/api/admin/challenge", headers=H, json={"start_at": start_value, "end_at": end_value})
     assert r.status_code == 200, r.text
@@ -80,29 +108,31 @@ def test_planned_dates_survive_start_and_bound_the_games(client: TestClient, ses
 
 
 def test_finish_after_the_planned_end_keeps_it(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    clock = FrozenClock(monkeypatch, EVE_UTC)
     setup_duo(client)
     client.patch("/api/admin/challenge", headers=H, json={"start_at": "2026-10-10T09:00", "end_at": "2026-10-12T00:00"})
     assert client.post("/api/admin/challenge/start", headers=H, json={}).status_code == 200
 
     # « Terminer » cliqué lundi à 10h : la fin reste lundi 00h
-    monkeypatch.setattr(routes_admin, "utcnow", lambda: END_UTC + timedelta(hours=10))
+    clock.now = END_UTC + timedelta(hours=10)
     r = client.post("/api/admin/challenge/finish", headers=H)
     assert r.status_code == 200, r.text
     assert parse(r.json()["challenge"]["end_at"]) == END_UTC
 
     # Redémarrer après un challenge terminé : les anciennes dates ne sont pas reprises
     later = END_UTC + timedelta(days=7)
-    monkeypatch.setattr(routes_admin, "utcnow", lambda: later)
+    clock.now = later
     r = client.post("/api/admin/challenge/start", headers=H, json={})
     assert parse(r.json()["challenge"]["start_at"]) == later and r.json()["challenge"]["end_at"] is None
 
 
 def test_finish_before_the_planned_end_ends_now(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    clock = FrozenClock(monkeypatch, EVE_UTC)
     setup_duo(client)
     client.patch("/api/admin/challenge", headers=H, json={"start_at": "2026-10-10T09:00", "end_at": "2026-10-12T00:00"})
     client.post("/api/admin/challenge/start", headers=H, json={})
     early = START_UTC + timedelta(hours=5)
-    monkeypatch.setattr(routes_admin, "utcnow", lambda: early)
+    clock.now = early
     r = client.post("/api/admin/challenge/finish", headers=H)
     assert parse(r.json()["challenge"]["end_at"]) == early
 

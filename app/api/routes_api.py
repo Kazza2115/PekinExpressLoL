@@ -59,6 +59,7 @@ from app.events import bus
 from app.riot import ddragon, get_api
 from app.riot.base import RiotAPI
 from app.services import notifications
+from app.services.palmares import palmares_overview
 from app.services.scoreboard import ScoreboardError, build_live_board, build_scoreboard
 from app.services.registration import link_player, parse_riot_id, register_player
 from app.services.stats import (
@@ -417,6 +418,14 @@ def get_rankings(
         "generated_at": now.isoformat(),
         **_ladder(teams, players),
     }
+
+
+@router.get("/api/palmares")
+def get_palmares(
+    session: Session = Depends(get_session), challenge: Challenge = Depends(get_challenge)
+) -> dict[str, Any]:
+    """Palmarès : édition en cours (provisoire tant qu'elle n'est pas terminée) et éditions passées."""
+    return {"challenge": challenge_to_dict(challenge), **palmares_overview(session, challenge)}
 
 
 @router.get("/api/players/{player_id}")

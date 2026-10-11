@@ -245,3 +245,79 @@ async def announce_placements(*, settings: Settings | None = None, now: datetime
     except Exception:  # noqa: BLE001 — jamais bloquant pour le suivi des parties
         log.warning("Annonce des placements impossible", exc_info=True)
         return 0
+
+
+# --------------------------------------------------------------------------- #
+# Palmarès : vainqueurs et trophées, une fois le challenge terminé
+# --------------------------------------------------------------------------- #
+
+# Le palmarès part quand les dernières parties ont pu arriver (Match-V5 publie parfois une partie
+# quelques minutes après la fin : le poller les stocke encore 30 min)
+PALMARES_DELAY = timedelta(minutes=30)
+_palmares_lock = asyncio.Lock()
+
+
+def _palmares_due(challenge: Challenge | None, now: datetime) -> bool:
+    if challenge is None or challenge.status != ChallengeStatus.FINISHED or challenge.palmares_announced_at is not None:
+        return False
+    end = as_utc(challenge.end_at)
+    return end is None or now >= end + PALMARES_DELAY
+
+
+async def _send_palmares(settings: Settings, *, now: datetime) -> dict[str, Any]:
+    """Construit le palmarès et le poste ; note l'envoi (palmarès final seulement)."""
+    from app.services.palmares import build_palmares  # import local : palmarès → leaderboard → services
+
+    with session_scope() as session:
+        challenge = session.exec(select(Challenge).order_by(col(Challenge.id))).first()
+        if challenge is None or challenge.status not in (ChallengeStatus.RUNNING, ChallengeStatus.FINISHED):
+            return {"sent": False, "error": "Le challenge n'a pas encore commencé : pas de palmarès.", "final": False}
+        palmares = build_palmares(session, challenge, now=now)
+    if not palmares["players"]:
+        return {"sent": False, "error": "Aucun joueur classé : pas de palmarès.", "final": palmares["final"]}
+    content, embeds = notifications.build_palmares_message(palmares, settings=settings)
+    result = await notifications.post_discord(content, embeds=embeds, settings=settings)
+    if result.sent and palmares["final"]:
+        with session_scope() as session:
+            challenge = session.exec(select(Challenge).order_by(col(Challenge.id))).first()
+            if challenge is not None:
+                challenge.palmares_announced_at = now
+                session.add(challenge)
+                session.commit()
+    if result.sent:
+        winner = palmares["podium"][0]["name"] if palmares["podium"] else None
+        bus.publish("palmares_announced", {"edition_label": palmares["edition_label"], "final": palmares["final"],
+                                           "winner": winner})
+        log.info("Palmarès (%s) posté sur Discord", palmares["edition_label"])
+    else:
+        log.warning("Palmarès : %s", result.error or "envoi refusé")
+    return {"sent": result.sent, "error": result.error, "final": palmares["final"],
+            "edition_label": palmares["edition_label"]}
+
+
+async def announce_palmares_if_due(*, settings: Settings | None = None, now: datetime | None = None) -> bool:
+    """Poste le palmarès une fois, 30 min après la fin du challenge. Jamais d'exception."""
+    settings = settings if settings is not None else get_settings()
+    now = now or utcnow()
+    try:
+        if not (settings.discord_webhook_url or "").strip():
+            return False
+        async with _palmares_lock:
+            with session_scope() as session:
+                challenge = session.exec(select(Challenge).order_by(col(Challenge.id))).first()
+                if not _palmares_due(challenge, now):
+                    return False
+            result = await _send_palmares(settings, now=now)
+            return bool(result["sent"])
+    except Exception:  # noqa: BLE001 — l'annonce ne doit jamais casser le suivi des parties
+        log.warning("Palmarès impossible à poster", exc_info=True)
+        return False
+
+
+async def announce_palmares_now(*, settings: Settings | None = None) -> dict[str, Any]:
+    """Envoi à la main depuis l'Admin (palmarès provisoire si le challenge est en cours)."""
+    settings = settings if settings is not None else get_settings()
+    if not (settings.discord_webhook_url or "").strip():
+        return {"sent": False, "error": "DISCORD_WEBHOOK_URL est vide dans .env.", "final": False}
+    async with _palmares_lock:
+        return await _send_palmares(settings, now=utcnow())

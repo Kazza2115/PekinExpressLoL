@@ -56,7 +56,7 @@ from app.riot.base import (
     RiotUnreachable,
 )
 from app.services import gifs
-from app.services.announce import announce_placements, announce_start_if_due
+from app.services.announce import announce_palmares_if_due, announce_placements, announce_start_if_due
 from app.services.double_lp import assess_double_lp, lp_bonus
 from app.services.notifications import (
     MAX_EMBEDS,
@@ -539,6 +539,7 @@ class Poller:
             log.exception("Fin automatique du challenge en échec")
         await announce_start_if_due(settings=self.settings)  # « c'est parti » à l'heure du début
         await announce_placements(settings=self.settings)  # duos qui viennent de finir leurs placements
+        await announce_palmares_if_due(settings=self.settings)  # vainqueurs et trophées, après la fin
         if report.errors:
             log.info("Cycle terminé avec %d erreur(s) en %.2fs", len(report.errors), report.duration_s)
         else:

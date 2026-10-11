@@ -39,6 +39,7 @@
     btnReload: $('#btn-reload'),
     btnDiscord: $('#btn-discord'),
     btnAnnounce: $('#btn-announce'),
+    btnPalmares: $('#btn-palmares'),
   };
 
   let state = null;
@@ -821,6 +822,30 @@
       toast(err.message, { type: 'error' });
     } finally {
       App.setLoading(els.btnRefresh, false);
+    }
+  });
+
+  /* Palmarès : vainqueurs et trophées sur Discord (provisoire si le challenge est en cours). */
+  els.btnPalmares.addEventListener('click', async () => {
+    const running = state && state.challenge && state.challenge.status === 'running';
+    const res = await App.confirm({
+      title: 'Annoncer le palmarès sur Discord ?',
+      message: running
+        ? 'Le challenge est en cours : le message dira « palmarès provisoire ». Le palmarès définitif partira tout seul 30 min après la fin.'
+        : 'Podium des duos, trophées de duo, trophées individuels et lien vers la page Palmarès.',
+      confirmText: 'Envoyer',
+    });
+    if (!res || !res.ok) return;
+    App.setLoading(els.btnPalmares, true);
+    try {
+      const r = await admin(() => api('/api/admin/announce-palmares', { method: 'POST', admin: true, body: {} }));
+      if (r === undefined) return;
+      if (r.sent) toast(`Palmarès ${r.final ? '' : 'provisoire '}posté sur Discord (${r.edition_label || ''}).`, { type: 'success' });
+      else toast(`Palmarès non envoyé : ${r.error || 'échec'}`, { type: 'error', timeout: 8000 });
+    } catch (err) {
+      toast(err.message, { type: 'error' });
+    } finally {
+      App.setLoading(els.btnPalmares, false);
     }
   });
 

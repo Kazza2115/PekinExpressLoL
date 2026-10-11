@@ -22,6 +22,12 @@ httpx, Jinja2, JS vanilla, CSS maison (pas de Tailwind), Chart.js vendored.
 - Abandons : `surrendered` (`gameEndedInSurrender`) est vrai pour les 10 joueurs ; seule l'équipe
   perdante a abandonné (`stats.surrendered_by_us` / `surrendered_by_them` → `surrenders` /
   `surrender_wins`, parties jouées ensemble comptées une fois pour le duo).
+- Palmarès (`services/palmares.py`) : `build_palmares` (podium, trophées de duo, `TROPHIES`
+  individuels attribués par `award` avec ex aequo et minimums, victoires et exploits de chaque
+  joueur) → `GET /api/palmares` et page `/palmares` ; `notifications.build_palmares_message` ;
+  `announce.announce_palmares_if_due` (30 min après la fin, une fois : `Challenge.palmares_announced_at`)
+  et `POST /api/admin/announce-palmares` ; `archive_edition` fige le palmarès dans `Edition`
+  à la réinitialisation.
 - Double LP (Aegis of Valor, `services/double_lp.py`) : après `backfill_lp_changes`, le poller
   juge chaque victoire Solo/Duo aux LP connus (`assess_double_lp` : gain ≥ 1,6 × la médiane des
   6 victoires de référence les plus proches, au moins 3, et ≥ 24 LP ; références = autres

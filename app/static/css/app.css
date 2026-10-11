@@ -191,6 +191,15 @@ code { font-family: var(--mono); font-size: 0.92em; background: var(--surface-2)
 .pill-live.is-live { color: var(--text); border-color: rgba(240, 90, 90, 0.45); }
 .pill-live.is-live .dot { background: var(--red); animation: pulse 1.6s ease-in-out infinite; }
 
+@media (max-width: 1440px) {
+  /* Écrans moyens : la barre garde tous ses liens visibles (6 pages + pastilles) */
+  .nav-inner { gap: 14px; }
+  .nav-links { margin-left: 0; gap: 2px; }
+  .nav-links a { padding: 7px 10px; }
+  #btn-notifications { font-size: 0; padding: 6px 8px; }
+  #btn-notifications::before { content: "🔔"; font-size: 14px; }
+  .pill-demo-prefix { display: none; }
+}
 @media (max-width: 720px) {
   /* Deux rangées : marque + pastilles, puis les liens sur toute la largeur (jamais coupés, défilement
      interne en dernier recours sur les très petits écrans). */

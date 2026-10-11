@@ -142,6 +142,12 @@ def rankings(request: Request, session: Session = Depends(get_session)) -> Respo
     return _render(request, "rankings.html", _context(request, "rankings", session))
 
 
+@router.get("/palmares", response_class=HTMLResponse, include_in_schema=False)
+def palmares_page(request: Request, session: Session = Depends(get_session)) -> Response:
+    """Vainqueurs de chaque édition, trophées individuels, victoires et exploits de chacun."""
+    return _render(request, "palmares.html", _context(request, "palmares", session))
+
+
 @router.get("/player/{player_id}", response_class=HTMLResponse, include_in_schema=False)
 def player_page(
     player_id: Annotated[int, PathParam(ge=1, le=2**31 - 1)], request: Request, session: Session = Depends(get_session)

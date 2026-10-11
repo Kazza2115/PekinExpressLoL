@@ -39,8 +39,8 @@ from app.db.session import as_utc, get_session
 from app.services.bootstrap import apply_default_schedule, parse_fr_datetime
 from app.events import bus
 from app.riot import get_api, reset_api
-from app.services import double_lp, gifs, notifications
-from app.services.announce import announce_start_if_due, announce_start_now, announce_status
+from app.services import double_lp, gifs, notifications, palmares
+from app.services.announce import announce_palmares_now, announce_start_if_due, announce_start_now, announce_status
 from app.services.draw import perform_draw, team_identity
 from app.state import state
 
@@ -425,6 +425,8 @@ async def reset_challenge(
     challenge: Challenge = Depends(get_challenge),
 ) -> dict[str, Any]:
     keep_players = body.keep_players if body is not None else True
+    # Édition terminée : son palmarès est figé avant d'effacer les parties (page « Palmarès »)
+    edition = palmares.archive_edition(session, challenge)
     # Ordre respectant les clés étrangères : participations → parties → snapshots → duos (→ joueurs)
     session.execute(delete(MatchParticipant))
     session.execute(delete(Match))
@@ -442,6 +444,7 @@ async def reset_challenge(
     challenge.end_at = None
     challenge.start_announced_at = None
     challenge.start_announce_dropped = False
+    challenge.palmares_announced_at = None
     session.add(challenge)
     session.commit()
     session.refresh(challenge)
@@ -451,7 +454,8 @@ async def reset_challenge(
         session.refresh(challenge)
         payload = challenge_to_dict(challenge)
     bus.publish("challenge_reset", {"challenge": payload, "keep_players": keep_players})
-    return {"challenge": payload, "keep_players": keep_players}
+    archived = edition.number if edition is not None else None
+    return {"challenge": payload, "keep_players": keep_players, "edition_archived": archived}
 
 
 @router.patch("/challenge")
@@ -963,6 +967,12 @@ async def post_announce_start() -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         log.warning("Annonce du début impossible", exc_info=True)
         return {"sent": False, "error": f"erreur inattendue ({type(exc).__name__})", "before": None, "after": None}
+
+
+@router.post("/announce-palmares")
+async def announce_palmares() -> dict[str, Any]:
+    """Poste le palmarès sur Discord maintenant (provisoire si le challenge est en cours)."""
+    return await announce_palmares_now()
 
 
 @router.post("/test-notification")
