@@ -170,6 +170,9 @@ class MatchParticipant(SQLModel, table=True):
     # double LP (la moitié du gain est retirée des LP nets), False = victoire normale
     double_lp: bool | None = None
     double_lp_manual: bool = False  # décision de l'organisateur (Admin) : plus jamais revue
+    # Gain habituel et seuil retenus au dernier jugement automatique (affichés dans l'Admin)
+    double_lp_usual: float | None = None
+    double_lp_threshold: int | None = None
     double_lp_announced_at: datetime | None = None  # annonce Discord envoyée
     items: str | None = None  # JSON : liste des 7 ids `item0`..`item6` (0 = emplacement vide)
     spells: str | None = None  # "summoner1Id,summoner2Id", ex. "4,14"

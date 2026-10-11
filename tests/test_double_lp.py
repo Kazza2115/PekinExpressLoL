@@ -364,13 +364,17 @@ def test_admin_lists_and_corrects_double_lp(client, session: Session, admin_head
         return True
 
     monkeypatch.setattr(notifications, "send_discord", fake_send)
-    _player(session)
-    _win(session, "M1", 22, 0, double_lp=False)
-    _win(session, "M2", 24, 40, double_lp=False)
-    _win(session, "M3", 23, 80, double_lp=False)
-    doubled = _win(session, "M4", 46, 120, double_lp=True, double_lp_announced_at=utc(2026, 10, 10, 12, 30))
-    missed = _win(session, "M5", 35, 160, double_lp=False)
+    player = _player(session)
+    _win(session, "M1", 22, 0)
+    _win(session, "M2", 24, 40)
+    _win(session, "M3", 23, 80)
+    doubled = _win(session, "M4", 46, 120)
+    missed = _win(session, "M5", 35, 160)
     _win(session, "FLEX", 44, 200, queue=Queue.FLEX)
+    assert [g.match_id for g, _ in assess_double_lp(session, player)] == ["M4"]
+    doubled.double_lp_announced_at = utc(2026, 10, 10, 12, 30)
+    session.add(doubled)
+    session.commit()
 
     data = client.get("/api/admin/double-lp", headers=admin_headers).json()
     assert (data["flagged"], data["total"]) == (1, 5)  # la Flex n'apparaît pas
@@ -400,3 +404,29 @@ def test_admin_lists_and_corrects_double_lp(client, session: Session, admin_head
     assert client.patch("/api/admin/double-lp/99999", json={"double_lp": True}, headers=admin_headers).status_code == 404
     assert client.get("/api/admin/double-lp").status_code == 401
     assert double_lp.DOUBLE_RATIO == data["ratio"]
+
+
+def test_admin_reason_follows_the_stored_decision(session: Session):
+    """Le seuil affiché est celui du jugement, même si les références changent ensuite."""
+    from app.api.routes_admin import _double_lp_reason  # noqa: PLC0415
+
+    player = _player(session)
+    for index, lp in enumerate([20, 21, 20]):
+        _win(session, f"R{index}", lp, index * 40)
+    flagged = _win(session, "X", 34, 120)
+    assert [g.match_id for g, _ in assess_double_lp(session, player)] == ["X"]
+    for index, lp in enumerate([25, 26, 24]):  # plus tard, des gains plus élevés
+        _win(session, f"L{index}", lp, 160 + index * 40)
+    assess_double_lp(session, player)
+    seen = double_lp.explain(session, 1)
+    session.refresh(flagged)
+    assert _double_lp_reason(flagged, seen[flagged.id]) == "Double LP : +34 ≥ seuil de 32 LP"
+
+    pending = _win(session, "P", 40, 400)
+    pending.double_lp = None
+    assert _double_lp_reason(pending, double_lp.Assessment(usual=20.5, threshold=33, references=4, mixed=False)) == (
+        "Pas encore jugée : +40 ≥ seuil actuel de 33 LP, à confirmer à la main"
+    )
+    assert _double_lp_reason(pending, double_lp.Assessment(usual=None, threshold=None, references=2, mixed=False)) == (
+        "À revoir : 2 victoire(s) de comparaison sur 3 nécessaires"
+    )

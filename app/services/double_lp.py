@@ -216,12 +216,19 @@ def assess_double_lp(session: Session, player: Player) -> list[tuple[MatchPartic
             continue
         assessment = history.assess(game)
         verdict = judge(game.lp_change, assessment.usual)
-        if verdict is None or verdict == game.double_lp:
+        if verdict is None:
             continue
+        basis = (assessment.usual, assessment.threshold)
+        if verdict == game.double_lp and basis == (game.double_lp_usual, game.double_lp_threshold):
+            continue
+        # Le gain habituel et le seuil du jugement sont gardés : l'Admin explique ainsi la décision
+        # telle qu'elle a été prise, même si les références changent ensuite
+        newly_flagged = verdict and not game.double_lp
         game.double_lp = verdict
+        game.double_lp_usual, game.double_lp_threshold = basis
         session.add(game)
         changed = True
-        if verdict:
+        if newly_flagged:
             flagged.append((game, assessment.usual))
     if changed:
         session.commit()
